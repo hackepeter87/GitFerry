@@ -1,0 +1,88 @@
+{
+  "format": "gitferry.transport",
+  "schema_version": 1,
+  "manifest_id": "example-return-2026-11-20",
+  "transfer_round_id": "example-round-2026-11-20",
+  "producer_version": "0.1.0.dev0",
+  "sender": {
+    "instance_key": "gitea-b-example",
+    "installation_marker": "operator-issued-installation-b-1"
+  },
+  "recipient": {
+    "instance_key": "gitea-a-example",
+    "installation_marker": "operator-issued-installation-a-1",
+    "context": "synthetic isolated return receiver"
+  },
+  "mode": "return",
+  "created_at": "2026-11-20T11:00:00Z",
+  "forward_reference": {
+    "manifest_id": "example-forward-2026-11-20",
+    "digest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "deletion_semantics": "absence-does-not-delete",
+  "selected_repositories": [
+    {
+      "repository": "synthetic/selected",
+      "object_types": ["issue"],
+      "fields": ["title", "body", "state", "labels"],
+      "capabilities": ["issue-create", "issue-update"],
+      "limitations": ["native-created-at-not-restored"]
+    }
+  ],
+  "identity_claims": [],
+  "objects": [
+    {
+      "origin": {
+        "instance_key": "gitea-a-example",
+        "repository": "synthetic/selected",
+        "object_type": "issue",
+        "global_id": "9007199254740993",
+        "issue_index": "3",
+        "created_at": "2026-11-20T09:00:00Z"
+      },
+      "replicas": [
+        {
+          "instance_key": "gitea-a-example",
+          "repository": "synthetic/selected",
+          "global_id": "9007199254740993",
+          "issue_index": "3",
+          "native_created_at": "2026-11-20T09:00:00Z"
+        },
+        {
+          "instance_key": "gitea-b-example",
+          "repository": "synthetic/selected",
+          "global_id": "71",
+          "issue_index": "8",
+          "native_created_at": "2026-11-20T10:01:00Z"
+        }
+      ],
+      "comparison": {
+        "ruleset": "gitea-issue-selected-fields",
+        "ruleset_version": 1,
+        "original_baseline": {
+          "title": "Synthetic issue",
+          "body": "Original body",
+          "state": "open",
+          "labels": []
+        },
+        "confirmed_import": {
+          "title": "Synthetic issue",
+          "body": "Original body",
+          "state": "open",
+          "labels": []
+        },
+        "current": {
+          "title": "Synthetic issue",
+          "body": "Changed on B",
+          "state": "open",
+          "labels": []
+        },
+        "baseline_origin": {
+          "instance_key": "gitea-a-example",
+          "transfer_round_id": "example-round-2026-11-20"
+        }
+      }
+    }
+  ],
+  "payloads": []
+}
