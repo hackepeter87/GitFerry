@@ -51,7 +51,15 @@ coarse capability list with a field-level, issue-owned evidence contract and per
 - [x] Separate implementation, first-import and return status with a fixed vocabulary.
 - [x] Assign every row one target release and owning GitHub issue.
 - [x] Add a machine-checked completeness, link, pin and known-limit contract.
-- [ ] Obtain independent review, hosted CI and integrated-main verification for Issue #3.
+- [x] Obtain independent review, hosted CI and integrated-main verification for Issue #3.
+
+### Phase 5: integrated 0.1.0 acceptance
+
+- [x] Audit Issues #1–#4, their PR/check evidence and the active main ruleset.
+- [x] Verify the exact integrated capability-matrix commit in hosted Linux CI.
+- [x] Run a context-free resume exercise and recover its blocked GitHub read without duplication.
+- [x] Classify local, hosted, configured-only, limited and untested evidence in a milestone report.
+- [ ] Obtain independent final review, merge the report and verify the resulting main commit.
 
 ## Verification checkpoints
 
