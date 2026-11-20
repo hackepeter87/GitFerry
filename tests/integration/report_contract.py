@@ -82,6 +82,19 @@ def initialize(results: Path, run_id: str, project: str) -> None:
             "runner_os": os.environ.get("RUNNER_OS"),
             "runner_arch": os.environ.get("RUNNER_ARCH"),
         },
+        "github": (
+            {
+                "run_id": os.environ.get("GITHUB_RUN_ID"),
+                "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+                "sha": os.environ.get("GITHUB_SHA"),
+                "ref": os.environ.get("GITHUB_REF"),
+                "event_name": os.environ.get("GITHUB_EVENT_NAME"),
+                "workflow_ref": os.environ.get("GITHUB_WORKFLOW_REF"),
+                "job": os.environ.get("GITHUB_JOB"),
+            }
+            if os.environ.get("GITHUB_ACTIONS") == "true"
+            else None
+        ),
     }
     (work / "run-metadata.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8"
@@ -135,6 +148,73 @@ def collect_runtime(results: Path, project: str, compose_file: Path) -> None:
         "services": services,
     }
     metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def run_metadata_is_complete(metadata: dict[str, Any]) -> bool:
+    code_state = metadata.get("code_state")
+    platform_data = metadata.get("platform")
+    images = metadata.get("gitea_images")
+    if not (
+        isinstance(metadata.get("run_id"), str)
+        and metadata["run_id"]
+        and isinstance(metadata.get("compose_project"), str)
+        and metadata["compose_project"].startswith("gitferry-it-")
+        and isinstance(code_state, dict)
+        and isinstance(code_state.get("git_head"), str)
+        and len(code_state["git_head"]) == 40
+        and isinstance(code_state.get("dirty"), bool)
+        and isinstance(code_state.get("workspace_sha256"), str)
+        and len(code_state["workspace_sha256"]) == 64
+        and isinstance(platform_data, dict)
+    ):
+        return False
+    platform_fields = (
+        "host_system",
+        "host_release",
+        "host_architecture",
+        "python",
+        "docker_server_os",
+        "docker_server_architecture",
+        "docker_server_version",
+    )
+    if not all(
+        isinstance(platform_data.get(field), str) and platform_data[field]
+        for field in platform_fields
+    ):
+        return False
+    if not (
+        isinstance(platform_data.get("github_actions"), bool)
+        and isinstance(platform_data.get("gitea_image_architectures"), list)
+        and platform_data["gitea_image_architectures"]
+        and isinstance(platform_data.get("emulation_observed"), bool)
+        and isinstance(images, dict)
+        and images.get("expected_pin") == PINNED_GITEA_IMAGE
+        and isinstance(images.get("services"), dict)
+    ):
+        return False
+    for service_name in ("source", "target"):
+        service = images["services"].get(service_name)
+        if not isinstance(service, dict):
+            return False
+        for field in ("configured_image", "image_id", "os", "architecture"):
+            if not isinstance(service.get(field), str) or not service[field]:
+                return False
+        if not isinstance(service.get("repo_digests"), list) or not service["repo_digests"]:
+            return False
+    if platform_data["github_actions"]:
+        github = metadata.get("github")
+        if not isinstance(github, dict):
+            return False
+        for field in ("run_id", "run_attempt", "sha", "ref", "event_name", "workflow_ref", "job"):
+            if not isinstance(github.get(field), str) or not github[field]:
+                return False
+        if (
+            len(github["sha"]) != 40
+            or github["sha"] != code_state["git_head"]
+            or code_state["dirty"]
+        ):
+            return False
+    return True
 
 
 def _value(report: dict[str, Any], path: str) -> Any:
@@ -351,6 +431,15 @@ def finalize(
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     contract_gate = (results / "work" / "contract-gate.passed").is_file()
     catalog = evidence_catalog(report, contract_gate)
+    metadata_complete = run_metadata_is_complete(metadata)
+    catalog.append(
+        {
+            "id": "run_metadata_contract",
+            "status": "passed" if metadata_complete else "failed",
+            "test": "backend/tests/test_integration_report_contract.py",
+            "report_evidence": "execution run, code, platform, image, and hosted-CI identity",
+        }
+    )
     failed = [entry["id"] for entry in catalog if entry["status"] != "passed"]
     complete = report_available and run_status == 0 and cleanup_status == 0 and not failed
     execution = {
