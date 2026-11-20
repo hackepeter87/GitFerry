@@ -40,6 +40,11 @@ SQLite stores control state;
 large Git/package bytes use bounded streaming on a persistent volume. No Docker socket is mounted
 into the application.
 
+The packaged OCI runtime initializes its local storage before readiness. One persistent root keeps
+the SQLite database and its WAL/SHM files together with package and work directories. Unsafe paths,
+permissions, corrupt databases, and unknown newer schemas stop startup rather than creating empty
+state. See [ADR 0009](decisions/0009-oci-runtime-storage-and-readiness.md).
+
 ## Core state model
 
 Each bounded transfer round records source identity, target identity, selection, comparison-rule version,

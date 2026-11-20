@@ -1,0 +1,48 @@
+services:
+  gitferry:
+    image: ${GITFERRY_IMAGE:-gitferry:dev}
+    init: true
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 45s
+    ports:
+      - "${GITFERRY_LISTEN_ADDRESS:-127.0.0.1}:${GITFERRY_PORT:-8080}:8080"
+    environment:
+      GITFERRY_RUNTIME_MANAGED: "1"
+      GITFERRY_STATE_DB: /var/lib/gitferry/state/gitferry.sqlite3
+      GITFERRY_PACKAGE_DIR: /var/lib/gitferry/packages
+      GITFERRY_WORK_DIR: /var/lib/gitferry/work
+      GITFERRY_CA_DIR: /etc/gitferry/ca
+      GITFERRY_SOURCE_TOKEN_FILE: /run/secrets/source_api_token
+      GITFERRY_TARGET_TOKEN_FILE: /run/secrets/target_api_token
+    volumes:
+      - gitferry-data:/var/lib/gitferry
+      - type: bind
+        source: ${GITFERRY_CA_DIR:-./ca}
+        target: /etc/gitferry/ca
+        read_only: true
+    secrets:
+      - source_api_token
+      - target_api_token
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1700,uid=10001,gid=10001
+    healthcheck:
+      test: ["CMD", "python", "-m", "gitferry.healthcheck"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 6
+
+volumes:
+  gitferry-data:
+
+secrets:
+  source_api_token:
+    file: ${GITFERRY_SOURCE_TOKEN_FILE:-./secrets/source-api-token}
+  target_api_token:
+    file: ${GITFERRY_TARGET_TOKEN_FILE:-./secrets/target-api-token}

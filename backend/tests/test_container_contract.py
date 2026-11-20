@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
@@ -27,3 +28,14 @@ def test_runtime_image_contract_binds_version_revision_and_license() -> None:
     assert 'org.opencontainers.image.version="$GITFERRY_VERSION"' in content
     assert 'org.opencontainers.image.revision="$GITFERRY_SOURCE_REVISION"' in content
     assert 'org.opencontainers.image.licenses="Apache-2.0"' in content
+
+
+def test_build_version_matches_python_package_metadata() -> None:
+    metadata = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r'^version = "([^"]+)"$', metadata, re.MULTILINE)
+    assert match is not None
+    version = match.group(1)
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+    assert f"ARG GITFERRY_VERSION={version}" in DOCKERFILE.read_text(encoding="utf-8")
+    assert f"GITFERRY_VERSION := {version}" in makefile

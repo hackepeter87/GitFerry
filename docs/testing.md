@@ -5,6 +5,10 @@
 - Unit: blueprint/schema rules, realm/SID/OU identity ambiguity and collisions, SQLite migrations/constraints, operation transitions, selected issue baselines, manifest/path validation, and drift decisions.
 - API: FastAPI request/response behavior with no external service.
 - Integration: two real Gitea 1.27.2 containers, synthetic seed data, Git bundle and metadata probes, plus file-backed SQLite workers restarted or killed as separate operating-system processes.
+- OCI lifecycle integration: inspect the built image, start it non-root on a fresh named volume,
+  retain exact mappings/baselines/journal/conflicts across container replacement and SIGKILL,
+  observe graceful SIGTERM shutdown, and require corrupt/newer-schema/read-only/symlink starts to
+  fail without secret leakage or database replacement.
 - Portable transport integration: two additional GitFerry containers with independent named
   SQLite volumes and disjoint internal networks; the harness copies only immutable transport files.
 - Later E2E: guided UI flows after the UI is implemented.
