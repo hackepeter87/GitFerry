@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -378,5 +378,33 @@ CREATE TABLE auth_events (
 );
 
 CREATE INDEX auth_events_created_at ON auth_events(created_at);
+""",
+    6: """
+CREATE TABLE connection_profiles (
+    instance_key TEXT PRIMARY KEY REFERENCES instances(instance_key),
+    display_name TEXT NOT NULL CHECK (length(display_name) BETWEEN 1 AND 120),
+    base_url TEXT NOT NULL,
+    credential_ref TEXT NOT NULL CHECK (length(credential_ref) BETWEEN 1 AND 64),
+    ca_ref TEXT,
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+    locally_approved INTEGER NOT NULL CHECK (locally_approved IN (0, 1))
+);
+CREATE UNIQUE INDEX connection_profiles_active_url
+    ON connection_profiles(base_url) WHERE enabled = 1;
+CREATE TABLE connection_profile_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_key TEXT NOT NULL REFERENCES instances(instance_key),
+    revision INTEGER NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('create', 'update', 'retire', 'approve')),
+    occurred_at TEXT NOT NULL
+);
+CREATE TABLE connection_checks (
+    instance_key TEXT PRIMARY KEY REFERENCES connection_profiles(instance_key),
+    profile_revision INTEGER NOT NULL,
+    observed_identity TEXT NOT NULL,
+    approved_identity TEXT,
+    checked_at TEXT NOT NULL
+);
 """,
 }

@@ -2,6 +2,7 @@
 import { nextTick, onMounted, ref } from "vue";
 
 import { ApiError, getAuthStatus, getSession, login, logout, type Principal } from "./api";
+import ConnectionsPanel from "./ConnectionsPanel.vue";
 
 type View = "loading" | "bootstrap" | "login" | "admin" | "unavailable";
 
@@ -116,6 +117,12 @@ function loginMessage(error: unknown): string {
   }
   return "Sign in failed. Check the service and try again.";
 }
+
+function handlePanelSessionExpired(): void {
+  principal.value = undefined;
+  view.value = "login";
+  message.value = "Your session expired or was revoked. Sign in again.";
+}
 </script>
 
 <template>
@@ -179,6 +186,7 @@ function loginMessage(error: unknown): string {
           <button type="button" :disabled="submitting" @click="signOut">Sign out</button>
         </div>
       </div>
+      <ConnectionsPanel @session-expired="handlePanelSessionExpired" />
     </section>
 
     <section v-else class="panel panel-narrow" aria-labelledby="unavailable-title">

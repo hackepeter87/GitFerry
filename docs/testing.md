@@ -20,6 +20,24 @@
 
 Mocks do not replace Gitea integration evidence.
 
+## Connection profile evidence (Issue #8)
+
+Local run `aef35e1e978c42e3` passed against the unchanged pinned Gitea 1.27.2 instances
+on a Darwin/arm64 host with Linux/arm64 Docker. The report's `connection_profiles` section
+requires nine assertions: real version/account, no implicit approval, explicit local approval,
+read-only checks, unknown/wrong CA rejection, hostname mismatch, expired certificate rejection,
+and no token values in profile state/exports. Its TLS boundary is a generated localhost HTTPS
+proxy forwarding to the isolated real target. This is not a native Gitea TLS deployment claim.
+Cleanup passed for that run's resources; `make test-clean` also passed.
+
+`make test` passed with 221 backend tests, Ruff, formatting, MyPy, TypeScript and frontend build.
+The new tests cover real-process persistence, atomic import rollback, concurrent endpoint claims,
+revision conflicts, schema-5 upgrades, API/CLI parity, reference safety, explicit trust and changed
+account evidence. `make test-browser` passed seven scenarios including profile create/reload,
+stale-edit rejection, configuration export/import rejection and keyboard controls, alongside the
+existing authentication scenarios. Hosted CI and review for this implementation remain pending
+until linked from its pull request; local evidence alone does not close the issue.
+
 ## Environment
 
 The documented integration entry point is `make test-integration` on both local development and
