@@ -74,6 +74,7 @@ def complete_probe_report() -> dict[str, object]:
                 "healthcheck_present": True,
                 "graceful_stop_signal": True,
                 "fresh_volume_initialized": True,
+                "packaged_frontend_served": True,
                 "container_replacement_preserved_state": True,
                 "identity_binding_preserved": True,
                 "object_mapping_preserved": True,

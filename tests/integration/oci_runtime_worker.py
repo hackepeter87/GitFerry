@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,31 @@ from gitferry.state_store import OriginKey, StateStore
 DATABASE = Path("/var/lib/gitferry/state/gitferry.sqlite3")
 PACKAGE_MARKER = Path("/var/lib/gitferry/packages/restart-proof.txt")
 WORK_MARKER = Path("/var/lib/gitferry/work/restart-proof.txt")
+
+
+def ui_snapshot() -> dict[str, bool]:
+    def get(path: str) -> tuple[int, str, bytes]:
+        connection = http.client.HTTPConnection("127.0.0.1", 8080, timeout=5)
+        connection.request("GET", path)
+        response = connection.getresponse()
+        result = (response.status, response.getheader("content-type", ""), response.read())
+        connection.close()
+        return result
+
+    root_status, root_type, root = get("/")
+    script_match = re.search(rb'<script[^>]+src="(/assets/[^"]+\.js)"', root)
+    asset_status = 0
+    asset = b""
+    if script_match is not None:
+        asset_status, _, asset = get(script_match.group(1).decode("ascii"))
+    api_status, _, api_body = get("/api/v1/auth/status")
+    return {
+        "root_html": root_status == 200
+        and root_type.startswith("text/html")
+        and b'<div id="app"></div>' in root,
+        "javascript_asset": asset_status == 200 and b"Administrator bootstrap required" in asset,
+        "bootstrap_api": api_status == 200 and json.loads(api_body) == {"bootstrapRequired": True},
+    }
 
 
 def seed() -> dict[str, Any]:
@@ -139,9 +166,14 @@ def snapshot(state: StateStore) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("seed", "verify"))
+    parser.add_argument("mode", choices=("seed", "verify", "ui"))
     args = parser.parse_args()
-    result = seed() if args.mode == "seed" else snapshot(StateStore(DATABASE))
+    if args.mode == "seed":
+        result = seed()
+    elif args.mode == "verify":
+        result = snapshot(StateStore(DATABASE))
+    else:
+        result = ui_snapshot()
     print(json.dumps(result, sort_keys=True))
 
 

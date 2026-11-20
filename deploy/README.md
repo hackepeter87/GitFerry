@@ -1,8 +1,8 @@
 # OCI deployment foundation
 
-This Compose example exercises the accepted local runtime boundary. It does not publish an image,
-configure administrative authentication, or complete a transfer workflow. Those capabilities are
-owned by later 0.2.0 issues.
+This Compose example exercises the accepted local runtime boundary and packages the same-origin
+administrator frontend. It does not complete a transfer workflow or claim productive-data
+migration.
 
 ## Prepare and start
 
@@ -19,6 +19,39 @@ owned by later 0.2.0 issues.
 The service runs as UID/GID `10001`, with all Linux capabilities removed, a read-only root
 filesystem, no Docker socket, and no privileged mode. Confirm readiness at `/readyz`; `/healthz` is
 only the process liveness endpoint.
+
+## Bootstrap and recovery
+
+The running Compose service is non-root. Keep the operator password in a local protected file and
+stream it to `docker compose exec`; the password is never placed in a command argument or
+environment variable. The temporary file inside the container is removed by a shell trap:
+
+```sh
+password_file=/operator-owned/path/gitferry-admin-password
+admin_username=operator.admin
+test -f "$password_file"
+test "$(stat -f '%Lp' "$password_file" 2>/dev/null || stat -c '%a' "$password_file")" = 600
+
+docker compose --env-file .env -f deploy/compose.yaml exec -T gitferry sh -ceu '
+  temporary=$(mktemp /tmp/gitferry-admin-password.XXXXXX)
+  cleanup() { rm -f "$temporary"; }
+  trap cleanup EXIT
+  chmod 600 "$temporary"
+  cat >"$temporary"
+  gitferry admin bootstrap --database "$GITFERRY_STATE_DB" \
+    --username "$1" --password-file "$temporary"
+' sh "$admin_username" <"$password_file"
+```
+
+For recovery, use the same pattern and replace only the final CLI command with:
+
+```text
+gitferry admin recover --database "$GITFERRY_STATE_DB" --password-file "$temporary"
+```
+
+Recovery revokes all existing sessions. MFA, SSO, multi-administrator management, and a general
+transfer UI are not implemented. Terminate TLS in front of the service so secure cookies are
+protected in deployment.
 
 ## Persistent storage and replacement
 

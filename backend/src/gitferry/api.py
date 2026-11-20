@@ -2,20 +2,42 @@
 
 from __future__ import annotations
 
+import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
+from gitferry.auth import AuthService
+from gitferry.auth_api import (
+    AuthBoundaryError,
+    AuthCookieSettings,
+    admin_csrf_dependency,
+    auth_error_response,
+    create_auth_router,
+)
 from gitferry.blueprints import MAX_BLUEPRINT_BYTES, BlueprintValidationError, validate_text
 from gitferry.runtime import RuntimeStatus, initialize_runtime
 from gitferry.state_migrations import SCHEMA_VERSION
 
+# Uvicorn configures ``uvicorn.error`` for production output.  A child logger
+# keeps the allowlisted request record visible while the raw access logger is
+# disabled by the GitFerry server entrypoint.
+HTTP_LOGGER = logging.getLogger("uvicorn.error.gitferry.http")
 
-def create_app() -> FastAPI:
+
+def create_app(
+    *,
+    auth_service: AuthService | None = None,
+    session_cookie_secure: bool = True,
+    frontend_dir: Path | None = None,
+) -> FastAPI:
     readiness = RuntimeStatus()
+    cookie_settings = AuthCookieSettings(secure=session_cookie_secure)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -24,6 +46,8 @@ def create_app() -> FastAPI:
         if managed:
             try:
                 application.state.runtime = initialize_runtime()
+                if auth_service is None:
+                    application.state.auth = AuthService(application.state.runtime.store)
             except Exception as exc:
                 readiness.failed(exc)
                 raise
@@ -40,7 +64,42 @@ def create_app() -> FastAPI:
         version="0.1.0-dev",
         description="Iteration-1 validation API; no general migration endpoint exists.",
         lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
     )
+    if auth_service is not None:
+        application.state.auth = auth_service
+
+    @application.exception_handler(AuthBoundaryError)
+    async def auth_error_handler(_: Request, exc: AuthBoundaryError) -> JSONResponse:
+        return auth_error_response(exc)
+
+    @application.middleware("http")
+    async def security_headers(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+        )
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "0"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if request.url.path.startswith("/api/v1/auth/"):
+            response.headers["Cache-Control"] = "no-store"
+        route = request.scope.get("route")
+        route_template = getattr(route, "path", "<unmatched>")
+        HTTP_LOGGER.info(
+            "http_request method=%s route=%s status=%d",
+            request.method,
+            route_template,
+            response.status_code,
+        )
+        return response
 
     @application.get("/healthz")
     def health() -> dict[str, object]:
@@ -53,7 +112,16 @@ def create_app() -> FastAPI:
             content=readiness.snapshot(),
         )
 
-    application.post("/api/v1/blueprints/validate")(validate_blueprint)
+    application.include_router(create_auth_router(cookie_settings))
+    application.post(
+        "/api/v1/blueprints/validate",
+        dependencies=[Depends(admin_csrf_dependency(cookie_settings))],
+    )(validate_blueprint)
+    configured_frontend = os.environ.get("GITFERRY_FRONTEND_DIR")
+    if frontend_dir is None and configured_frontend:
+        frontend_dir = Path(configured_frontend)
+    if frontend_dir is not None:
+        application.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
     return application
 
 

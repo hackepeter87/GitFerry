@@ -45,6 +45,14 @@ the SQLite database and its WAL/SHM files together with package and work directo
 permissions, corrupt databases, and unknown newer schemas stop startup rather than creating empty
 state. See [ADR 0009](decisions/0009-oci-runtime-storage-and-readiness.md).
 
+The same image contains the compiled Vue administrator client and serves it from the FastAPI
+origin. A host operator creates the first local GitFerry administrator through the CLI; no default
+credential exists. Password verifiers, session-verifier hashes, expiry, revocation, rate limiting
+and security events share the persistent SQLite store. Raw passwords, session tokens and CSRF
+tokens are not stored there. This local GitFerry identity is separate from technical Gitea
+credentials and from functional source/target directory identities. See
+[ADR 0010](decisions/0010-local-administrator-authentication.md).
+
 ## Core state model
 
 Each bounded transfer round records source identity, target identity, selection, comparison-rule version,
@@ -90,7 +98,16 @@ Subprocess arguments are passed as arrays without a shell. Extraction targets mu
 
 ## API boundary
 
-Iteration 1 exposes only health and blueprint validation over HTTP. The CLI additionally exposes
+`/healthz`, `/readyz`, and the minimal bootstrap-status read remain public so an operator and the
+container platform can establish service state. Login issues an opaque same-origin session;
+sensitive API writes require an authenticated local administrator and a session-bound CSRF value.
+Authentication failures do not disclose whether an account exists. The default cookie contract
+requires HTTPS and is relaxed only by explicit localhost-only test construction.
+
+The API currently exposes the protected blueprint-validation slice rather than a general transfer
+control plane. Machine-readable `/openapi.json` remains available. FastAPI's CDN-based interactive
+documentation pages are disabled because their remote and inline resources conflict with the
+offline, same-origin content-security policy. The CLI additionally exposes
 `transport create`, `transport verify`, and `transport admit`, all backed by the same
 version-selected parser, validator, state store, and operation services used by the integration
 worker. `state resolve-unknown-comment` performs live target/parent/body/author verification before

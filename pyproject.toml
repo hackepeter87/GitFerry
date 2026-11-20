@@ -58,5 +58,5 @@ module = ["jsonschema", "jsonschema.*", "yaml"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["anyio", "anyio.*", "click", "click.*"]
+module = ["anyio", "anyio.*", "click", "click.*", "uvicorn", "uvicorn.*"]
 follow_imports = "skip"

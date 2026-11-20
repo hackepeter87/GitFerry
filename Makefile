@@ -5,7 +5,7 @@ MYPY := .venv/bin/mypy
 GITFERRY_VERSION := 0.1.0.dev0
 GITFERRY_SOURCE_REVISION := $(shell git rev-parse HEAD)
 
-.PHONY: doctor setup test test-integration test-integration-diagnostics test-integration-failure-contract test-clean container-build
+.PHONY: doctor setup test test-browser test-integration test-integration-diagnostics test-integration-failure-contract test-clean container-build
 
 doctor:
 	./scripts/doctor.sh
@@ -21,6 +21,9 @@ test:
 	PYTHONPATH=backend/src $(MYPY) backend/src
 	PYTHONPATH=backend/src $(PYTEST) backend/tests -q
 	cd frontend && npm run build
+
+test-browser:
+	cd frontend && npm run test:e2e
 
 test-integration:
 	./tests/integration/run.sh

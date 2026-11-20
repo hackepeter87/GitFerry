@@ -15,9 +15,23 @@ def test_runtime_image_contract_is_non_root_persistent_and_health_checked() -> N
     assert "GITFERRY_STATE_DB=/var/lib/gitferry/state/gitferry.sqlite3" in content
     assert "GITFERRY_PACKAGE_DIR=/var/lib/gitferry/packages" in content
     assert "GITFERRY_WORK_DIR=/var/lib/gitferry/work" in content
+    assert "GITFERRY_FRONTEND_DIR=/app/frontend-dist" in content
+    assert "COPY --from=frontend-build /build/frontend/dist ./frontend-dist" in content
     assert "HEALTHCHECK" in content
     assert 'CMD ["python", "-m", "gitferry.healthcheck"]' in content
     assert "STOPSIGNAL SIGTERM" in content
+
+
+def test_frontend_build_uses_immutable_node_image_and_locked_dependencies() -> None:
+    content = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert re.search(
+        r"^FROM node:24\.14\.0-bookworm-slim@sha256:[0-9a-f]{64} AS frontend-build$",
+        content,
+        re.MULTILINE,
+    )
+    assert "RUN npm ci --ignore-scripts" in content
+    assert "RUN npm run build" in content
 
 
 def test_runtime_image_contract_binds_version_revision_and_license() -> None:

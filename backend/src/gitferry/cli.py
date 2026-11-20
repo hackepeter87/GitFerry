@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from gitferry.auth import AuthError, AuthService
 from gitferry.blueprints import BlueprintValidationError, load_and_validate
 from gitferry.comment_operations import resolve_unknown_comment_operation
 from gitferry.gitea_comments import CommentTargetConflict, GiteaCommentClient
@@ -24,17 +26,36 @@ from gitferry.transport import (
 from gitferry.transport_state import admit_transport, record_export
 
 MAX_EVIDENCE_BYTES = 1024 * 1024
+MAX_SECRET_FILE_BYTES = 4096
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="gitferry")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    database_default = os.environ.get("GITFERRY_STATE_DB")
     validate = subparsers.add_parser("validate-blueprint")
     validate.add_argument("path", type=Path)
 
+    admin = subparsers.add_parser("admin")
+    admin_commands = admin.add_subparsers(dest="admin_command", required=True)
+    bootstrap = admin_commands.add_parser("bootstrap")
+    bootstrap.add_argument(
+        "--database", type=Path, default=database_default, required=database_default is None
+    )
+    bootstrap.add_argument("--username", required=True)
+    bootstrap.add_argument("--password-file", type=Path, required=True)
+    recover = admin_commands.add_parser("recover")
+    recover.add_argument(
+        "--database", type=Path, default=database_default, required=database_default is None
+    )
+    recover.add_argument("--password-file", type=Path, required=True)
+    admin_status = admin_commands.add_parser("status")
+    admin_status.add_argument(
+        "--database", type=Path, default=database_default, required=database_default is None
+    )
+
     state = subparsers.add_parser("state")
     state_commands = state.add_subparsers(dest="state_command", required=True)
-    database_default = os.environ.get("GITFERRY_STATE_DB")
 
     operation = state_commands.add_parser("operation")
     operation.add_argument(
@@ -91,8 +112,80 @@ def _load_evidence(path: Path) -> dict[str, Any]:
     return value
 
 
+def _load_password_file(path: Path) -> str:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError("password file cannot be opened safely") from exc
+    try:
+        details = os.fstat(descriptor)
+        if not stat.S_ISREG(details.st_mode):
+            raise ValueError("password file must be a regular file")
+        if stat.S_IMODE(details.st_mode) & 0o022:
+            raise ValueError("password file must not be writable by group or other users")
+        if details.st_size > MAX_SECRET_FILE_BYTES:
+            raise ValueError("password file is too large")
+        content = bytearray()
+        while len(content) <= MAX_SECRET_FILE_BYTES:
+            chunk = os.read(descriptor, min(1024, MAX_SECRET_FILE_BYTES + 1 - len(content)))
+            if not chunk:
+                break
+            content.extend(chunk)
+        if len(content) > MAX_SECRET_FILE_BYTES:
+            raise ValueError("password file is too large")
+    finally:
+        os.close(descriptor)
+    try:
+        password = content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("password file must contain UTF-8 text") from exc
+    if password.endswith("\n"):
+        password = password[:-1]
+        if password.endswith("\r"):
+            password = password[:-1]
+    if "\n" in password or "\r" in password or "\x00" in password:
+        raise ValueError("password file must contain exactly one line")
+    return password
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "admin":
+        try:
+            auth = AuthService(StateStore(args.database))
+            if args.admin_command == "status":
+                print(json.dumps({"bootstrapRequired": not auth.bootstrap_completed()}))
+                return 0
+            admin_password = _load_password_file(args.password_file)
+            if args.admin_command == "bootstrap":
+                account = auth.bootstrap_admin(args.username, admin_password)
+                print(
+                    json.dumps(
+                        {
+                            "status": "bootstrapped",
+                            "username": account.username,
+                            "role": account.role,
+                        },
+                        sort_keys=True,
+                    )
+                )
+                return 0
+            account = auth.recover_bootstrap_admin(admin_password)
+            print(
+                json.dumps(
+                    {
+                        "status": "recovered",
+                        "username": account.username,
+                        "sessions": "revoked",
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+        except (OSError, ValueError, AuthError, StateStoreError) as exc:
+            print(json.dumps({"status": "failed", "error": str(exc)}, sort_keys=True))
+            return 2
     if args.command == "validate-blueprint":
         try:
             document = load_and_validate(args.path)
