@@ -20,9 +20,11 @@ REST and CLI call the same application core. Configuration is versioned and port
 embedded secrets. The OCI application uses persistent local state and package/work directories and
 does not require an external database service or an open browser.
 
-The agreed data scope is tracked field by field in `docs/capability-matrix.md`; untested classes do
-not disappear from the product target. Gitea is the first platform. Adapter boundaries may support
-future forges, but GitLab implementation is not part of this roadmap.
+The agreed data scope is tracked field by field in `docs/capability-matrix.md`. Each class records
+implementation, first-import and return status independently, cites its evidence and has exactly one
+owning roadmap issue. Untested classes do not disappear from the product target, and module tests do
+not become workflow support without the required real-system evidence. Gitea is the first platform.
+Adapter boundaries may support future forges, but GitLab implementation is not part of this roadmap.
 
 ## Foundation assumptions
 

@@ -57,6 +57,21 @@ Offline isolation: the importer is attached only to the internal target network,
 
 The latest concrete run is recorded by the integration report under `integration-results/` and summarized in the capability matrix. Generated reports are not committed by default.
 
+## Capability claim gate
+
+[`capability-matrix.md`](capability-matrix.md) is checked as a contract, not only reviewed as prose.
+`backend/tests/test_capability_matrix_contract.py` requires the complete agreed capability ID set,
+the documented status vocabulary, all workflow/status fields, one GitHub owner and target release
+per row, resolvable local evidence links, the exact Gitea pin, and the known trust/timestamp/restart
+limits. The existing transport tests separately pin the accepted Manifest v1 fixture bytes and
+SHA-256 digests while validating Manifest v2 through its own schema.
+
+A matrix claim is upgraded only when its cited evidence has run at the required layer. A source
+module or unit test can establish implementation behavior but cannot replace the two-Gitea workflow
+evidence required for `First import` or `Return`. When evidence conflicts or is unavailable, the row
+is downgraded to `not-checked`, `blocked`, `not-implemented`, or a bounded status; the owning issue is
+updated instead of treating the total number of passing tests as proof.
+
 ## Report, diagnostics, and cleanup contract
 
 `integration-results/report.json` is the only machine-readable result contract. Its `execution`

@@ -17,13 +17,17 @@ delivery through two dependent implementation cycles.
 - [#3](https://github.com/hackepeter87/GitFerry/issues/3) completes the requirement/capability
   evidence matrix.
 - [#4](https://github.com/hackepeter87/GitFerry/issues/4) composes the bounded durable provisioning
-  service. Local evidence is complete for the accepted bounded flow; hosted CI, review, merge, and
-  integrated-main verification remain pending.
+  service. The application-service flow, independent review, hosted CI and integrated-main
+  verification are complete on merge commit `f4dc16b260ed96d48a8194f6d12b2d867dbc3b86`.
 - [#5](https://github.com/hackepeter87/GitFerry/issues/5) owns integrated milestone acceptance and
   the resume proof.
 
 The workflow definition alone is not hosted-CI evidence. The milestone requires actual GitHub
 Actions runs and effective repository rules.
+
+The capability matrix uses one owning issue per row. A current bounded implementation can therefore
+remain `supported-with-limits` while its owner delivers or accepts the complete product contract in
+the target release; the roadmap link is not evidence that the future capability already exists.
 
 ## 0.2.0 — First operable provisioning flow
 
