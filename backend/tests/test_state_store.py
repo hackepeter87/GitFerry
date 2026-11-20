@@ -5,7 +5,7 @@ import threading
 from pathlib import Path
 
 import pytest
-from gitferry.state_migrations import MIGRATIONS
+from gitferry.state_migrations import MIGRATIONS, SCHEMA_VERSION
 from gitferry.state_store import (
     BindingConflict,
     MappingConflict,
@@ -258,7 +258,7 @@ def test_version_one_database_migrates_without_losing_existing_state(tmp_path: P
 
     assert migrated.get_instance("instance-a").installation_marker == "install-a"
     connection = sqlite3.connect(database)
-    assert connection.execute("PRAGMA user_version").fetchone() == (4,)
+    assert connection.execute("PRAGMA user_version").fetchone() == (SCHEMA_VERSION,)
     assert connection.execute(
         "SELECT name FROM sqlite_master WHERE name = 'transport_manifests'"
     ).fetchone() == ("transport_manifests",)
@@ -325,7 +325,7 @@ def test_version_two_operations_migrate_to_comment_journal_without_lost_events(
     assert migrated.get_operation("existing-create").status == "prepared"
     assert migrated.operation_evidence("existing-create")["events"][0]["to"] == "prepared"
     connection = sqlite3.connect(database)
-    assert connection.execute("PRAGMA user_version").fetchone() == (4,)
+    assert connection.execute("PRAGMA user_version").fetchone() == (SCHEMA_VERSION,)
     assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     connection.close()
 
@@ -388,6 +388,74 @@ def test_failed_v4_migration_rolls_back_the_populated_v3_database(
     assert (
         connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'object_origins_backup'"
+        ).fetchone()
+        is None
+    )
+    connection.close()
+
+
+def test_version_four_database_adds_auth_schema_without_losing_state(tmp_path: Path) -> None:
+    database = tmp_path / "version-four.sqlite3"
+    connection = sqlite3.connect(database)
+    for version in (1, 2, 3, 4):
+        connection.executescript(MIGRATIONS[version])
+        connection.execute(
+            "INSERT INTO schema_migrations VALUES (?, ?)",
+            (version, f"2026-11-20T00:0{version}:00Z"),
+        )
+    connection.execute("PRAGMA user_version = 4")
+    connection.execute(
+        "INSERT INTO instances VALUES (?, ?, ?, ?, ?)",
+        ("instance-a", "A", "http://a.invalid", "install-a", "2026-11-20T00:00:00Z"),
+    )
+    connection.commit()
+    connection.close()
+
+    migrated = StateStore(database)
+
+    assert migrated.get_instance("instance-a").installation_marker == "install-a"
+    connection = sqlite3.connect(database)
+    assert connection.execute("PRAGMA user_version").fetchone() == (SCHEMA_VERSION,)
+    assert connection.execute(
+        "SELECT name FROM sqlite_master WHERE name = 'auth_sessions'"
+    ).fetchone() == ("auth_sessions",)
+    assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    connection.close()
+
+
+def test_failed_v5_migration_leaves_version_four_database_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "failed-v5.sqlite3"
+    connection = sqlite3.connect(database)
+    for version in (1, 2, 3, 4):
+        connection.executescript(MIGRATIONS[version])
+        connection.execute(
+            "INSERT INTO schema_migrations VALUES (?, ?)",
+            (version, f"2026-11-20T00:0{version}:00Z"),
+        )
+    connection.execute("PRAGMA user_version = 4")
+    connection.commit()
+    connection.close()
+
+    failing = MIGRATIONS[5].replace(
+        "CREATE TABLE auth_sessions (",
+        "THIS IS DELIBERATELY INVALID SQL;\nCREATE TABLE auth_sessions (",
+        1,
+    )
+    monkeypatch.setitem(MIGRATIONS, 5, failing)
+
+    with pytest.raises(sqlite3.OperationalError):
+        StateStore(database)
+
+    connection = sqlite3.connect(database)
+    assert connection.execute("PRAGMA user_version").fetchone() == (4,)
+    assert connection.execute(
+        "SELECT version FROM schema_migrations ORDER BY version"
+    ).fetchall() == [(1,), (2,), (3,), (4,)]
+    assert (
+        connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'local_accounts'"
         ).fetchone()
         is None
     )

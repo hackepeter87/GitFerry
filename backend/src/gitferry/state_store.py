@@ -266,6 +266,16 @@ class StateStore:
             connection.close()
 
     @contextmanager
+    def read_connection(self) -> Iterator[sqlite3.Connection]:
+        """Open one configured read connection without taking the writer lease."""
+
+        connection = self._connect()
+        try:
+            yield connection
+        finally:
+            connection.close()
+
+    @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
         """Open one short local transaction with the store's durability settings."""
 

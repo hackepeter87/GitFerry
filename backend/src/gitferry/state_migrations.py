@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -323,5 +323,60 @@ CREATE TABLE operations (
 
 INSERT INTO operations SELECT * FROM operations_backup;
 DROP TABLE operations_backup;
+""",
+    5: """
+CREATE TABLE local_accounts (
+    account_id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    role TEXT NOT NULL CHECK (role IN ('admin', 'viewer')),
+    password_algorithm TEXT NOT NULL CHECK (password_algorithm = 'pbkdf2-sha256'),
+    password_salt BLOB NOT NULL CHECK (length(password_salt) >= 16),
+    password_hash BLOB NOT NULL CHECK (length(password_hash) = 32),
+    password_iterations INTEGER NOT NULL CHECK (password_iterations >= 600000),
+    password_changed_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    disabled_at TEXT
+);
+
+CREATE TABLE auth_bootstrap (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    account_id TEXT NOT NULL UNIQUE REFERENCES local_accounts(account_id),
+    completed_at TEXT NOT NULL
+);
+
+CREATE TABLE auth_sessions (
+    session_id TEXT PRIMARY KEY CHECK (length(session_id) = 32),
+    account_id TEXT NOT NULL REFERENCES local_accounts(account_id),
+    verifier_hash BLOB NOT NULL CHECK (length(verifier_hash) = 32),
+    csrf_hash BLOB NOT NULL CHECK (length(csrf_hash) = 32),
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT
+);
+
+CREATE INDEX auth_sessions_account_status
+    ON auth_sessions(account_id, revoked_at, expires_at);
+
+CREATE TABLE auth_login_limits (
+    key_hash TEXT PRIMARY KEY CHECK (length(key_hash) = 64),
+    window_started_at TEXT NOT NULL,
+    failures INTEGER NOT NULL CHECK (failures >= 0),
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE auth_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id TEXT REFERENCES local_accounts(account_id),
+    username TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK (
+        event_type IN ('bootstrap', 'login', 'logout', 'recovery')
+    ),
+    outcome TEXT NOT NULL CHECK (
+        outcome IN ('succeeded', 'failed', 'rate_limited', 'revoked')
+    ),
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX auth_events_created_at ON auth_events(created_at);
 """,
 }
