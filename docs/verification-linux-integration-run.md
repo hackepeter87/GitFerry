@@ -5,8 +5,8 @@
 On 2026-11-20, `make test-integration` completed with run ID `d7430d29c274458b` from the dirty,
 uncommitted workspace. The orchestration host was Darwin 27.2.0/arm64. Docker Server 29.9.3 and
 all tested application/Gitea containers were Linux/arm64; no architecture emulation was observed.
-This proves the Linux container execution path on the local Docker host, not a native Linux host or
-a GitHub-hosted Actions run.
+This proves the Linux container execution path on the local Docker host; it is retained separately
+from the hosted evidence below.
 
 Both instances reported Gitea 1.27.2. Compose retained the configured image pin
 `docker.gitea.com/gitea:1.27.2@sha256:d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd`.
@@ -14,6 +14,24 @@ Docker resolved both running containers to Linux/arm64 image ID
 `sha256:5b1bb1996a19a68ef3bcc669651500f37fb37206446cb777a3ced3b75f25a168`
 and reported the same repository digest. The report records Git HEAD, the dirty flag, and a SHA-256
 over the tested workspace inputs so this result is not confused with the unchanged commit alone.
+
+## GitHub-hosted Linux evidence
+
+GitHub Actions run `44791010437` executed PR #39 on `ubuntu-24.04`. The `quality` job passed in
+1m22s and `gitea-integration` passed in 2m45s. The integration report records Linux/x86_64 host,
+Linux/amd64 Docker Server 28.0.4, Python 3.13.9, runner architecture X64, and no emulation. Both
+Gitea services reported version 1.27.2 and retained the configured digest pin. Docker resolved both
+to image ID `sha256:e8be8e1f776fe453b811d88887306b1d7bdf83577789465e5d186924014a57a6`.
+
+The run used GitHub run ID `44791010437`, attempt 1, event `pull_request`, and ref
+`refs/pull/39/merge`. It records PR source commit
+`b28915f967f0e4f599345bf8381635cae35e085e` separately from tested merge checkout and Git HEAD
+`7cc8cce97b4b47f93f546635a659783f561844bf`. The checkout was clean. The report's
+`run_metadata_contract` assertion passed, all mandatory evidence entries passed, and the uploaded
+artifact was `gitferry-integration-results-44791010437-1` (14-day retention). Both normal and
+controlled-failure reports record the successful outer workflow cleanup. Text inspection of
+the uploaded report and logs found no credential, authorization header, token, password, API key,
+or private-key value; the only matching report text describes locally retained authorization data.
 
 ## Unified execution contract
 
@@ -29,7 +47,8 @@ Local development and `.github/workflows/ci.yml` both invoke `make test-integrat
 7. requires all existing probe sections and the requirement catalog to pass;
 8. captures diagnostics before cleanup on failure;
 9. removes only project-labeled resources and its recorded run image;
-10. writes the cleanup result before a successful final exit.
+10. validates code/platform/image and hosted run identity, including source/checkout SHA semantics;
+11. writes both run-local and outer workflow cleanup results before artifact publication.
 
 The probe has a 900-second default bound and individual harness commands have bounded waits. It
 does not encode a Docker socket path or a macOS-specific host path. Preparatory image/dependency
@@ -89,15 +108,22 @@ The normal run also left zero run-labeled resources. Its report status is `passe
 
 ## CI status and remaining limits
 
-The `ubuntu-24.04` GitHub Actions job is prepared with a 30-minute limit, run/attempt-specific
-names, always-uploaded normal and failure-contract artifacts, and `always()` scoped cleanup. It has
-not been executed for this code state because no commit or push was authorized. Therefore:
+The `ubuntu-24.04` jobs use immutable Node 24 action commits, stable check contexts `quality` and
+`gitea-integration`, bounded runtimes, run/attempt-specific names, scoped cleanup, and an
+always-executed artifact upload. The positive PR run described above is actual hosted evidence.
+The workflow also exposes an explicit `inject_integration_failure` dispatch input; the deliberately
+red hosted dispatch and an internal-watchdog timeout dispatch are recorded only after they have
+actually run. The hard Actions step timeout remains a backstop; an `always()` diagnostic step runs
+before outer cleanup for partial-report cases. Effective repository rules are recorded only after
+they have been queried. Therefore:
 
 - locally executed: unit/report checks, controlled Docker failure, full two-Gitea integration;
 - Linux environment executed: Linux/arm64 Docker services and importer contexts on the local host;
-- native Linux host executed: no;
+- native Linux host executed: yes, GitHub-hosted Ubuntu/Linux x86_64;
 - GitHub Actions workflow prepared: yes;
-- GitHub Actions hosted runner executed: no.
+- GitHub Actions hosted runner executed: yes, positive PR run `44791010437`;
+- deliberately failed hosted dispatch: pending until the workflow is integrated on `main`;
+- repository required-check rules: pending until configured and queried.
 
 Known product limits remain unchanged: no historical native timestamp restoration for ordinary
 creates, no atomic server-side precondition between comment preflight and PATCH, no untested Gitea

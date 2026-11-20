@@ -3,7 +3,7 @@ PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 MYPY := .venv/bin/mypy
 
-.PHONY: doctor setup test test-integration test-integration-failure-contract test-clean container-build
+.PHONY: doctor setup test test-integration test-integration-diagnostics test-integration-failure-contract test-clean container-build
 
 doctor:
 	./scripts/doctor.sh
@@ -22,6 +22,9 @@ test:
 
 test-integration:
 	./tests/integration/run.sh
+
+test-integration-diagnostics:
+	./tests/integration/capture_diagnostics.sh
 
 test-integration-failure-contract:
 	./tests/integration/failure_contract.sh

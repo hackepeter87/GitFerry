@@ -123,6 +123,21 @@ if [ "${GITFERRY_IT_INJECT_FAILURE:-}" = "after-environment-start" ]; then
   echo "controlled integration failure after environment start" >&2
   exit 86
 fi
+if [ "${GITFERRY_IT_INJECT_FAILURE:-}" = "timeout-after-environment-start" ]; then
+  phase=controlled-timeout
+  timeout_seconds=${GITFERRY_IT_INJECT_TIMEOUT_SECONDS:-30}
+  echo "controlled internal integration timeout after environment start" >&2
+  set +e
+  "$python" "$root/tests/integration/run_with_timeout.py" "$timeout_seconds" \
+    "$python" -c 'import time; time.sleep(86400)'
+  timeout_status=$?
+  set -e
+  if [ "$timeout_status" -ne 124 ]; then
+    echo "controlled timeout returned unexpected status: $timeout_status" >&2
+    exit 125
+  fi
+  exit 124
+fi
 
 phase=synthetic-administration
 for service in source target; do

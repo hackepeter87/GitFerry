@@ -52,7 +52,13 @@ production activation requires the separate owner decision reserved in the proje
 
 ## Current status
 
-The repository is at `0.1.0.dev0`. The historical local integration evidence predates hosted CI.
-The first milestone must adopt that implementation, execute the prepared Linux workflow on GitHub,
-establish enforced gates, complete the full capability baseline, and prove two dependent
-issue-to-merge cycles before any `0.1.0` candidate is described as accepted.
+The repository is at `0.1.0.dev0`. The application foundation is integrated on `main`. Hosted PR
+run `44791010437` established the stable `quality` and `gitea-integration` contexts on
+`ubuntu-24.04`; its report binds source and tested checkout commits separately and records the
+exact pinned Gitea images, mandatory assertions, diagnostics, and outer cleanup. Current-head run
+`44791666207` repeated both gates after the evidence documentation update.
+
+Milestone 0.1.0 remains open. Issue #2 still requires enforced repository rules, an integrated-main
+run, and deliberately red failure and internal-timeout dispatches with retained diagnostics and
+run-scoped cleanup. The milestone must also complete the full capability baseline and prove two
+dependent issue-to-merge cycles before any `0.1.0` candidate is described as accepted.

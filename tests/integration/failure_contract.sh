@@ -10,6 +10,7 @@ set +e
 GITFERRY_IT_RESULTS_DIR="$results" \
 GITFERRY_IT_RUN_ID="$run_id" \
 GITFERRY_IT_PROJECT="$project" \
+GITFERRY_IT_RUNTIME_IMAGE="gitferry-it-runtime:$run_id" \
 GITFERRY_IT_INJECT_FAILURE=after-environment-start \
   "$root/tests/integration/run.sh"
 observed=$?
