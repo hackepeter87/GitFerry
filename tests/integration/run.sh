@@ -40,6 +40,39 @@ capture_diagnostics() {
   diagnostics_captured=true
 }
 
+wait_for_service_state() {
+  service=$1
+  expected=$2
+  timeout_seconds=$3
+  started_at=$(date +%s)
+  while :; do
+    container_id=$(docker compose -p "$project" -f "$compose_file" ps -q "$service" 2>/dev/null || true)
+    if [ -n "$container_id" ]; then
+      container_state=$(docker inspect --format '{{.State.Status}}' "$container_id" 2>/dev/null || true)
+      if [ "$expected" = healthy ]; then
+        observed_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$container_id" 2>/dev/null || true)
+      else
+        observed_state=$container_state
+      fi
+      if [ "$observed_state" = "$expected" ]; then
+        return 0
+      fi
+      case "$container_state" in
+        dead|exited)
+          echo "service $service stopped before reaching $expected" >&2
+          return 1
+          ;;
+      esac
+    fi
+    now=$(date +%s)
+    if [ $((now - started_at)) -ge "$timeout_seconds" ]; then
+      echo "service $service did not reach $expected within ${timeout_seconds}s" >&2
+      return 1
+    fi
+    sleep 1
+  done
+}
+
 finish() {
   run_status=$?
   trap - EXIT HUP INT TERM
@@ -134,7 +167,12 @@ export GITFERRY_IT_SOURCE_URL="http://127.0.0.1:$GITFERRY_IT_SOURCE_PORT"
 export GITFERRY_IT_TARGET_URL="http://127.0.0.1:$GITFERRY_IT_TARGET_PORT"
 
 phase=environment-start
-docker compose -p "$project" -f "$compose_file" up -d --wait --wait-timeout 120 --build
+docker compose -p "$project" -f "$compose_file" up -d --build
+wait_for_service_state source healthy 120
+wait_for_service_state target healthy 120
+wait_for_service_state importer running 120
+wait_for_service_state gitferry-a running 120
+wait_for_service_state gitferry-b running 120
 "$python" "$root/tests/integration/report_contract.py" collect-runtime \
   --results "$results" --project "$project" --compose-file "$compose_file"
 

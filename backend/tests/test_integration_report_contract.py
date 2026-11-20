@@ -211,6 +211,28 @@ def test_finalize_accepts_complete_required_evidence(tmp_path: Path) -> None:
     assert execution["failed_or_not_executed_checks"] == []
 
 
+@pytest.mark.parametrize("mutation", ["missing", "false"])
+def test_finalize_rejects_incomplete_oci_assertions(tmp_path: Path, mutation: str) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    assertions = report["oci_runtime"]["assertions"]
+    if mutation == "missing":
+        del assertions["symlink_path_failed_closed"]
+    else:
+        assertions["symlink_path_failed_closed"] = False
+    results = prepare_results(tmp_path, report)
+
+    assert not module.finalize(
+        results,
+        run_status=0,
+        cleanup_status=0,
+        phase="probe-complete",
+        diagnostics_captured=False,
+    )
+    execution = json.loads((results / "report.json").read_text())["execution"]
+    assert "persistent_non_root_oci_runtime" in execution["failed_or_not_executed_checks"]
+
+
 def test_probe_contract_requires_every_top_level_probe(tmp_path: Path) -> None:
     module = report_contract()
     report = complete_probe_report()
