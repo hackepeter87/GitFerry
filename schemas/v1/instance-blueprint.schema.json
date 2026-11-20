@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitferry.io/schemas/v1/instance-blueprint.schema.json",
+  "title": "GitFerry instance blueprint v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {"const": "gitferry.io/v1"},
+    "kind": {"const": "InstanceBlueprint"},
+    "metadata": {"$ref": "#/$defs/metadata"},
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gitea"],
+      "properties": {
+        "gitea": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["baseUrl", "credentialSecretRef"],
+          "properties": {
+            "baseUrl": {"type": "string", "format": "uri", "pattern": "^https?://"},
+            "credentialSecretRef": {"$ref": "#/$defs/secretRef"},
+            "caSecretRef": {"$ref": "#/$defs/secretRef"},
+            "expectedVersion": {"type": "string", "minLength": 1}
+          }
+        },
+        "authenticationSources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type", "directoryRealm", "host", "bindSecretRef"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "type": {"enum": ["ldap", "ldaps"]},
+              "directoryRealm": {"type": "string", "minLength": 1},
+              "host": {"type": "string", "minLength": 1},
+              "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+              "userSearchBase": {"type": "string"},
+              "groupSearchBase": {"type": "string"},
+              "bindSecretRef": {"$ref": "#/$defs/secretRef"},
+              "caSecretRef": {"$ref": "#/$defs/secretRef"}
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {"name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"}}
+    },
+    "secretRef": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"}
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitferry.io/schemas/v1/transfer-blueprint.schema.json",
+  "title": "GitFerry transfer blueprint v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {"const": "gitferry.io/v1"},
+    "kind": {"const": "TransferBlueprint"},
+    "metadata": {"$ref": "#/$defs/metadata"},
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "source", "target", "selection", "identity", "validation"],
+      "properties": {
+        "mode": {"enum": ["bootstrap", "provision", "roundtrip"]},
+        "source": {"$ref": "#/$defs/endpoint"},
+        "target": {"$ref": "#/$defs/endpoint"},
+        "selection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["allRepositories"],
+          "properties": {
+            "allRepositories": {"type": "boolean"},
+            "organizations": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+            "repositories": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[^/]+/[^/]+$"}}
+          }
+        },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["importAccounts", "ambiguousMapping"],
+          "properties": {
+            "importAccounts": {"type": "boolean"},
+            "ambiguousMapping": {"const": "require-manual-confirmation"},
+            "mappings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sourceLogin",
+                  "sourceRealm",
+                  "sourceExternalId",
+                  "sourceOuPath",
+                  "targetLogin",
+                  "targetRealm"
+                ],
+                "properties": {
+                  "sourceLogin": {"type": "string", "minLength": 1},
+                  "sourceRealm": {"type": "string", "minLength": 1},
+                  "sourceExternalId": {"type": "string", "minLength": 1},
+                  "sourceOuPath": {"type": "string", "minLength": 1},
+                  "targetLogin": {"type": "string", "minLength": 1},
+                  "targetRealm": {"type": "string", "minLength": 1}
+                }
+              }
+            }
+          }
+        },
+        "permissions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"allowPrivilegeExpansion": {"const": false}}
+        },
+        "validation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["onCollision", "verifySourceBaseline"],
+          "properties": {
+            "onCollision": {"enum": ["fail", "resume-owned-transfer"]},
+            "verifySourceBaseline": {"type": "boolean"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {"name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"}}
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instanceRef"],
+      "properties": {"instanceRef": {"type": "string", "minLength": 1}}
+    }
+  }
+}

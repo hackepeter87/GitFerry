@@ -1,0 +1,117 @@
+{
+  "format": "gitferry.transport",
+  "schema_version": 2,
+  "manifest_id": "example-comments-return-2026-11-20",
+  "transfer_round_id": "example-comments-round-2026-11-20",
+  "producer_version": "0.1.0.dev0",
+  "sender": {
+    "instance_key": "gitea-b-example",
+    "installation_marker": "operator-issued-installation-b-1"
+  },
+  "recipient": {
+    "instance_key": "gitea-a-example",
+    "installation_marker": "operator-issued-installation-a-1",
+    "context": "synthetic isolated return receiver"
+  },
+  "mode": "return",
+  "created_at": "2026-11-20T11:00:00Z",
+  "forward_reference": {
+    "manifest_id": "example-comments-forward-2026-11-20",
+    "digest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "deletion_semantics": "absence-does-not-delete",
+  "selected_repositories": [
+    {
+      "repository": "synthetic/selected",
+      "object_types": ["issue", "issue_comment"],
+      "fields": ["title", "body", "state", "labels", "comment.body"],
+      "capabilities": [
+        "issue-create",
+        "issue-update",
+        "issue-comment-create",
+        "issue-comment-update"
+      ],
+      "limitations": ["normal-issue-comments-only", "native-created-at-not-restored"]
+    }
+  ],
+  "identity_claims": [],
+  "objects": [
+    {
+      "origin": {
+        "instance_key": "gitea-b-example",
+        "repository": "synthetic/selected",
+        "object_type": "issue_comment",
+        "global_id": "42",
+        "parent_issue_origin": {
+          "instance_key": "gitea-b-example",
+          "repository": "synthetic/selected",
+          "object_type": "issue",
+          "global_id": "41"
+        },
+        "created_at": "2026-11-20T10:31:00Z"
+      },
+      "replicas": [
+        {
+          "instance_key": "gitea-b-example",
+          "repository": "synthetic/selected",
+          "global_id": "42",
+          "parent_issue_index": "9",
+          "native_created_at": "2026-11-20T10:31:00Z"
+        }
+      ],
+      "author": {
+        "realm_key": "synthetic-directory-b",
+        "login": "comment-author-b",
+        "external_id": "SYNTHETIC-B-COMMENT-1",
+        "ou_path": "OU=People,DC=b,DC=invalid"
+      },
+      "comparison": {
+        "ruleset": "gitea-issue-comment-body",
+        "ruleset_version": 1,
+        "original_baseline": null,
+        "confirmed_import": null,
+        "current": {"body": "B-born child listed before its parent"},
+        "baseline_origin": {
+          "instance_key": "gitea-b-example",
+          "transfer_round_id": "example-comments-round-2026-11-20"
+        }
+      }
+    },
+    {
+      "origin": {
+        "instance_key": "gitea-b-example",
+        "repository": "synthetic/selected",
+        "object_type": "issue",
+        "global_id": "41",
+        "issue_index": "9",
+        "created_at": "2026-11-20T10:30:00Z"
+      },
+      "replicas": [
+        {
+          "instance_key": "gitea-b-example",
+          "repository": "synthetic/selected",
+          "global_id": "41",
+          "issue_index": "9",
+          "native_created_at": "2026-11-20T10:30:00Z"
+        }
+      ],
+      "comparison": {
+        "ruleset": "gitea-issue-selected-fields",
+        "ruleset_version": 1,
+        "original_baseline": null,
+        "confirmed_import": null,
+        "current": {
+          "title": "B-born issue",
+          "body": "Parent follows child in file order",
+          "state": "open",
+          "labels": []
+        },
+        "baseline_origin": {
+          "instance_key": "gitea-b-example",
+          "transfer_round_id": "example-comments-round-2026-11-20"
+        }
+      }
+    }
+  ],
+  "payloads": []
+}

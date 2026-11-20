@@ -1,0 +1,9 @@
+.git
+.github
+.projectatlas
+.venv
+frontend/node_modules
+frontend/dist
+integration-results
+__pycache__
+*.pyc

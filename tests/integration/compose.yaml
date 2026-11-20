@@ -1,0 +1,117 @@
+services:
+  source:
+    image: docker.gitea.com/gitea:1.27.2@sha256:d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd
+    environment: &gitea-environment
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__database__PATH: /data/gitea/gitea.db
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      GITEA__server__DISABLE_SSH: "true"
+      GITEA__server__HTTP_PORT: "3000"
+      GITEA__server__OFFLINE_MODE: "true"
+      GITEA__server__ROOT_URL: http://source:3000/
+      GITEA__log__MODE: console
+      GITEA__log__LEVEL: warn
+    ports:
+      - "127.0.0.1:${GITFERRY_IT_SOURCE_PORT:-33001}:3000"
+    volumes:
+      - source-data:/data
+    networks:
+      - control-net
+      - source-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/v1/version"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+
+  target:
+    image: docker.gitea.com/gitea:1.27.2@sha256:d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd
+    environment:
+      <<: *gitea-environment
+      GITEA__server__ROOT_URL: http://target:3000/
+      GITEA__migrations__ALLOWED_DOMAINS: source
+      GITEA__migrations__ALLOW_LOCALNETWORKS: "true"
+    ports:
+      - "127.0.0.1:${GITFERRY_IT_TARGET_PORT:-33002}:3000"
+    volumes:
+      - target-data:/data
+    networks:
+      - control-net
+      - target-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/v1/version"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+
+  importer:
+    image: docker.gitea.com/gitea:1.27.2@sha256:d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["sleep infinity"]
+    volumes:
+      - ../../integration-results/package:/package:ro
+    networks:
+      - target-net
+    depends_on:
+      target:
+        condition: service_healthy
+
+  gitferry-a:
+    build:
+      context: ../..
+      dockerfile: containers/gitferry.Dockerfile
+    image: ${GITFERRY_IT_RUNTIME_IMAGE:-gitferry-it-runtime:dev}
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["sleep infinity"]
+    environment:
+      GITFERRY_SIDE: A
+      GITFERRY_GITEA_URL: http://source:3000
+      GITFERRY_IT_USER_PASSWORD: ${GITFERRY_IT_USER_PASSWORD}
+      GITFERRY_IT_INSTANCE_NONCE: ${GITFERRY_IT_INSTANCE_NONCE}
+    volumes:
+      - gitferry-a-state:/state
+      - ./transport_worker.py:/probe/transport_worker.py:ro
+      - ./comment_transport_worker.py:/probe/comment_transport_worker.py:ro
+    networks:
+      - source-net
+    depends_on:
+      source:
+        condition: service_healthy
+
+  gitferry-b:
+    build:
+      context: ../..
+      dockerfile: containers/gitferry.Dockerfile
+    image: ${GITFERRY_IT_RUNTIME_IMAGE:-gitferry-it-runtime:dev}
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["sleep infinity"]
+    environment:
+      GITFERRY_SIDE: B
+      GITFERRY_GITEA_URL: http://target:3000
+      GITFERRY_IT_USER_PASSWORD: ${GITFERRY_IT_USER_PASSWORD}
+      GITFERRY_IT_INSTANCE_NONCE: ${GITFERRY_IT_INSTANCE_NONCE}
+    volumes:
+      - gitferry-b-state:/state
+      - ./transport_worker.py:/probe/transport_worker.py:ro
+      - ./comment_transport_worker.py:/probe/comment_transport_worker.py:ro
+    networks:
+      - target-net
+    depends_on:
+      target:
+        condition: service_healthy
+
+volumes:
+  source-data:
+  target-data:
+  gitferry-a-state:
+  gitferry-b-state:
+
+networks:
+  control-net:
+  target-net:
+    internal: true
+  source-net:
+    internal: true
