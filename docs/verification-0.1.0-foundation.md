@@ -5,8 +5,10 @@ release, and it does not claim 0.2 user-flow acceptance.
 
 ## Scope and integrated result
 
-The accepted integrated-main baseline is `dedc0778677f1e88eaf1c0baebfee7a1ead0966d`.
-PR #42 is at head `168cadc28456be2d9faf8111335eccde9002879e`; its current-head review
+The accepted capability baseline is `dedc0778677f1e88eaf1c0baebfee7a1ead0966d`.
+The acceptance report was integrated as `07fe353a896b83a29ee8013bddb80ef638e50c56` and passed
+main run `44811562483`. PR #42 is at head
+`168cadc28456be2d9faf8111335eccde9002879e`; its current-head review
 reported no findings. Run `44808494083`
 passed `quality` in 1m13s and `gitea-integration` in 2m43s. The integrated-main run
 `44808991767` passed both `quality` and `gitea-integration`.
@@ -23,6 +25,10 @@ The two current-diff review cycles are recorded as follows:
   (`gpt-6-astra`, high reasoning) found and the change fixed label and owner gaps, then reported no
   findings on final head `168cadc28456be2d9faf8111335eccde9002879e`. Current-head run
   `44808494083`; main run `44808991767`.
+- PR #43 (milestone acceptance), merged at `07fe353`: final review found two durable-evidence gaps;
+  head `648de07afcecf4db2176491ecb47b6dff4bb061c` retained the PR #41 re-review and resume
+  transcript, then received a no-findings re-review. Current-head run `44811003946` and main run
+  `44811562483` passed both required checks.
 
 ## Evidence classification
 
@@ -40,6 +46,8 @@ The two current-diff review cycles are recorded as follows:
   `d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd`. It records 19
   required checks passed, normal cleanup passed, and outer cleanup passed. A controlled failure
   exited 86, kept diagnostics, and passed both cleanups.
+  Final main artifact `14668890407` repeats that contract on clean commit `07fe353`: all required
+  checks passed, the controlled failure exited 86 with diagnostics, and both cleanup levels passed.
 - **Configured-only:** Ruleset `27751371` is active on `main` with exact checks `quality` and
   `gitea-integration`, strict current-code, required PR/resolved threads, no bypass, and
   deletion/non-fast-forward protection. This describes enforcement configuration, not a product
@@ -89,5 +97,5 @@ verification, required ruleset enforcement, artifact cleanup, and controlled-fai
 all passed as stated above. The first fresh-context GitHub query was blocked, but its explicit
 read-only retry passed; it remains a recorded recovery event, not a product failure.
 
-Open issue: Issue #5 remains In Progress and is not closed by this report. No additional failing
-or not-yet-tested capability is promoted to passed.
+Issue #5 may close after the evidence-only closeout change receives its own required PR and main
+checks. No additional failing or not-yet-tested capability is promoted to passed.

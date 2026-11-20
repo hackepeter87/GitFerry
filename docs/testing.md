@@ -93,6 +93,12 @@ On the acceptance branch, `make doctor` passed on Darwin/arm64 with Docker Linux
 locally; the exact integrated baseline received the fresh hosted Linux integration and controlled
 failure runs described above.
 
+The acceptance report then merged as `07fe353a896b83a29ee8013bddb80ef638e50c56`. Final main run
+`44811562483` passed `quality` in 1m14s and `gitea-integration` in 2m46s. Artifact `14668890407`
+binds the clean commit and exact Gitea pin, reports no failed or unexecuted required checks, and
+records successful normal and outer cleanup. Its controlled failure exited 86, retained diagnostics,
+and also completed both cleanup levels.
+
 ## Report, diagnostics, and cleanup contract
 
 `integration-results/report.json` is the only machine-readable result contract. Its `execution`
