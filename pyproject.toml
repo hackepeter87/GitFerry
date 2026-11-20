@@ -56,3 +56,7 @@ disable_error_code = ["import-untyped"]
 [[tool.mypy.overrides]]
 module = ["jsonschema", "jsonschema.*", "yaml"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["anyio", "anyio.*"]
+follow_imports = "skip"
