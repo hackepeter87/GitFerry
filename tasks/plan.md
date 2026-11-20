@@ -1,4 +1,4 @@
-# Implementation plan: bounded provisioning milestone
+# Implementation plan: 0.1.0 foundation completion
 
 Source: `docs/roadmap.md` recommended next slice and the project-owner collaboration request.
 
@@ -7,8 +7,9 @@ Source: `docs/roadmap.md` recommended next slice and the project-owner collabora
 First establish the repository-scoped Codex role model. Then extract the already proven
 organization/team/repository, explicit-identity and Git-bundle behavior into reusable application
 services. The milestone ends only after the existing pinned Gitea integration environment proves
-the bounded selected-repository flow and replay behavior. It remains narrower than a general
-transfer engine.
+the bounded selected-repository flow and replay behavior. Complete the foundation by replacing the
+coarse capability list with a field-level, issue-owned evidence contract and performing integrated
+0.1.0 acceptance. It remains narrower than a general transfer engine.
 
 ## Architecture decisions
 
@@ -43,6 +44,14 @@ transfer engine.
 - [x] Prove reader/writer/outsider behavior and unchanged control objects on Gitea 1.27.2.
 - [x] Prove process-restart replay creates no duplicate structure or metadata.
 - [x] Run all repository gates and update testing, capability matrix and roadmap with exact evidence.
+
+### Phase 4: product capability contract
+
+- [x] Map agreed product classes to current code, tests and real-Gitea reports.
+- [x] Separate implementation, first-import and return status with a fixed vocabulary.
+- [x] Assign every row one target release and owning GitHub issue.
+- [x] Add a machine-checked completeness, link, pin and known-limit contract.
+- [ ] Obtain independent review, hosted CI and integrated-main verification for Issue #3.
 
 ## Verification checkpoints
 
