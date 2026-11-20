@@ -24,7 +24,10 @@ from gitferry.blueprints import MAX_BLUEPRINT_BYTES, BlueprintValidationError, v
 from gitferry.runtime import RuntimeStatus, initialize_runtime
 from gitferry.state_migrations import SCHEMA_VERSION
 
-HTTP_LOGGER = logging.getLogger("gitferry.http")
+# Uvicorn configures ``uvicorn.error`` for production output.  A child logger
+# keeps the allowlisted request record visible while the raw access logger is
+# disabled by the GitFerry server entrypoint.
+HTTP_LOGGER = logging.getLogger("uvicorn.error.gitferry.http")
 
 
 def create_app(

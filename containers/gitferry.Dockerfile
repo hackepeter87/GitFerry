@@ -45,4 +45,4 @@ EXPOSE 8080
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=6 \
     CMD ["python", "-m", "gitferry.healthcheck"]
-CMD ["uvicorn", "gitferry.api:app", "--host", "0.0.0.0", "--port", "8080", "--lifespan", "on", "--timeout-graceful-shutdown", "30"]
+CMD ["python", "-m", "gitferry.server"]

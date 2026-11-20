@@ -282,7 +282,7 @@ def test_asgi_request_logs_allowlist_route_metadata_without_secrets(
     password = "never-log-this-synthetic-password"  # noqa: S105 - synthetic redaction probe
     token_like_path = "never-log-this-synthetic-token"  # noqa: S105 - synthetic probe
 
-    with caplog.at_level(logging.INFO, logger="gitferry.http"):
+    with caplog.at_level(logging.INFO, logger="uvicorn.error.gitferry.http"):
         denied = client.post(
             "/api/v1/auth/login",
             json={"username": "synthetic.admin", "password": password},

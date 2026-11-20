@@ -11,7 +11,7 @@ make doctor
 
 ```text
 make test
-# passed: Ruff, format, MyPy, 190 backend tests, Vue typecheck/build
+# passed: Ruff, format, MyPy, 193 backend tests, Vue typecheck/build
 ```
 
 ```text
@@ -21,12 +21,12 @@ make test-browser
 
 ```text
 make container-build
-# passed: image sha256:1c2e77cdb433027db724ab88d5f8e5475e79b199d16f16b7ba478979e98c9a4d
+# passed through the integration build: image sha256:3764dc0714d4264e251325c030956bb4b2dd43928adf36046835d984a6b74add
 ```
 
 ```text
 make test-integration
-# passed: run 9831417d4f324e21, Gitea 1.27.2 on both sides
+# passed: run 8c9c45736a4c4bbb, Gitea 1.27.2 on both sides
 make test-integration-failure-contract
 # passed: injected failure remained failed, diagnostics and scoped cleanup retained
 make test-clean
@@ -39,9 +39,10 @@ cookie attributes, rate limiting, public health/readiness, minimal status, fail-
 role denial and schema migration. The Playwright suite uses synthetic identities and drove
 bootstrap guidance, keyboard login, denied unauthenticated API access, logout, deterministic
 server-side expiry, recovery revocation, refocus behavior and dark-mode field contrast through real
-FastAPI processes and file-backed SQLite stores. ASGI request-log tests verify that only the route
-template, method and status are logged; credentials, usernames and unmatched secret-like paths are
-absent.
+FastAPI processes and file-backed SQLite stores. The request-log regression starts the production
+Uvicorn entrypoint and verifies that its raw access logger is disabled: only the route template,
+method and status are emitted, while credentials, usernames, unmatched secret-like paths and query
+values remain absent.
 
 The full integration run used fresh run-scoped resources and the pinned Gitea image
 `docker.gitea.com/gitea:1.27.2@sha256:d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd`.
@@ -50,7 +51,7 @@ minimal bootstrap API, container replacement, forced restart and fail-closed sto
 report recorded no failed or unexecuted mandatory check and successful run-scoped cleanup.
 
 This local integration report is bound to dirty worktree head
-`316e477d6261b31eb8c1917b6b2bd57ead82d13a`; it is engineering evidence for the assembled branch,
+`8aced890c92ce1b616040d189705120ca2147440`; it is engineering evidence for the assembled branch,
 not clean-commit or hosted evidence. The exact branch head must still pass Hosted CI after push.
 
 `npm audit --audit-level=high` also completed against the registry with zero reported
