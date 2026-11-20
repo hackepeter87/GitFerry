@@ -11,7 +11,11 @@
   fail without secret leakage or database replacement.
 - Portable transport integration: two additional GitFerry containers with independent named
   SQLite volumes and disjoint internal networks; the harness copies only immutable transport files.
-- Later E2E: guided UI flows after the UI is implemented.
+- Browser E2E: Playwright drives the authentication contract against real local FastAPI processes
+  and file-backed SQLite stores. It covers the bootstrap prerequisite, keyboard login, denied
+  unauthenticated API access, logout, deterministic server-side expiry, host recovery and durable
+  revocation. Backend API tests separately cover cookie attributes, CSRF, fixation, rate limiting,
+  redaction and role denial.
 - Separate qualification: 30 GB dataset, distributed/multi-host execution, LDAP, AD, LFS, wiki, attachments, broader permissions, and full roundtrip.
 
 Mocks do not replace Gitea integration evidence.
@@ -35,6 +39,13 @@ The entire Python probe is bounded (900 seconds by default); individual harness 
 bounded. Override only through `GITFERRY_IT_PROBE_TIMEOUT_SECONDS`, run-specific port variables, or
 an explicit safe `GITFERRY_IT_RUN_ID`. A missing report, missing required section, false required
 assertion, or failed cleanup makes the entry point fail.
+
+Run `make test-browser` after installing the pinned Playwright Chromium runtime with
+`cd frontend && npx playwright install chromium`. The test creates a unique temporary root, starts
+separate bootstrapped and unbootstrapped FastAPI/SQLite processes, waits on HTTP readiness, and
+removes only that validated temporary root. GitHub Actions installs Chromium with its Linux system
+dependencies, runs the same Make target with a five-minute step limit, and uploads Playwright
+traces, screenshots and videos when the browser step fails.
 
 ## Required fixtures
 

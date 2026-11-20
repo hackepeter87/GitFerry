@@ -17,5 +17,17 @@ GitFerry has not released a supported production version. The current repository
 - Logs and reports must redact credentials and tokens.
 - Imported identities never gain permissions implicitly.
 - GitFerry never manages its test environment through a mounted Docker socket.
+- The first local administrator is created once through the host CLI from a protected password
+  file; recovery replaces its password and revokes existing sessions.
+- Passwords use PBKDF2-HMAC-SHA256 with a random 16-byte salt, 600,000 iterations, and a 32-byte
+  derived key. Session and CSRF verifiers are opaque and only their hashes are stored.
+- Deployed sessions are eight hours, use `Secure`/`HttpOnly`/`SameSite=Strict` cookie controls as
+  applicable, and require a session-bound CSRF header for state-changing requests. TLS termination
+  is required.
+- Health, readiness, and minimal authentication status are public; protected operations fail closed
+  when authentication is missing or unavailable. Login failures are durably rate-limited.
+
+The local administrator boundary does not provide MFA, SSO, or multi-administrator management. It
+also does not provide a general transfer UI or productive-data migration capability.
 
 The iteration-1 threat analysis is in `docs/architecture.md`; package/path validation tests are part of `make test`.

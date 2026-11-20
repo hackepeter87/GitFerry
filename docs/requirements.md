@@ -45,8 +45,9 @@ Adapter boundaries may support future forges, but GitLab implementation is not p
 5. LDAP compatibility does not prove Active Directory compatibility. AD-specific evidence requires a dedicated environment.
 6. A 30 GB load claim requires a separately executed benchmark with disk and peak-memory measurements.
 7. Offline isolation must deny source and Internet reachability from the importer, not merely use different container names.
-8. The current validation API has no administrative authentication yet and must not be exposed as
-   a production service. Authentication design and tests are required by 0.2.0.
+8. The first local-administrator boundary is implemented with host-controlled bootstrap/recovery,
+   durable revocable sessions and protected API writes. It is not external SSO, MFA or a
+   multi-administrator lifecycle, and the application still requires HTTPS before non-local use.
 
 ## Outside the approved roadmap
 
