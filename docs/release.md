@@ -52,15 +52,16 @@ production activation requires the separate owner decision reserved in the proje
 
 ## Current status
 
-The repository remains at `0.1.0.dev0`. The technical 0.1.0 foundation evidence is based on
-integrated commit `dedc0778677f1e88eaf1c0baebfee7a1ead0966d`. Hosted run `44808991767`
-passed `quality` and `gitea-integration` on that exact clean Linux checkout; its normal and
-controlled-failure paths retained the required reports and completed scoped cleanup. Active ruleset
+The repository remains at `0.1.0.dev0`. The technical 0.1.0 foundation evidence is integrated at
+commit `07fe353a896b83a29ee8013bddb80ef638e50c56`. Hosted run `44811562483` passed
+`quality` and `gitea-integration` on that exact clean Linux checkout; artifact `14668890407` records
+all required checks, controlled failure exit 86 with diagnostics, and successful run-local and
+outer cleanup. Active ruleset
 `27751371` requires both contexts on current code, pull requests and resolved threads, with no bypass
 actors and deletion/non-fast-forward protection.
 
 The complete acceptance classification, dependent delivery cycles and restart/resume evidence are
 recorded in [the 0.1.0 foundation report](verification-0.1.0-foundation.md). The report-integration
-merge and its final main check are durable GitHub evidence on Issue #5 because their merge commit is
-not knowable from the report's parent revision. No OCI/offline release candidate was built, tagged
-or published for 0.1.0; stable publication remains a separate owner decision.
+merge and its final main check are durable GitHub evidence on Issue #5. No OCI/offline release
+candidate was built, tagged or published for 0.1.0; stable publication remains a separate owner
+decision.

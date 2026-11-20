@@ -11,14 +11,19 @@ def test_foundation_report_binds_exact_integrated_and_delivery_evidence() -> Non
 
     for value in (
         "dedc0778677f1e88eaf1c0baebfee7a1ead0966d",
+        "07fe353a896b83a29ee8013bddb80ef638e50c56",
         "168cadc28456be2d9faf8111335eccde9002879e",
+        "648de07afcecf4db2176491ecb47b6dff4bb061c",
         "44805207547",
         "44805706378",
         "44808494083",
         "44808991767",
+        "44811003946",
+        "44811562483",
         "64bf3dd5bc4ddc06e57bfe2bfd09f8d0fb98a14e",
         "27751371",
         "14664143681",
+        "14668890407",
         "7049764078",
         "d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd",
     ):

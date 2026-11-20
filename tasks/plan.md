@@ -59,7 +59,7 @@ coarse capability list with a field-level, issue-owned evidence contract and per
 - [x] Verify the exact integrated capability-matrix commit in hosted Linux CI.
 - [x] Run a context-free resume exercise and recover its blocked GitHub read without duplication.
 - [x] Classify local, hosted, configured-only, limited and untested evidence in a milestone report.
-- [ ] Obtain independent final review, merge the report and verify the resulting main commit.
+- [x] Obtain independent final review, merge the report and verify the resulting main commit.
 
 ## Verification checkpoints
 

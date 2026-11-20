@@ -13,4 +13,5 @@
 - [x] Review, run hosted gates and integrate Issue #3.
 - [x] Execute the context-free resume discovery proof for Issue #5.
 - [x] Verify current integrated-main hosted gates and repository rules.
-- [ ] Review, integrate and close the 0.1.0 milestone acceptance report.
+- [x] Review and integrate the 0.1.0 milestone acceptance report; close after this evidence-only
+  closeout receives its required main check.
