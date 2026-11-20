@@ -12,6 +12,7 @@ from typing import Any
 
 from comment_transport_roundtrip_probe import run_comment_transport_roundtrip_probe
 from metadata_roundtrip_probe import run_metadata_roundtrip_probe
+from oci_runtime_probe import run_oci_runtime_probe
 from openapi_migration_probe import run_openapi_migration_probe
 from permissions_probe import run_permissions_probe
 from persistent_state_probe import run_persistent_state_probe
@@ -312,6 +313,7 @@ def main() -> None:
         "portable_transport_roundtrip": run_transport_roundtrip_probe(),
         "comment_transport_roundtrip": run_comment_transport_roundtrip_probe(),
         "openapi_and_migration": run_openapi_migration_probe(access_context),
+        "oci_runtime": run_oci_runtime_probe(),
     }
     (RESULTS / "report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"

@@ -5,9 +5,21 @@ root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 compose_file="$root/tests/integration/compose.yaml"
 results_root=${GITFERRY_IT_RESULTS_ROOT:-$root}
 export GITFERRY_IT_USER_PASSWORD=${GITFERRY_IT_USER_PASSWORD:-}
+export GITFERRY_IT_ADMIN_PASSWORD=${GITFERRY_IT_ADMIN_PASSWORD:-}
 export GITFERRY_IT_INSTANCE_NONCE=${GITFERRY_IT_INSTANCE_NONCE:-}
 seen_projects=
 seen_images=
+
+clean_scoped_resources() {
+  project=$1
+  label="gitferry.integration.project=$project"
+  for container in $(docker ps --all --quiet --filter "label=$label"); do
+    docker rm --force "$container"
+  done
+  for volume in $(docker volume ls --quiet --filter "label=$label"); do
+    docker volume rm --force "$volume"
+  done
+}
 
 clean_project() {
   project=$1
@@ -22,6 +34,7 @@ clean_project() {
     *"|$project|"*) return ;;
   esac
   seen_projects="${seen_projects:+$seen_projects|}$project"
+  clean_scoped_resources "$project"
   docker compose -p "$project" -f "$compose_file" down --volumes --remove-orphans
 }
 

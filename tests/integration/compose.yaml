@@ -61,10 +61,15 @@ services:
     build:
       context: ../..
       dockerfile: containers/gitferry.Dockerfile
+      args:
+        GITFERRY_VERSION: ${GITFERRY_VERSION:-0.1.0.dev0}
+        GITFERRY_SOURCE_REVISION: ${GITFERRY_SOURCE_REVISION:-unknown}
     image: ${GITFERRY_IT_RUNTIME_IMAGE:-gitferry-it-runtime:dev}
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command: ["sleep infinity"]
+    healthcheck:
+      disable: true
     environment:
       GITFERRY_SIDE: A
       GITFERRY_GITEA_URL: http://source:3000
@@ -84,10 +89,15 @@ services:
     build:
       context: ../..
       dockerfile: containers/gitferry.Dockerfile
+      args:
+        GITFERRY_VERSION: ${GITFERRY_VERSION:-0.1.0.dev0}
+        GITFERRY_SOURCE_REVISION: ${GITFERRY_SOURCE_REVISION:-unknown}
     image: ${GITFERRY_IT_RUNTIME_IMAGE:-gitferry-it-runtime:dev}
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
     command: ["sleep infinity"]
+    healthcheck:
+      disable: true
     environment:
       GITFERRY_SIDE: B
       GITFERRY_GITEA_URL: http://target:3000

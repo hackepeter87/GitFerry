@@ -33,6 +33,7 @@ def _workspace_digest() -> str:
         ".github",
         "backend",
         "containers",
+        "deploy",
         "docs",
         "examples",
         "frontend/package-lock.json",
@@ -270,6 +271,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         "portable_transport_roundtrip",
         "comment_transport_roundtrip",
         "openapi_and_migration",
+        "oci_runtime",
     )
     mandatory_sections_passed = (
         _value(report, "gitea.source") == "1.27.2"
@@ -295,6 +297,12 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
             _all_true(report, "durable_provisioning.assertions"),
             "tests/integration/provisioning_probe.py",
             "durable_provisioning.assertions",
+        ),
+        (
+            "persistent_non_root_oci_runtime",
+            _all_true(report, "oci_runtime.assertions"),
+            "tests/integration/oci_runtime_probe.py",
+            "oci_runtime.assertions",
         ),
         (
             "provisioning_crash_and_lost_response_halt_replay",
