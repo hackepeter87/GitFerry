@@ -1,7 +1,7 @@
 # Durable provisioning verification
 
-- Run: `f2b89fe3e5ba49b7`
-- Code state: clean commit `6d908c9b5dfb6b8e52867d3408148dc89bc3c761`
+- Run: `f6765a2dec4a436a`
+- Code state: clean commit `209064243f1c3b2130e9fb337ac551135368dee6`
 - Date: 2026-11-20
 - Status: passed locally; hosted CI and integrated-main verification pending
 
