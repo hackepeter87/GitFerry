@@ -13,10 +13,16 @@ passed `quality` in 1m13s and `gitea-integration` in 2m43s. The integrated-main 
 
 The two current-diff review cycles are recorded as follows:
 
-- PR #41 (feature), merged as `f4dc16b`: an independent review found and the change fixed
-  stable-ID and tag bugs. Current-head run `44805207547`; main run `44805706378`.
-- PR #42 (evidence/test contract), merged at `dedc077`: review found and the change fixed
-  label and owner gaps. Current-head run `44808494083`; main run `44808991767`.
+- PR #41 (feature), merged as `f4dc16b`: the independent Codex reviewer subagent
+  (`gpt-6-astra`, high reasoning) found and the change fixed stable-ID and tag bugs. The reviewer
+  then re-read final head
+  `64bf3dd5bc4ddc06e57bfe2bfd09f8d0fb98a14e`, ran 64 focused tests plus missing/replaced
+  structure and permission-drift probes, and reported no findings. Current-head run
+  `44805207547`; main run `44805706378`.
+- PR #42 (evidence/test contract), merged at `dedc077`: an independent Codex reviewer subagent
+  (`gpt-6-astra`, high reasoning) found and the change fixed label and owner gaps, then reported no
+  findings on final head `168cadc28456be2d9faf8111335eccde9002879e`. Current-head run
+  `44808494083`; main run `44808991767`.
 
 ## Evidence classification
 
@@ -50,6 +56,28 @@ The two current-diff review cycles are recorded as follows:
 Issues #1–#4 are closed/Done; Issue #5 is the sole open milestone item. A fresh-context resume
 probe had a blocked first GitHub query; an explicit read-only retry succeeded, finding branch
 `release/0.1.0-acceptance` at `dedc077` and Issue #5 In Progress, with no duplicate created.
+
+### Controlled resume transcript
+
+The sanitized invocation and output are also retained in the
+[Issue #5 evidence comment](https://github.com/hackepeter87/GitFerry/issues/5#issuecomment-7049764078).
+
+The resume agent was started with `fork_turns=none`, low-cost explorer model configuration and only
+the repository path plus a read-only discovery contract. It received no parent conversation or
+Python objects and was prohibited from editing, creating, commenting, committing, pushing or
+changing GitHub state.
+
+Its first result read AGENTS.md and ProjectAtlas, then found a clean
+`release/0.1.0-acceptance` branch equal to `main`/`origin/main` at `dedc077`; it selected Issue #5
+as the next likely unblocked item. GitHub API calls failed in the restricted network, so that part
+was reported `blocked` rather than inferred.
+
+The explicit follow-up authorized read-only GitHub access. In that snapshot, the same agent reported
+Issues #1–#4 closed and Done, Issue #5 as the sole open 0.1.0 item and In Progress, run
+`44808991767` green for both required checks, and Ruleset `27751371` active without bypass. The
+only open pull request was unrelated Dependabot PR #38. It instructed the main agent to reuse the
+existing acceptance branch and create no issue, branch or PR. No resume-probe write occurred. Issue
+#5 subsequently moved to In Review when PR #43 opened.
 
 No 0.1 artifact candidate has been built or published. This is technical foundation acceptance
 only; stable release publication and 0.2 user-flow acceptance remain open work.

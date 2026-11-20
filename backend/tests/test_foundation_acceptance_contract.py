@@ -16,8 +16,10 @@ def test_foundation_report_binds_exact_integrated_and_delivery_evidence() -> Non
         "44805706378",
         "44808494083",
         "44808991767",
+        "64bf3dd5bc4ddc06e57bfe2bfd09f8d0fb98a14e",
         "27751371",
         "14664143681",
+        "7049764078",
         "d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd",
     ):
         assert value in text
@@ -40,6 +42,9 @@ def test_foundation_report_keeps_evidence_classes_and_release_boundary_explicit(
     assert "does not approve a stable release" in normalized
     assert "does not claim 0.2 user-flow acceptance" in normalized
     assert "no duplicate" in text
+    assert "fork_turns=none" in text
+    assert "unrelated Dependabot PR #38" in text
+    assert "create no issue, branch or PR" in text
 
 
 def test_release_and_roadmap_link_the_foundation_report() -> None:
