@@ -7,4 +7,4 @@
 - [x] Add bounded Gitea provisioning client/service and unit tests.
 - [x] Use the application service in the pinned two-Gitea integration path.
 - [x] Verify restart replay, functional permissions and unchanged control objects.
-- [ ] Run complete gates and update evidence documentation.
+- [x] Run complete gates and update evidence documentation.

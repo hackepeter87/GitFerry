@@ -42,7 +42,7 @@ transfer engine.
 - [x] Route the selected repository structure, membership and bundle steps through the application services.
 - [x] Prove reader/writer/outsider behavior and unchanged control objects on Gitea 1.27.2.
 - [x] Prove process-restart replay creates no duplicate structure or metadata.
-- [ ] Run all repository gates and update testing, capability matrix and roadmap with exact evidence.
+- [x] Run all repository gates and update testing, capability matrix and roadmap with exact evidence.
 
 ## Verification checkpoints
 

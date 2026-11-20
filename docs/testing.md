@@ -153,10 +153,10 @@ blocked unknown operation is a passing safety test but remains incomplete produc
 
 ## Executed durable provisioning run: 2026-11-20
 
-Run `31dafa76ad1e45e1` completed locally on a Darwin/arm64 host with Linux/arm64 Docker
+Run `f2b89fe3e5ba49b7` completed from clean commit `6d908c9` on a Darwin/arm64 host with Linux/arm64 Docker
 containers, using the pinned Gitea 1.27.2 image digest above. The selected structure path used the
 reusable application service, a separate target-side SQLite state store, and a file bundle. The
-mandatory report checks passed 17/17; run-scoped cleanup also passed.
+mandatory report checks passed 18/18; run-scoped cleanup also passed.
 
 - Passed: the service created one organization, one selected repository, and the planned
   `readers`/`writers` teams; Gitea also created its required `Owners` team. All nine bounded

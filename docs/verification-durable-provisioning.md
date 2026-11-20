@@ -1,8 +1,9 @@
 # Durable provisioning verification
 
-Run: `31dafa76ad1e45e1`  
-Date: 2026-11-20  
-Status: passed locally; hosted CI and integrated-main verification pending
+- Run: `f2b89fe3e5ba49b7`
+- Code state: clean commit `6d908c9b5dfb6b8e52867d3408148dc89bc3c761`
+- Date: 2026-11-20
+- Status: passed locally; hosted CI and integrated-main verification pending
 
 ## Inputs and environment
 
@@ -43,7 +44,7 @@ claim is made. The live aggregate permission is `none` under the explicit per-un
 The proof does not establish general exactly-once behavior, distributed locking, automatic
 reconciliation, LDAP/AD support, or a manifest v1/v2 change. Historical timestamps and the
 comment PATCH race remain unchanged. The integration evidence maps to
-`tests/integration/provisioning_probe.py`, with the 17/17 mandatory checks recorded by the run
+`tests/integration/provisioning_probe.py`, with the 18/18 mandatory checks recorded by the run
 report. Unit coverage supplies schema v4 migration, collision, parent dependency, journal, and
 unknown-outcome transition checks. Generated field-level details remain in
 `integration-results/report.json`.
