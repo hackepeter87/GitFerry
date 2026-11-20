@@ -2,24 +2,61 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from gitferry.blueprints import MAX_BLUEPRINT_BYTES, BlueprintValidationError, validate_text
-
-app = FastAPI(
-    title="GitFerry API",
-    version="0.1.0-dev",
-    description="Iteration-1 validation API; no general migration endpoint exists.",
-)
+from gitferry.runtime import RuntimeStatus, initialize_runtime
+from gitferry.state_migrations import SCHEMA_VERSION
 
 
-@app.get("/healthz")
-def health() -> dict[str, object]:
-    return {"status": "ok", "iteration": 1}
+def create_app() -> FastAPI:
+    readiness = RuntimeStatus()
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        managed = os.environ.get("GITFERRY_RUNTIME_MANAGED", "0") == "1"
+        readiness.starting(managed=managed)
+        if managed:
+            try:
+                application.state.runtime = initialize_runtime()
+            except Exception as exc:
+                readiness.failed(exc)
+                raise
+            readiness.ready(schema_version=SCHEMA_VERSION)
+        else:
+            readiness.ready(schema_version=None)
+        try:
+            yield
+        finally:
+            readiness.stopping()
+
+    application = FastAPI(
+        title="GitFerry API",
+        version="0.1.0-dev",
+        description="Iteration-1 validation API; no general migration endpoint exists.",
+        lifespan=lifespan,
+    )
+
+    @application.get("/healthz")
+    def health() -> dict[str, object]:
+        return {"status": "ok", "iteration": 1}
+
+    @application.get("/readyz")
+    def ready() -> JSONResponse:
+        return JSONResponse(
+            status_code=200 if readiness.is_ready else 503,
+            content=readiness.snapshot(),
+        )
+
+    application.post("/api/v1/blueprints/validate")(validate_blueprint)
+    return application
 
 
-@app.post("/api/v1/blueprints/validate")
 async def validate_blueprint(request: Request) -> JSONResponse:
     declared_length = request.headers.get("content-length")
     if declared_length is not None and declared_length.isdigit():
@@ -52,3 +89,6 @@ def _oversized_response() -> JSONResponse:
         status_code=413,
         content={"valid": False, "errors": ["blueprint exceeds the 1 MiB input limit"]},
     )
+
+
+app = create_app()
