@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-ObjectType = Literal["issue", "comment"]
+ObjectType = Literal["issue", "comment", "organization", "team", "repository"]
 OperationStatus = Literal[
     "prepared",
     "blocked_parent",

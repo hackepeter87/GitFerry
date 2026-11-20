@@ -12,6 +12,7 @@ from gitferry.state_store import (
     OperationConflict,
     OriginKey,
     StateStore,
+    TargetConfirmation,
     UnsupportedSchemaVersion,
 )
 
@@ -257,7 +258,7 @@ def test_version_one_database_migrates_without_losing_existing_state(tmp_path: P
 
     assert migrated.get_instance("instance-a").installation_marker == "install-a"
     connection = sqlite3.connect(database)
-    assert connection.execute("PRAGMA user_version").fetchone() == (3,)
+    assert connection.execute("PRAGMA user_version").fetchone() == (4,)
     assert connection.execute(
         "SELECT name FROM sqlite_master WHERE name = 'transport_manifests'"
     ).fetchone() == ("transport_manifests",)
@@ -324,7 +325,419 @@ def test_version_two_operations_migrate_to_comment_journal_without_lost_events(
     assert migrated.get_operation("existing-create").status == "prepared"
     assert migrated.operation_evidence("existing-create")["events"][0]["to"] == "prepared"
     connection = sqlite3.connect(database)
+    assert connection.execute("PRAGMA user_version").fetchone() == (4,)
+    assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    connection.close()
+
+
+def test_failed_v4_migration_rolls_back_the_populated_v3_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "failed-v4.sqlite3"
+    connection = sqlite3.connect(database)
+    for version in (1, 2, 3):
+        connection.executescript(MIGRATIONS[version])
+        connection.execute(
+            "INSERT INTO schema_migrations VALUES (?, ?)",
+            (version, f"2026-11-20T00:0{version}:00Z"),
+        )
+    connection.execute("PRAGMA user_version = 3")
+    connection.execute(
+        "INSERT INTO instances VALUES (?, ?, ?, ?, ?)",
+        ("instance-a", "A", "http://a.invalid", "install-a", "2026-11-20T00:00:00Z"),
+    )
+    connection.execute(
+        "INSERT INTO object_origins VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "origin-a",
+            "instance-a",
+            "org/repo",
+            "issue",
+            "17",
+            3,
+            None,
+            None,
+            "2026-11-20T00:00:00Z",
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    failing = MIGRATIONS[4].replace(
+        "DROP TABLE object_origins;",
+        "DROP TABLE object_origins;\nTHIS IS DELIBERATELY INVALID SQL;",
+        1,
+    )
+    monkeypatch.setitem(MIGRATIONS, 4, failing)
+
+    with pytest.raises(sqlite3.OperationalError):
+        StateStore(database)
+
+    connection = sqlite3.connect(database)
     assert connection.execute("PRAGMA user_version").fetchone() == (3,)
+    assert connection.execute("SELECT origin_id, object_type FROM object_origins").fetchall() == [
+        ("origin-a", "issue")
+    ]
+    assert connection.execute(
+        "SELECT version FROM schema_migrations ORDER BY version"
+    ).fetchall() == [
+        (1,),
+        (2,),
+        (3,),
+    ]
+    assert (
+        connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'object_origins_backup'"
+        ).fetchone()
+        is None
+    )
+    connection.close()
+
+
+def test_v4_origin_types_and_mapping_preserving_side_effects(tmp_path: Path) -> None:
+    state = store(tmp_path)
+    register_instances(state)
+    origins = [
+        state.register_origin(OriginKey("instance-a", "org", kind, kind))
+        for kind in ("organization", "team", "repository")
+    ]
+    assert [origin.key.object_type for origin in origins] == [
+        "organization",
+        "team",
+        "repository",
+    ]
+
+    origin = origins[1]
+    state.prepare_operation(
+        operation_id="create-team",
+        origin_id=origin.id,
+        target_instance_key="instance-b",
+        target_repository_scope="org",
+        operation_type="create_team",
+        mapping_version=1,
+        baseline_id=None,
+        intent={"name": "Synthetic Team"},
+    )
+    state.start_executor_session("executor")
+    state.claim_operation("create-team", "executor")
+    state.confirm_operation("create-team", TargetConfirmation("team-7", None))
+
+    for operation_type in ("add_team_member", "assign_team_repository", "push_git_bundle"):
+        operation_id = f"{operation_type}-1"
+        state.prepare_operation(
+            operation_id=operation_id,
+            origin_id=origin.id,
+            target_instance_key="instance-b",
+            target_repository_scope="org",
+            operation_type=operation_type,
+            mapping_version=1,
+            baseline_id=None,
+            intent={"operation": operation_type},
+        )
+        state.claim_operation(operation_id, "executor")
+        state.confirm_operation(operation_id, TargetConfirmation("team-7", None))
+
+    connection = sqlite3.connect(state.path)
+    assert connection.execute(
+        "SELECT count(*) FROM object_mappings WHERE origin_id = ?", (origin.id,)
+    ).fetchone() == (1,)
+    connection.close()
+
+
+def test_mapping_preserving_side_effect_rejects_mismatched_target(tmp_path: Path) -> None:
+    state = store(tmp_path)
+    register_instances(state)
+    origin = state.register_origin(OriginKey("instance-a", "org", "team", "team-1"))
+    state.prepare_operation(
+        operation_id="create-team",
+        origin_id=origin.id,
+        target_instance_key="instance-b",
+        target_repository_scope="org",
+        operation_type="create_team",
+        mapping_version=1,
+        baseline_id=None,
+        intent={"name": "Synthetic Team"},
+    )
+    state.start_executor_session("executor")
+    state.claim_operation("create-team", "executor")
+    state.confirm_operation("create-team", TargetConfirmation("team-7", None))
+    state.prepare_operation(
+        operation_id="add-member",
+        origin_id=origin.id,
+        target_instance_key="instance-b",
+        target_repository_scope="org",
+        operation_type="add_team_member",
+        mapping_version=1,
+        baseline_id=None,
+        intent={"login": "synthetic-user"},
+    )
+    state.claim_operation("add-member", "executor")
+    with pytest.raises(MappingConflict, match="immutable target mapping"):
+        state.confirm_operation("add-member", TargetConfirmation("team-8", None))
+
+
+def test_unknown_mapping_preserving_side_effects_reconcile_without_duplicate_mapping(
+    tmp_path: Path,
+) -> None:
+    state = store(tmp_path)
+    register_instances(state)
+    origin = state.register_origin(OriginKey("instance-a", "org", "team", "team-1"))
+    state.prepare_operation(
+        operation_id="create-team",
+        origin_id=origin.id,
+        target_instance_key="instance-b",
+        target_repository_scope="org",
+        operation_type="create_team",
+        mapping_version=1,
+        baseline_id=None,
+        intent={"name": "Synthetic Team"},
+    )
+    state.start_executor_session("executor")
+    state.claim_operation("create-team", "executor")
+    state.confirm_operation("create-team", TargetConfirmation("team-7", None))
+
+    for operation_type in ("assign_team_repository", "add_team_member", "push_git_bundle"):
+        operation_id = f"unknown-{operation_type}"
+        intent = {"operation": operation_type}
+        state.prepare_operation(
+            operation_id=operation_id,
+            origin_id=origin.id,
+            target_instance_key="instance-b",
+            target_repository_scope="org",
+            operation_type=operation_type,
+            mapping_version=1,
+            baseline_id=None,
+            intent=intent,
+        )
+        state.claim_operation(operation_id, "executor")
+        state.mark_outcome_unknown(operation_id, "synthetic lost response")
+        reconciled = state.resolve_unknown_operation(
+            operation_id,
+            target_global_id="team-7",
+            target_issue_index=None,
+            observed_intent=intent,
+            evidence="synthetic target lookup",
+        )
+        assert reconciled.status == "confirmed"
+
+    issue = state.register_origin(
+        OriginKey("instance-a", "org/repo", "issue", "issue-1", issue_index=1)
+    )
+    state.add_object_mapping(
+        issue.id,
+        "instance-b",
+        "org/repo",
+        "71",
+        target_issue_index=8,
+    )
+    comment = state.register_origin(
+        OriginKey(
+            "instance-a",
+            "org/repo",
+            "comment",
+            "comment-1",
+            issue_index=1,
+            parent_origin_id=issue.id,
+        )
+    )
+    state.add_object_mapping(
+        comment.id,
+        "instance-b",
+        "org/repo",
+        "101",
+        target_issue_index=8,
+    )
+
+    for operation_type, mapped_origin, target_global_id in (
+        ("update_issue", issue, "71"),
+        ("update_comment", comment, "101"),
+    ):
+        operation_id = f"unknown-{operation_type}"
+        intent = {"operation": operation_type}
+        state.prepare_operation(
+            operation_id=operation_id,
+            origin_id=mapped_origin.id,
+            target_instance_key="instance-b",
+            target_repository_scope="org/repo",
+            operation_type=operation_type,
+            mapping_version=1,
+            baseline_id=None,
+            intent=intent,
+        )
+        state.claim_operation(operation_id, "executor")
+        state.mark_outcome_unknown(operation_id, "synthetic lost response")
+        reconciled = state.resolve_unknown_operation(
+            operation_id,
+            target_global_id=target_global_id,
+            target_issue_index=8,
+            observed_intent=intent,
+            evidence="synthetic target lookup",
+        )
+        assert reconciled.status == "confirmed"
+
+    connection = sqlite3.connect(state.path)
+    assert connection.execute(
+        "SELECT count(*) FROM object_mappings WHERE origin_id = ?", (origin.id,)
+    ).fetchone() == (1,)
+    connection.close()
+
+
+def test_populated_v3_database_migrates_to_v4_without_losing_references(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "populated-v3.sqlite3"
+    connection = sqlite3.connect(database)
+    connection.executescript(MIGRATIONS[1])
+    connection.execute("INSERT INTO schema_migrations VALUES (1, '2026-11-20T00:00:00Z')")
+    connection.executescript(MIGRATIONS[2])
+    connection.execute("INSERT INTO schema_migrations VALUES (2, '2026-11-20T00:01:00Z')")
+    connection.executescript(MIGRATIONS[3])
+    connection.execute("INSERT INTO schema_migrations VALUES (3, '2026-11-20T00:02:00Z')")
+    connection.execute("PRAGMA user_version = 3")
+    connection.executemany(
+        "INSERT INTO instances VALUES (?, ?, ?, ?, ?)",
+        [
+            ("instance-a", "A", "http://a.invalid", "install-a", "2026-11-20T00:00:00Z"),
+            ("instance-b", "B", "http://b.invalid", "install-b", "2026-11-20T00:00:00Z"),
+        ],
+    )
+    connection.execute(
+        "INSERT INTO object_origins VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "origin-issue",
+            "instance-a",
+            "org/repo",
+            "issue",
+            "17",
+            3,
+            None,
+            None,
+            "2026-11-20T00:00:00Z",
+        ),
+    )
+    connection.execute(
+        "INSERT INTO object_origins VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "origin-comment",
+            "instance-a",
+            "org/repo",
+            "comment",
+            "19",
+            None,
+            "origin-issue",
+            None,
+            "2026-11-20T00:00:00Z",
+        ),
+    )
+    connection.execute(
+        "INSERT INTO object_mappings "
+        "(origin_id, target_instance_key, target_repository_scope, target_object_type, "
+        "target_global_id, target_issue_index, target_native_created_at, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("origin-issue", "instance-b", "org/repo", "issue", "71", 8, None, "2026-11-20T00:00:00Z"),
+    )
+    connection.execute(
+        "INSERT INTO transfer_rounds VALUES (?, ?, ?, ?, ?)",
+        ("round-1", "instance-a", "instance-b", "selection", "2026-11-20T00:00:00Z"),
+    )
+    connection.execute(
+        "INSERT INTO baselines VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "baseline-1",
+            "round-1",
+            "origin-issue",
+            "default",
+            1,
+            "{}",
+            "{}",
+            "{}",
+            1,
+            None,
+            None,
+            "2026-11-20T00:00:00Z",
+            "2026-11-20T00:00:00Z",
+        ),
+    )
+    connection.execute(
+        "INSERT INTO operations "
+        "(operation_id, origin_id, target_instance_key, target_repository_scope, operation_type, "
+        "mapping_version, baseline_id, intent_json, intent_hash, status, target_global_id, "
+        "target_issue_index, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "op-1",
+            "origin-issue",
+            "instance-b",
+            "org/repo",
+            "update_issue",
+            1,
+            "baseline-1",
+            "{}",
+            "a" * 64,
+            "confirmed",
+            "71",
+            8,
+            "2026-11-20T00:00:00Z",
+            "2026-11-20T00:00:00Z",
+        ),
+    )
+    connection.execute(
+        "INSERT INTO operation_events (operation_id, from_status, to_status, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        ("op-1", "executing", "confirmed", "2026-11-20T00:00:00Z"),
+    )
+    connection.execute(
+        "INSERT INTO conflicts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "conflict-1",
+            "op-1",
+            "synthetic",
+            "retained",
+            "{}",
+            "resolved",
+            "2026-11-20T00:00:00Z",
+            "2026-11-20T00:01:00Z",
+        ),
+    )
+    digest = "b" * 64
+    connection.execute(
+        "INSERT INTO transport_manifests VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "manifest-1",
+            digest,
+            "round-1",
+            "exported",
+            "forward",
+            "instance-a",
+            "instance-b",
+            None,
+            None,
+            "{}",
+            "2026-11-20T00:00:00Z",
+        ),
+    )
+    connection.execute(
+        "INSERT INTO transport_manifest_objects VALUES (?, ?, ?)",
+        ("manifest-1", "origin-comment", "{}"),
+    )
+    connection.commit()
+    connection.close()
+
+    migrated = StateStore(database)
+    assert migrated.get_origin("origin-comment").key.parent_origin_id == "origin-issue"
+    assert migrated.get_object_mapping("origin-issue", "instance-b").target_global_id == "71"
+    assert migrated.get_baseline("baseline-1").origin_id == "origin-issue"
+    assert migrated.get_operation("op-1").target_global_id == "71"
+    connection = sqlite3.connect(database)
+    assert connection.execute(
+        "SELECT count(*) FROM operation_events WHERE operation_id = 'op-1'"
+    ).fetchone() == (1,)
+    assert connection.execute(
+        "SELECT count(*) FROM conflicts WHERE conflict_id = 'conflict-1'"
+    ).fetchone() == (1,)
+    assert connection.execute(
+        "SELECT count(*) FROM transport_manifest_objects WHERE manifest_id = 'manifest-1'"
+    ).fetchone() == (1,)
     assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     connection.close()
 

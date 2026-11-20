@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -239,5 +239,89 @@ CREATE TABLE operations_v3 (
 INSERT INTO operations_v3 SELECT * FROM operations;
 DROP TABLE operations;
 ALTER TABLE operations_v3 RENAME TO operations;
+""",
+    4: """
+CREATE TABLE object_origins_backup AS SELECT * FROM object_origins;
+DROP TABLE object_origins;
+
+CREATE TABLE object_origins (
+    origin_id TEXT PRIMARY KEY,
+    origin_instance_key TEXT NOT NULL REFERENCES instances(instance_key),
+    origin_repository_scope TEXT NOT NULL,
+    object_type TEXT NOT NULL CHECK (
+        object_type IN ('issue', 'comment', 'organization', 'team', 'repository')
+    ),
+    origin_global_id TEXT NOT NULL,
+    origin_issue_index INTEGER,
+    parent_origin_id TEXT REFERENCES object_origins(origin_id),
+    origin_created_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (
+        origin_instance_key, origin_repository_scope, object_type, origin_global_id
+    )
+);
+
+INSERT INTO object_origins SELECT * FROM object_origins_backup;
+DROP TABLE object_origins_backup;
+
+CREATE TABLE object_mappings_backup AS SELECT * FROM object_mappings;
+DROP TABLE object_mappings;
+
+CREATE TABLE object_mappings (
+    mapping_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    origin_id TEXT NOT NULL REFERENCES object_origins(origin_id),
+    target_instance_key TEXT NOT NULL REFERENCES instances(instance_key),
+    target_repository_scope TEXT NOT NULL,
+    target_object_type TEXT NOT NULL CHECK (
+        target_object_type IN ('issue', 'comment', 'organization', 'team', 'repository')
+    ),
+    target_global_id TEXT NOT NULL,
+    target_issue_index INTEGER,
+    target_native_created_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (origin_id, target_instance_key),
+    UNIQUE (
+        target_instance_key, target_repository_scope, target_object_type, target_global_id
+    )
+);
+
+INSERT INTO object_mappings SELECT * FROM object_mappings_backup;
+DROP TABLE object_mappings_backup;
+
+CREATE TABLE operations_backup AS SELECT * FROM operations;
+DROP TABLE operations;
+
+CREATE TABLE operations (
+    operation_id TEXT PRIMARY KEY,
+    origin_id TEXT NOT NULL REFERENCES object_origins(origin_id),
+    target_instance_key TEXT NOT NULL REFERENCES instances(instance_key),
+    target_repository_scope TEXT NOT NULL,
+    operation_type TEXT NOT NULL CHECK (
+        operation_type IN (
+            'create_issue', 'create_comment', 'update_issue', 'update_comment',
+            'create_organization', 'create_team', 'create_repository',
+            'assign_team_repository', 'add_team_member', 'push_git_bundle'
+        )
+    ),
+    mapping_version INTEGER NOT NULL CHECK (mapping_version > 0),
+    baseline_id TEXT REFERENCES baselines(baseline_id),
+    intent_json TEXT NOT NULL,
+    intent_hash TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN (
+            'prepared', 'blocked_parent', 'executing', 'outcome_unknown',
+            'confirmed', 'conflict', 'failed'
+        )
+    ),
+    executor_id TEXT,
+    target_global_id TEXT,
+    target_issue_index INTEGER,
+    error_reason TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+INSERT INTO operations SELECT * FROM operations_backup;
+DROP TABLE operations_backup;
 """,
 }
