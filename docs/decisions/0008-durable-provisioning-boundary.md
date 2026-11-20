@@ -24,6 +24,8 @@ The service follows these rules:
 - Prepare and durably commit the intent before calling Gitea.
 - Perform the remote call outside the SQLite transaction.
 - Atomically commit target mapping and `confirmed` after a usable response.
+- Re-read a confirmed organization, repository, or team before dependent writes and require its
+  live stable ID and supported properties to match the immutable local mapping.
 - Fail closed on an existing target collision without an immutable mapping.
 - Mark dependent operations `blocked_parent` until their parent mapping is confirmed.
 - Verify the complete expected team/unit mapping; this proof covers `repo.code` and `repo.issues`.

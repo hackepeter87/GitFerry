@@ -135,7 +135,7 @@ def _git_remote(
         if command == "push":
             args.extend(["--mirror", url])
         else:
-            args.append(url)
+            args.extend(["--refs", url])
         result = subprocess.run(args, cwd=cwd, env=env, check=True, capture_output=True, text=True)
         return {
             ref: sha

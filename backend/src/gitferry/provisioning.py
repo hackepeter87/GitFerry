@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from gitferry.gitea_provisioning import (
+    ProvisioningTargetConflict,
     verify_account,
     verify_organization,
     verify_repository,
@@ -398,20 +399,47 @@ def _mapping_absent(state: StateStore, origin_id: str, target_instance_key: str)
     return False
 
 
-def _reject_unbound_target(
+def _verify_or_reject_target(
     state: StateStore,
     operation: OperationRecord,
     *,
     kind: str,
     name: str,
     lookup: Callable[[], Mapping[str, Any] | None],
+    verify: Callable[[Mapping[str, Any]], str],
 ) -> None:
     current = state.get_operation(operation.operation_id)
-    if current.status == "confirmed":
-        return
     if current.status in ("outcome_unknown", "conflict"):
         raise OperationBlocked(f"{kind} operation is {current.status}; reconciliation is required")
     observed = lookup()
+    if current.status == "confirmed":
+        expected = _mapped(state, operation.origin_id, operation.target_instance_key, kind)
+        reason = f"mapped target {kind} {name} no longer matches its confirmed identity"
+        try:
+            observed_id = None if observed is None else verify(observed)
+        except ProvisioningTargetConflict as exc:
+            _record_target_verification_conflict(
+                state,
+                operation,
+                kind=kind,
+                name=name,
+                expected_id=expected.target_global_id,
+                observed_id=str(observed.get("id")) if observed is not None else None,
+                reason=reason,
+            )
+            raise OperationBlocked(reason) from exc
+        if observed_id != expected.target_global_id:
+            _record_target_verification_conflict(
+                state,
+                operation,
+                kind=kind,
+                name=name,
+                expected_id=expected.target_global_id,
+                observed_id=observed_id,
+                reason=reason,
+            )
+            raise OperationBlocked(reason)
+        return
     if observed is None:
         return
     observed_id = observed.get("id")
@@ -427,6 +455,32 @@ def _reject_unbound_target(
         },
     )
     raise OperationBlocked(reason)
+
+
+def _record_target_verification_conflict(
+    state: StateStore,
+    operation: OperationRecord,
+    *,
+    kind: str,
+    name: str,
+    expected_id: str,
+    observed_id: str | None,
+    reason: str,
+) -> None:
+    evidence = {
+        "kind": kind,
+        "name": name,
+        "expected_target_id": expected_id,
+        "observed_target_id": observed_id,
+    }
+    fingerprint = hashlib.sha256(canonical_json(evidence).encode()).hexdigest()[:24]
+    state.record_conflict(
+        f"mapped-target-{operation.operation_id}-{fingerprint}",
+        operation_id=operation.operation_id,
+        conflict_type="mapped_target_mismatch",
+        reason=reason,
+        evidence=evidence,
+    )
 
 
 def provision_selected_repository(
@@ -456,12 +510,13 @@ def provision_selected_repository(
     completed: list[OperationRecord] = []
 
     try:
-        _reject_unbound_target(
+        _verify_or_reject_target(
             state,
             prepared.organization,
             kind="organization",
             name=plan.organization,
             lookup=lambda: client.find_organization(plan.organization),
+            verify=lambda value: verify_organization(value, plan.organization),
         )
 
         def create_organization(_: dict[str, Any]) -> TargetConfirmation:
@@ -471,12 +526,13 @@ def provision_selected_repository(
         completed.append(executor.execute(prepared.organization.operation_id, create_organization))
 
         _ensure_dependencies(state, prepared.repository, (prepared.organization.origin_id,))
-        _reject_unbound_target(
+        _verify_or_reject_target(
             state,
             prepared.repository,
             kind="repository",
             name=plan.repository,
             lookup=lambda: client.find_repository(plan.repository),
+            verify=lambda value: verify_repository(value, plan.repository, True),
         )
         repository_name = plan.repository.split("/", 1)[1]
 
@@ -495,12 +551,18 @@ def provision_selected_repository(
             def find_team(current: ProvisioningTeam = team.plan) -> Mapping[str, Any] | None:
                 return client.find_team(plan.organization, current.name)
 
-            _reject_unbound_target(
+            def verify_current_team(
+                value: Mapping[str, Any], current: ProvisioningTeam = team.plan
+            ) -> str:
+                return verify_team(value, current.name, current.permission)
+
+            _verify_or_reject_target(
                 state,
                 team.create,
                 kind="team",
                 name=f"{plan.organization}/{team.plan.name}",
                 lookup=find_team,
+                verify=verify_current_team,
             )
 
             def create_team(

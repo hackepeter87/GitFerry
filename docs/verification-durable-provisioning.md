@@ -28,7 +28,7 @@ control repository, and safe replay.
 |---|---|---|---|
 | Structure | 1 organization, 1 repository, 2 planned teams plus required `Owners` | Counts matched | passed |
 | Operations | All 9 confirm | All 9 confirmed | passed |
-| Refs | Exact names and object IDs | Matched; replay changed no refs | passed |
+| Refs | Exact branch and annotated-tag names/object IDs | Matched; replay changed no refs | passed |
 | Permissions | Reader clone/no push; writer clone/push; outsider denied | Matched over Git smart HTTP | passed |
 | Accounts | No user transfer | No accounts created; technical owner remained separate | passed |
 | Control | Unselected repository unchanged | Unchanged | passed |
@@ -46,5 +46,6 @@ reconciliation, LDAP/AD support, or a manifest v1/v2 change. Historical timestam
 comment PATCH race remain unchanged. The integration evidence maps to
 `tests/integration/provisioning_probe.py`, with the 18/18 mandatory checks recorded by the run
 report. Unit coverage supplies schema v4 migration, collision, parent dependency, journal, and
-unknown-outcome transition checks. Generated field-level details remain in
-`integration-results/report.json`.
+unknown-outcome transition checks. It also rejects a same-name repository whose live stable ID no
+longer matches the confirmed mapping before any dependent permission write. Generated field-level
+details remain in `integration-results/report.json`.

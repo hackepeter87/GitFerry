@@ -42,7 +42,9 @@ class FakeProvisioningClient:
     def create_organization(self, username: str, visibility: str) -> dict[str, Any]:
         self.organizations += 1
         assert visibility == "private"
-        return {"id": 101, "username": username, "visibility": "private"}
+        created = {"id": 101, "username": username, "visibility": "private"}
+        self.existing_organizations[username] = created
+        return created
 
     def find_organization(self, username: str) -> dict[str, Any] | None:
         self.remote_reads += 1
@@ -51,6 +53,7 @@ class FakeProvisioningClient:
     def create_repository(self, organization: str, name: str, private: bool) -> dict[str, Any]:
         self.repositories += 1
         assert (organization, name, private) == ("access-lab", "selected-private", True)
+        self.existing_repositories[self.repository["full_name"]] = self.repository
         if self.fail_after_repository:
             raise OutcomeUnknownError("accepted create but response was lost")
         return self.repository
@@ -61,7 +64,7 @@ class FakeProvisioningClient:
 
     def create_team(self, organization: str, name: str, permission: str) -> dict[str, Any]:
         self.teams += 1
-        return {
+        created = {
             "id": 300 + self.teams,
             "name": name,
             "permission": permission,
@@ -69,6 +72,8 @@ class FakeProvisioningClient:
             "includes_all_repositories": False,
             "units_map": {"repo.code": permission, "repo.issues": permission},
         }
+        self.existing_teams[(organization, name)] = created
+        return created
 
     def find_team(self, organization: str, name: str) -> dict[str, Any] | None:
         self.remote_reads += 1
@@ -335,11 +340,12 @@ def test_same_origin_and_intent_can_target_two_instances(tmp_path: Path) -> None
         }
     )
     first = ProvisioningPlan(**{**plan.__dict__, "teams": (), "bundle": None})
-    client = FakeProvisioningClient()
+    client_b = FakeProvisioningClient()
     with OperationExecutor(state, "target-b") as executor:
-        result_b = provision_selected_repository(state, executor, client, first)
+        result_b = provision_selected_repository(state, executor, client_b, first)
+    client_c = FakeProvisioningClient()
     with OperationExecutor(state, "target-c") as executor:
-        result_c = provision_selected_repository(state, executor, client, second)
+        result_c = provision_selected_repository(state, executor, client_c, second)
     assert {operation.target_instance_key for operation in result_b.operations} == {"instance-b"}
     assert {operation.target_instance_key for operation in result_c.operations} == {"instance-c"}
     assert {operation.operation_id for operation in result_b.operations}.isdisjoint(
@@ -413,6 +419,45 @@ def test_same_name_unbound_target_is_a_durable_conflict_without_post(tmp_path: P
     organization = next(row for row in rows if row["operation_type"] == "create_organization")
     assert organization["status"] == "conflict"
     assert any(row["status"] == "blocked_parent" for row in rows)
+
+
+def test_replay_rejects_same_name_repository_with_a_different_target_id(
+    tmp_path: Path,
+) -> None:
+    state, plan = configured(tmp_path)
+    client = FakeProvisioningClient()
+    bundle = FakeBundlePusher()
+    structure_only = ProvisioningPlan(
+        **{
+            **plan.__dict__,
+            "teams": (),
+            "bundle": None,
+        }
+    )
+    with OperationExecutor(state, "first") as executor:
+        provision_selected_repository(state, executor, client, structure_only)
+
+    client.existing_repositories[plan.repository] = {
+        **client.repository,
+        "id": 999,
+    }
+    with OperationExecutor(state, "replacement-replay") as executor:
+        with pytest.raises(OperationBlocked, match="confirmed identity"):
+            provision_selected_repository(state, executor, client, plan, bundle_pusher=bundle)
+
+    assert (client.assignments, client.memberships, bundle.pushes) == (0, 0, 0)
+    with state._connect() as connection:
+        operation_id = connection.execute(
+            "SELECT operation_id FROM operations WHERE operation_type = 'create_repository'"
+        ).fetchone()["operation_id"]
+    evidence = state.operation_evidence(operation_id)
+    assert evidence["conflicts"][-1]["type"] == "mapped_target_mismatch"
+    assert evidence["conflicts"][-1]["evidence"] == {
+        "kind": "repository",
+        "name": plan.repository,
+        "expected_target_id": "201",
+        "observed_target_id": "999",
+    }
 
 
 def test_remote_success_before_local_confirmation_leaves_no_mapping(tmp_path: Path) -> None:

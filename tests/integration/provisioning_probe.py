@@ -74,12 +74,16 @@ def _seed_source_repository() -> Path:
     (repository / "README.md").write_text("# Durable provisioning proof\n", encoding="utf-8")
     run(["git", "add", "README.md"], cwd=repository)
     run(["git", "commit", "-m", "Seed durable provisioning proof"], cwd=repository)
+    run(
+        ["git", "tag", "-a", "provisioning-v1", "-m", "Annotated provisioning proof"],
+        cwd=repository,
+    )
     source_repository_url = f"{SOURCE_URL}/{REPOSITORY}.git"
     if (
         _git_with_password(
             "gitferry-admin",
             os.environ["GITFERRY_IT_ADMIN_PASSWORD"],
-            ["push", source_repository_url, "main"],
+            ["push", source_repository_url, "main", "refs/tags/provisioning-v1"],
             cwd=repository,
         ).returncode
         != 0
