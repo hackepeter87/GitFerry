@@ -20,11 +20,14 @@ REQUIRED_IDS = {
     "oci-runtime",
     "admin-auth",
     "gitea-connections",
+    "transfer-plan-execution",
+    "content-inventory-plan",
     "git-refs-history",
     "git-lfs",
     "git-wiki",
     "structure-rights",
     "identity-bindings",
+    "auth-source-bootstrap",
     "directory-integration",
     "issues",
     "labels",
@@ -49,6 +52,11 @@ REQUIRED_IDS = {
     "install-operations-docs",
     "browser-acceptance",
     "release-candidate",
+}
+EXPLICIT_GAP_OWNERS = {
+    "transfer-plan-execution": ("0.2.0", "9"),
+    "auth-source-bootstrap": ("0.3.0", "13"),
+    "content-inventory-plan": ("0.4.0", "17"),
 }
 OWNER_RE = re.compile(
     r"^\[#(?P<number>\d+)\]"
@@ -97,6 +105,21 @@ def test_matrix_local_evidence_links_resolve() -> None:
         assert links, row
         for link in links:
             assert (MATRIX.parent / link).resolve().exists(), (row["ID"], link)
+
+
+def test_matrix_does_not_overstate_label_return_and_names_foundational_gap_owners() -> None:
+    rows = {row["ID"].strip("`"): row for row in matrix_rows()}
+    labels = rows["labels"]
+
+    assert labels["Implementation"] == "not-implemented"
+    assert labels["First import"] == "supported-with-limits"
+    assert labels["Return"] == "not-checked"
+    for capability_id, (release, issue) in EXPLICIT_GAP_OWNERS.items():
+        row = rows[capability_id]
+        assert row["Target release"] == release
+        assert row["Owner"] == (
+            f"[#{issue}](https://github.com/hackepeter87/GitFerry/issues/{issue})"
+        )
 
 
 def test_matrix_keeps_known_boundaries_and_exact_integration_pin_visible() -> None:
