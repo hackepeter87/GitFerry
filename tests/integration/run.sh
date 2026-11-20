@@ -99,6 +99,10 @@ PYTHONPATH="$root/backend/src" "$root/.venv/bin/pytest" -q \
   "$root/backend/tests/test_transport_manifest_v2.py" \
   "$root/backend/tests/test_transport_state.py" \
   "$root/backend/tests/test_comment_operations.py" \
+  "$root/backend/tests/test_state_store.py" \
+  "$root/backend/tests/test_git_bundle.py" \
+  "$root/backend/tests/test_gitea_provisioning.py" \
+  "$root/backend/tests/test_provisioning.py" \
   >"$results/work/contract-gate.log" 2>&1
 touch "$results/work/contract-gate.passed"
 

@@ -36,6 +36,27 @@ def complete_probe_report() -> dict[str, object]:
         "portable_transport_roundtrip": {
             "assertions": {"separate_networks_block_cross_gitea": True}
         },
+        "durable_provisioning": {
+            "status": "passed",
+            "assertions": {
+                "all_operations_confirmed": True,
+                "replay_all_operations_confirmed": True,
+                "expected_private_structure_created": True,
+                "replay_created_no_structure": True,
+                "bundle_refs_match_source": True,
+                "replay_changed_no_refs": True,
+                "functional_access_matches_plan": True,
+                "control_repository_untouched": True,
+                "no_accounts_created": True,
+                "crash_remote_post_succeeded": True,
+                "crash_restart_is_outcome_unknown": True,
+                "crash_replay_sent_no_second_post": True,
+                "lost_response_remote_post_succeeded": True,
+                "lost_response_is_outcome_unknown": True,
+                "new_packaging_cannot_bypass_unknown": True,
+                "credentials_absent_from_plan_and_state": True,
+            },
+        },
     }
     for section in (
         "git_bundle",

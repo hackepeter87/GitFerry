@@ -158,6 +158,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         "git_bundle",
         "metadata",
         "identity_and_permissions",
+        "durable_provisioning",
         "metadata_roundtrip",
         "persistent_state_restart",
         "portable_transport_roundtrip",
@@ -182,6 +183,28 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
             "backend/tests/test_transport_manifest_v2.py::"
             "test_existing_v1_examples_validate_without_byte_or_digest_change",
             "focused contract gate",
+        ),
+        (
+            "durable_structure_and_bundle_application_service",
+            _all_true(report, "durable_provisioning.assertions"),
+            "tests/integration/provisioning_probe.py",
+            "durable_provisioning.assertions",
+        ),
+        (
+            "provisioning_crash_and_lost_response_halt_replay",
+            all(
+                _value(report, f"durable_provisioning.assertions.{name}") is True
+                for name in (
+                    "crash_remote_post_succeeded",
+                    "crash_restart_is_outcome_unknown",
+                    "crash_replay_sent_no_second_post",
+                    "lost_response_remote_post_succeeded",
+                    "lost_response_is_outcome_unknown",
+                    "new_packaging_cannot_bypass_unknown",
+                )
+            ),
+            "tests/integration/provisioning_probe.py",
+            "durable_provisioning.crash_probe and lost_response_probe",
         ),
         (
             "changed_a_comment_updates_same_a_comment",
