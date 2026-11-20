@@ -63,16 +63,21 @@ def test_injected_failure_still_cleans_and_uploads_diagnostics() -> None:
     by_name = {step["name"]: step for step in steps}
     integration = by_name["Run Gitea integration"]
     failure_contract = by_name["Run integration failure contract"]
+    diagnostics = by_name["Capture final workflow diagnostics"]
     cleanup = by_name["Clean integration resources"]
     record_cleanup = by_name["Record workflow cleanup result"]
     upload = by_name["Upload integration results"]
 
     assert "inject_integration_failure" in integration["env"]["GITFERRY_IT_INJECT_FAILURE"]
     assert "inject_integration_timeout" in integration["env"]["GITFERRY_IT_INJECT_FAILURE"]
+    assert "GITFERRY_IT_INJECT_TIMEOUT_SECONDS" in integration["env"]
     assert "inject_integration_timeout" in integration["timeout-minutes"]
     assert "inject_integration_failure" in failure_contract["if"]
     assert "inject_integration_timeout" in failure_contract["if"]
     assert failure_contract["timeout-minutes"] == 10
+    assert diagnostics["if"] == "always()"
+    assert diagnostics["timeout-minutes"] == 3
+    assert diagnostics["run"] == "make test-integration-diagnostics"
     assert cleanup["if"] == "always()"
     assert cleanup["timeout-minutes"] == 5
     assert record_cleanup["if"] == "always()"
@@ -80,6 +85,9 @@ def test_injected_failure_still_cleans_and_uploads_diagnostics() -> None:
     assert "record-workflow-cleanup" in record_cleanup["run"]
     assert upload["if"] == "always()"
     assert upload["timeout-minutes"] == 5
-    assert steps.index(cleanup) < steps.index(record_cleanup) < steps.index(upload)
+    ordered_steps = (diagnostics, cleanup, record_cleanup, upload)
+    assert [steps.index(step) for step in ordered_steps] == sorted(
+        steps.index(step) for step in ordered_steps
+    )
     assert upload["with"]["if-no-files-found"] == "error"
     assert upload["with"]["retention-days"] == 14

@@ -55,6 +55,8 @@ jobs:
     timeout-minutes: 55
     env:
       GITFERRY_IT_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+      GITFERRY_IT_PROJECT: gitferry-it-gha-${{ github.run_id }}-${{ github.run_attempt }}
+      GITFERRY_IT_RUNTIME_IMAGE: gitferry-it-runtime:gha-${{ github.run_id }}-${{ github.run_attempt }}
       GITFERRY_CI_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Check out repository
@@ -75,14 +77,19 @@ jobs:
       - name: Run integration doctor
         run: make doctor
       - name: Run Gitea integration
-        timeout-minutes: ${{ (github.event_name == 'workflow_dispatch' && inputs.inject_integration_timeout) && 1 || 20 }}
+        timeout-minutes: ${{ (github.event_name == 'workflow_dispatch' && inputs.inject_integration_timeout) && 5 || 20 }}
         env:
           GITFERRY_IT_INJECT_FAILURE: ${{ (github.event_name == 'workflow_dispatch' && inputs.inject_integration_timeout) && 'timeout-after-environment-start' || (github.event_name == 'workflow_dispatch' && inputs.inject_integration_failure) && 'after-environment-start' || '' }}
+          GITFERRY_IT_INJECT_TIMEOUT_SECONDS: ${{ (github.event_name == 'workflow_dispatch' && inputs.inject_integration_timeout) && '30' || '' }}
         run: make test-integration
       - name: Run integration failure contract
         if: ${{ success() && !(github.event_name == 'workflow_dispatch' && inputs.inject_integration_failure) && !(github.event_name == 'workflow_dispatch' && inputs.inject_integration_timeout) }}
         timeout-minutes: 10
         run: make test-integration-failure-contract
+      - name: Capture final workflow diagnostics
+        if: always()
+        timeout-minutes: 3
+        run: make test-integration-diagnostics
       - name: Clean integration resources
         id: cleanup
         if: always()

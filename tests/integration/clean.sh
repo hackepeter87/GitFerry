@@ -32,6 +32,15 @@ clean_image_file() {
 
 if [ -n "${GITFERRY_IT_PROJECT:-}" ]; then
   clean_project "$GITFERRY_IT_PROJECT"
+  if [ -n "${GITFERRY_IT_RUNTIME_IMAGE:-}" ]; then
+    case "$GITFERRY_IT_RUNTIME_IMAGE" in
+      gitferry-it-runtime:*) ;;
+      *) echo "refusing cleanup of non-integration image: $GITFERRY_IT_RUNTIME_IMAGE" >&2; exit 1 ;;
+    esac
+    if docker image inspect "$GITFERRY_IT_RUNTIME_IMAGE" >/dev/null 2>&1; then
+      docker image rm "$GITFERRY_IT_RUNTIME_IMAGE"
+    fi
+  fi
   exit 0
 fi
 
