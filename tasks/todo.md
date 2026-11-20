@@ -10,5 +10,7 @@
 - [x] Run complete gates and update evidence documentation.
 - [x] Expand the product capability matrix with test, acceptance, dependency and owner fields.
 - [x] Add a machine-readable contract test for matrix completeness and evidence links.
-- [ ] Review, run hosted gates and integrate Issue #3.
-- [ ] Perform the integrated 0.1.0 milestone acceptance in Issue #5.
+- [x] Review, run hosted gates and integrate Issue #3.
+- [x] Execute the context-free resume discovery proof for Issue #5.
+- [x] Verify current integrated-main hosted gates and repository rules.
+- [ ] Review, integrate and close the 0.1.0 milestone acceptance report.

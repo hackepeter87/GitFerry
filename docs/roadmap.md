@@ -29,6 +29,11 @@ The capability matrix uses one owning issue per row. A current bounded implement
 remain `supported-with-limits` while its owner delivers or accepts the complete product contract in
 the target release; the roadmap link is not evidence that the future capability already exists.
 
+The integrated foundation through `dedc0778677f1e88eaf1c0baebfee7a1ead0966d`, its two reviewed
+delivery cycles, hosted checks, repository rules and controlled resume exercise are classified in
+the [0.1.0 foundation acceptance report](verification-0.1.0-foundation.md). This milestone is an
+engineering foundation and does not claim the 0.2.0 provisioning user flow or a stable release.
+
 ## 0.2.0 — First operable provisioning flow
 
 Deliver persistent OCI operation, protected administration, secret-reference/TLS connection

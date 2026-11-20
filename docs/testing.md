@@ -72,6 +72,27 @@ evidence required for `First import` or `Return`. When evidence conflicts or is 
 is downgraded to `not-checked`, `blocked`, `not-implemented`, or a bounded status; the owning issue is
 updated instead of treating the total number of passing tests as proof.
 
+## Executed 0.1.0 foundation acceptance: 2026-11-20
+
+The exact integrated-main commit `dedc0778677f1e88eaf1c0baebfee7a1ead0966d` passed hosted run
+`44808991767`. Its `quality` job completed successfully, and its `gitea-integration` job used a clean
+Linux/x86_64 checkout, Docker Linux/amd64 without observed emulation, and both pinned Gitea 1.27.2
+images. All 19 report-contract checks passed. The deliberately failed inner run exited 86, retained
+diagnostics, and both the run-local and outer cleanup passed.
+
+A context-free resume probe first classified its unavailable GitHub network as blocked rather than
+inferring success. On an explicitly authorized read-only retry it discovered the existing
+`release/0.1.0-acceptance` branch, Issue #5 as the sole open milestone item, closed dependencies
+#1–#4, the exact integrated check run and active ruleset, and selected the existing work without
+creating a duplicate. Detailed local/hosted/configured/limited/unverified classifications are in
+[`verification-0.1.0-foundation.md`](verification-0.1.0-foundation.md).
+
+On the acceptance branch, `make doctor` passed on Darwin/arm64 with Docker Linux/arm64 29.9.3,
+`make test` passed 144 backend tests plus Ruff/format/MyPy and the frontend build, and
+`make test-clean` passed. The current acceptance branch did not rerun the full integration suite
+locally; the exact integrated baseline received the fresh hosted Linux integration and controlled
+failure runs described above.
+
 ## Report, diagnostics, and cleanup contract
 
 `integration-results/report.json` is the only machine-readable result contract. Its `execution`
