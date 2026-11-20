@@ -82,7 +82,10 @@ immutable Node 24 action pins. A separate cleanup step cannot turn an earlier fa
 The report binds a hosted run to its GitHub run/attempt, source SHA, tested checkout SHA, ref, event,
 workflow, job, clean Git checkout, platform, and resolved images. `workflow_dispatch` can inject the same deterministic
 failure so the overall hosted run is expected to be red while cleanup and artifact publication
-still execute.
+still execute. Its timeout probe uses a 30-second internal watchdog after environment startup; the
+five-minute Actions step timeout is only a backstop. An independent `always()` step captures any
+available run-scoped Compose diagnostics before outer cleanup, including when the primary report is
+partial or missing.
 
 ## Executed feasibility run: 2026-11-20
 

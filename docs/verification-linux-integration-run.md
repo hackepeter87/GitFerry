@@ -112,8 +112,10 @@ The `ubuntu-24.04` jobs use immutable Node 24 action commits, stable check conte
 `gitea-integration`, bounded runtimes, run/attempt-specific names, scoped cleanup, and an
 always-executed artifact upload. The positive PR run described above is actual hosted evidence.
 The workflow also exposes an explicit `inject_integration_failure` dispatch input; the deliberately
-red hosted dispatch and effective repository rules are recorded only after they have actually run
-and been queried. Therefore:
+red hosted dispatch and an internal-watchdog timeout dispatch are recorded only after they have
+actually run. The hard Actions step timeout remains a backstop; an `always()` diagnostic step runs
+before outer cleanup for partial-report cases. Effective repository rules are recorded only after
+they have been queried. Therefore:
 
 - locally executed: unit/report checks, controlled Docker failure, full two-Gitea integration;
 - Linux environment executed: Linux/arm64 Docker services and importer contexts on the local host;
