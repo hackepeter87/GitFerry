@@ -1,0 +1,20 @@
+apiVersion: gitferry.io/v1
+kind: InstanceBlueprint
+metadata:
+  name: source-lab
+spec:
+  gitea:
+    baseUrl: https://gitea-source.example.invalid
+    credentialSecretRef: secrets/gitea/source-admin-token
+    caSecretRef: trust/internal-lab-ca
+    expectedVersion: 1.27.2
+  authenticationSources:
+    - name: synthetic-directory
+      type: ldaps
+      directoryRealm: SOURCE-LAB
+      host: ldap-source.example.invalid
+      port: 636
+      userSearchBase: OU=People,DC=source,DC=example,DC=invalid
+      groupSearchBase: OU=Groups,DC=source,DC=example,DC=invalid
+      bindSecretRef: secrets/ldap/source-bind
+      caSecretRef: trust/internal-lab-ca

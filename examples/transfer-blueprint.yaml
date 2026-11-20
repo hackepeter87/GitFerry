@@ -1,0 +1,29 @@
+apiVersion: gitferry.io/v1
+kind: TransferBlueprint
+metadata:
+  name: bootstrap-selected
+spec:
+  mode: bootstrap
+  source:
+    instanceRef: source-lab
+  target:
+    instanceRef: target-lab
+  selection:
+    allRepositories: false
+    organizations: [ferry-lab]
+    repositories: [ferry-lab/selected-repo]
+  identity:
+    importAccounts: false
+    ambiguousMapping: require-manual-confirmation
+    mappings:
+      - sourceLogin: developer
+        sourceRealm: SOURCE-LAB
+        sourceExternalId: S-1-5-21-A-1001
+        sourceOuPath: OU=People,DC=a,DC=example,DC=invalid
+        targetLogin: developer
+        targetRealm: TARGET-LAB
+  permissions:
+    allowPrivilegeExpansion: false
+  validation:
+    onCollision: fail
+    verifySourceBaseline: true

@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gitferry"
+version = "0.1.0.dev0"
+description = "Verified foundation for controlled Gitea-to-Gitea transfers"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+dependencies = [
+  "fastapi==0.128.8",
+  "httpx==0.28.1",
+  "jsonschema[format]==4.25.1",
+  "pydantic==2.13.5",
+  "PyYAML==6.0.3",
+  "uvicorn[standard]==0.38.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy==1.19.1",
+  "pytest==8.4.2",
+  "ruff==0.17.6",
+]
+
+[project.scripts]
+gitferry = "gitferry.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["backend/src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["backend/tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/**" = ["S101"]
+"tests/integration/**" = ["S105", "S108", "S603"]
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+packages = ["gitferry"]
+mypy_path = "backend/src"
+disable_error_code = ["import-untyped"]
+
+[[tool.mypy.overrides]]
+module = ["jsonschema", "jsonschema.*", "yaml"]
+ignore_missing_imports = true
