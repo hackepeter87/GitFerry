@@ -77,9 +77,12 @@ successful cleanup, and zero remaining run-labeled containers, networks, volumes
 image. This is a test of failure handling; it is not a migrated operation.
 
 GitHub Actions job `gitea-integration` uses the same entry point on `ubuntu-24.04`, a run/attempt
-specific ID, a 30-minute job timeout, always-uploaded result directories, and an `always()` cleanup
-step. A separate cleanup step cannot turn an earlier failed step green. A workflow definition is
-not evidence that GitHub hosted it; actual execution status is recorded separately below.
+specific ID, a 55-minute job timeout with shorter bounded test/cleanup/upload steps, scoped cleanup before the always-executed result upload, and
+immutable Node 24 action pins. A separate cleanup step cannot turn an earlier failed step green.
+The report binds a hosted run to its GitHub run/attempt, source SHA, tested checkout SHA, ref, event,
+workflow, job, clean Git checkout, platform, and resolved images. `workflow_dispatch` can inject the same deterministic
+failure so the overall hosted run is expected to be red while cleanup and artifact publication
+still execute.
 
 ## Executed feasibility run: 2026-11-20
 
@@ -204,8 +207,18 @@ configured repository digest. No emulation was observed. The side-local GitFerry
 Linux containers; the orchestration host itself was not Linux.
 
 The controlled failure contract also passed locally. No run-labeled container, network, volume,
-or runtime image remained after either check. The Linux GitHub Actions workflow is prepared but
-has not been executed for this uncommitted workspace state. No commit or push was made. Exact
-run facts and the requirement-to-test map are in
+or runtime image remained after either check.
+
+GitHub-hosted run `44791010437` then passed for PR #39 on Ubuntu 24.04/Linux x86_64 with Docker
+Linux/amd64 28.0.4 and no emulation. `quality` passed in 1m22s and `gitea-integration` in 2m45s.
+The report bound PR source commit `b28915f967f0e4f599345bf8381635cae35e085e` separately from
+tested merge checkout and Git HEAD `7cc8cce97b4b47f93f546635a659783f561844bf`, recorded clean
+checkout state, resolved both Gitea containers to image ID
+`sha256:e8be8e1f776fe453b811d88887306b1d7bdf83577789465e5d186924014a57a6`, and passed the
+metadata contract plus every existing mandatory assertion. Both uploaded reports include the
+successful outer workflow cleanup. The controlled-failure report also records exit 86, diagnostics
+captured, phase `environment-start`, and successful run-local cleanup.
+This hosted run is distinct from both the earlier local Linux-container path and the post-merge
+`main` check still required for Issue #2. Exact run facts and the requirement-to-test map are in
 [`verification-linux-integration-run.md`](verification-linux-integration-run.md) and the generated
 `integration-results/report.json`.
