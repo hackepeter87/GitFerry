@@ -64,6 +64,32 @@ def complete_probe_report() -> dict[str, object]:
                 "credentials_absent_from_plan_and_state": True,
             },
         },
+        "oci_runtime": {
+            "status": "passed",
+            "assertions": {
+                "non_root_user": True,
+                "version_label": True,
+                "revision_label": True,
+                "license_label": True,
+                "healthcheck_present": True,
+                "graceful_stop_signal": True,
+                "fresh_volume_initialized": True,
+                "container_replacement_preserved_state": True,
+                "identity_binding_preserved": True,
+                "object_mapping_preserved": True,
+                "baseline_preserved": True,
+                "outcome_unknown_preserved": True,
+                "operation_events_preserved": True,
+                "conflict_preserved": True,
+                "package_and_work_files_preserved": True,
+                "graceful_shutdown_observed": True,
+                "forced_restart_recovered_sqlite": True,
+                "newer_schema_failed_closed": True,
+                "corrupt_database_failed_closed": True,
+                "read_only_directory_failed_closed": True,
+                "symlink_path_failed_closed": True,
+            },
+        },
     }
     for section in (
         "git_bundle",
@@ -183,6 +209,28 @@ def test_finalize_accepts_complete_required_evidence(tmp_path: Path) -> None:
     execution = json.loads((results / "report.json").read_text())["execution"]
     assert execution["status"] == "passed"
     assert execution["failed_or_not_executed_checks"] == []
+
+
+@pytest.mark.parametrize("mutation", ["missing", "false"])
+def test_finalize_rejects_incomplete_oci_assertions(tmp_path: Path, mutation: str) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    assertions = report["oci_runtime"]["assertions"]
+    if mutation == "missing":
+        del assertions["symlink_path_failed_closed"]
+    else:
+        assertions["symlink_path_failed_closed"] = False
+    results = prepare_results(tmp_path, report)
+
+    assert not module.finalize(
+        results,
+        run_status=0,
+        cleanup_status=0,
+        phase="probe-complete",
+        diagnostics_captured=False,
+    )
+    execution = json.loads((results / "report.json").read_text())["execution"]
+    assert "persistent_non_root_oci_runtime" in execution["failed_or_not_executed_checks"]
 
 
 def test_probe_contract_requires_every_top_level_probe(tmp_path: Path) -> None:

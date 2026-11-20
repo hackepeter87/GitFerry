@@ -7,6 +7,7 @@ import sqlite3
 import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
 
@@ -78,6 +79,93 @@ _MAPPING_PRESERVING_OPERATION_TYPES = frozenset(
     }
 )
 
+SchemaSignature = tuple[
+    tuple[
+        str,
+        tuple[tuple[Any, ...], ...],
+        tuple[tuple[Any, ...], ...],
+        tuple[tuple[str, int, str, int, tuple[tuple[Any, ...], ...]], ...],
+    ],
+    ...,
+]
+
+
+def _apply_migrations(connection: sqlite3.Connection, current: int) -> None:
+    for version in range(current + 1, SCHEMA_VERSION + 1):
+        if version in (3, 4):
+            # Rebuilding a referenced table is the documented SQLite migration
+            # pattern. Foreign keys must be disabled outside the transaction and
+            # are checked in full before the connection is accepted again.
+            connection.execute("PRAGMA foreign_keys = OFF")
+        applied_at = _now().replace("'", "''")
+        script = (
+            "BEGIN IMMEDIATE;\n"
+            + MIGRATIONS[version]
+            + f"\nINSERT INTO schema_migrations VALUES ({version}, '{applied_at}');\n"
+            + f"PRAGMA user_version = {version};\nCOMMIT;"
+        )
+        connection.executescript(script)
+        if version in (3, 4):
+            connection.execute("PRAGMA foreign_keys = ON")
+            violations = list(connection.execute("PRAGMA foreign_key_check"))
+            if violations:
+                raise StateStoreError(f"schema migration {version} left foreign-key violations")
+
+
+def _schema_signature(connection: sqlite3.Connection) -> SchemaSignature:
+    tables = tuple(
+        str(row[0])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
+    )
+    signature: list[
+        tuple[
+            str,
+            tuple[tuple[Any, ...], ...],
+            tuple[tuple[Any, ...], ...],
+            tuple[tuple[str, int, str, int, tuple[tuple[Any, ...], ...]], ...],
+        ]
+    ] = []
+    for table in tables:
+        quoted_table = '"' + table.replace('"', '""') + '"'
+        columns = tuple(
+            tuple(row) for row in connection.execute(f"PRAGMA table_xinfo({quoted_table})")
+        )
+        foreign_keys = tuple(
+            tuple(row) for row in connection.execute(f"PRAGMA foreign_key_list({quoted_table})")
+        )
+        indexes = []
+        for index_row in connection.execute(f"PRAGMA index_list({quoted_table})"):
+            index_name = str(index_row[1])
+            quoted_index = '"' + index_name.replace('"', '""') + '"'
+            index_columns = tuple(
+                tuple(row) for row in connection.execute(f"PRAGMA index_xinfo({quoted_index})")
+            )
+            indexes.append(
+                (
+                    index_name,
+                    int(index_row[2]),
+                    str(index_row[3]),
+                    int(index_row[4]),
+                    index_columns,
+                )
+            )
+        signature.append((table, columns, foreign_keys, tuple(indexes)))
+    return tuple(signature)
+
+
+@lru_cache(maxsize=1)
+def _expected_schema_signature() -> SchemaSignature:
+    connection = sqlite3.connect(":memory:", isolation_level=None)
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        _apply_migrations(connection, 0)
+        return _schema_signature(connection)
+    finally:
+        connection.close()
+
 
 class StateStore:
     """Short-transaction store; each method configures and closes its connection."""
@@ -127,27 +215,7 @@ class StateStore:
                         "database has tables but no recognized schema version; "
                         "refusing to replace it"
                     )
-            for version in range(current + 1, SCHEMA_VERSION + 1):
-                if version in (3, 4):
-                    # Rebuilding a referenced table is the documented SQLite migration
-                    # pattern. Foreign keys must be disabled outside the transaction and
-                    # are checked in full before the connection is accepted again.
-                    connection.execute("PRAGMA foreign_keys = OFF")
-                applied_at = _now().replace("'", "''")
-                script = (
-                    "BEGIN IMMEDIATE;\n"
-                    + MIGRATIONS[version]
-                    + f"\nINSERT INTO schema_migrations VALUES ({version}, '{applied_at}');\n"
-                    + f"PRAGMA user_version = {version};\nCOMMIT;"
-                )
-                connection.executescript(script)
-                if version in (3, 4):
-                    connection.execute("PRAGMA foreign_keys = ON")
-                    violations = list(connection.execute("PRAGMA foreign_key_check"))
-                    if violations:
-                        raise StateStoreError(
-                            f"schema migration {version} left foreign-key violations"
-                        )
+            _apply_migrations(connection, current)
         except Exception:
             if connection.in_transaction:
                 connection.rollback()
@@ -165,6 +233,35 @@ class StateStore:
                 ).lower(),
                 "synchronous": int(connection.execute("PRAGMA synchronous").fetchone()[0]),
             }
+        finally:
+            connection.close()
+
+    def validate_integrity(self) -> None:
+        """Fail unless persisted bytes and schema match the supported state contract."""
+
+        connection = self._connect()
+        try:
+            integrity = [str(row[0]) for row in connection.execute("PRAGMA integrity_check")]
+            if integrity != ["ok"]:
+                raise StateStoreError("state database integrity validation failed")
+
+            migration_versions = tuple(
+                int(row[0])
+                for row in connection.execute(
+                    "SELECT version FROM schema_migrations ORDER BY version"
+                )
+            )
+            if _schema_signature(connection) != _expected_schema_signature() or (
+                migration_versions != tuple(range(1, SCHEMA_VERSION + 1))
+            ):
+                raise StateStoreError(
+                    f"state database schema does not match version {SCHEMA_VERSION}"
+                )
+
+            if list(connection.execute("PRAGMA foreign_key_check")):
+                raise StateStoreError("state database foreign-key validation failed")
+        except sqlite3.DatabaseError as exc:
+            raise StateStoreError("state database integrity validation failed") from exc
         finally:
             connection.close()
 

@@ -19,6 +19,32 @@ PINNED_GITEA_IMAGE = (
     "d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd"
 )
 
+OCI_RUNTIME_ASSERTION_NAMES = frozenset(
+    {
+        "non_root_user",
+        "version_label",
+        "revision_label",
+        "license_label",
+        "healthcheck_present",
+        "graceful_stop_signal",
+        "fresh_volume_initialized",
+        "container_replacement_preserved_state",
+        "identity_binding_preserved",
+        "object_mapping_preserved",
+        "baseline_preserved",
+        "outcome_unknown_preserved",
+        "operation_events_preserved",
+        "conflict_preserved",
+        "package_and_work_files_preserved",
+        "graceful_shutdown_observed",
+        "forced_restart_recovered_sqlite",
+        "newer_schema_failed_closed",
+        "corrupt_database_failed_closed",
+        "read_only_directory_failed_closed",
+        "symlink_path_failed_closed",
+    }
+)
+
 
 def _run(args: list[str]) -> str:
     return subprocess.run(args, cwd=ROOT, check=True, text=True, capture_output=True).stdout.strip()
@@ -33,6 +59,7 @@ def _workspace_digest() -> str:
         ".github",
         "backend",
         "containers",
+        "deploy",
         "docs",
         "examples",
         "frontend/package-lock.json",
@@ -257,6 +284,15 @@ def _all_true(report: dict[str, Any], prefix: str) -> bool:
     return isinstance(value, dict) and bool(value) and all(item is True for item in value.values())
 
 
+def _all_required_true(report: dict[str, Any], prefix: str, required_names: frozenset[str]) -> bool:
+    value = _value(report, prefix)
+    return (
+        isinstance(value, dict)
+        and required_names.issubset(value)
+        and all(value[name] is True for name in required_names)
+    )
+
+
 def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[str, Any]]:
     """Map every requested regression to an executed assertion or focused unit test."""
 
@@ -270,6 +306,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         "portable_transport_roundtrip",
         "comment_transport_roundtrip",
         "openapi_and_migration",
+        "oci_runtime",
     )
     mandatory_sections_passed = (
         _value(report, "gitea.source") == "1.27.2"
@@ -295,6 +332,12 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
             _all_true(report, "durable_provisioning.assertions"),
             "tests/integration/provisioning_probe.py",
             "durable_provisioning.assertions",
+        ),
+        (
+            "persistent_non_root_oci_runtime",
+            _all_required_true(report, "oci_runtime.assertions", OCI_RUNTIME_ASSERTION_NAMES),
+            "tests/integration/oci_runtime_probe.py",
+            "oci_runtime.assertions",
         ),
         (
             "provisioning_crash_and_lost_response_halt_replay",

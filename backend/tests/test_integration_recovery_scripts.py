@@ -51,3 +51,7 @@ def test_outer_recovery_covers_primary_and_failure_contract_projects(tmp_path: P
     assert calls.count("compose -p gitferry-it-failure ") == 1
     assert calls.count("image rm gitferry-it-runtime:primary") == 1
     assert calls.count("image rm gitferry-it-runtime:failure") == 1
+    for project in ("gitferry-it-primary", "gitferry-it-failure"):
+        label = f"label=gitferry.integration.project={project}"
+        assert f"ps --all --quiet --filter {label}" in calls
+        assert f"volume ls --quiet --filter {label}" in calls

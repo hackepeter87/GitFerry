@@ -2,6 +2,8 @@ PYTHON := .venv/bin/python
 PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 MYPY := .venv/bin/mypy
+GITFERRY_VERSION := 0.1.0.dev0
+GITFERRY_SOURCE_REVISION := $(shell git rev-parse HEAD)
 
 .PHONY: doctor setup test test-integration test-integration-diagnostics test-integration-failure-contract test-clean container-build
 
@@ -33,4 +35,7 @@ test-clean:
 	./tests/integration/clean.sh
 
 container-build:
-	docker build -f containers/gitferry.Dockerfile -t gitferry:dev .
+	docker build \
+		--build-arg GITFERRY_VERSION=$(GITFERRY_VERSION) \
+		--build-arg GITFERRY_SOURCE_REVISION=$(GITFERRY_SOURCE_REVISION) \
+		-f containers/gitferry.Dockerfile -t gitferry:dev .

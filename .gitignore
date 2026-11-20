@@ -18,6 +18,7 @@ frontend/dist/
 test-results/
 integration-results/
 integration-failure-results/
+deploy/secrets/
 *.pem
 *.key
 .projectatlas/

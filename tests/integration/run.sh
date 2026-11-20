@@ -40,6 +40,39 @@ capture_diagnostics() {
   diagnostics_captured=true
 }
 
+wait_for_service_state() {
+  service=$1
+  expected=$2
+  timeout_seconds=$3
+  started_at=$(date +%s)
+  while :; do
+    container_id=$(docker compose -p "$project" -f "$compose_file" ps -q "$service" 2>/dev/null || true)
+    if [ -n "$container_id" ]; then
+      container_state=$(docker inspect --format '{{.State.Status}}' "$container_id" 2>/dev/null || true)
+      if [ "$expected" = healthy ]; then
+        observed_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$container_id" 2>/dev/null || true)
+      else
+        observed_state=$container_state
+      fi
+      if [ "$observed_state" = "$expected" ]; then
+        return 0
+      fi
+      case "$container_state" in
+        dead|exited)
+          echo "service $service stopped before reaching $expected" >&2
+          return 1
+          ;;
+      esac
+    fi
+    now=$(date +%s)
+    if [ $((now - started_at)) -ge "$timeout_seconds" ]; then
+      echo "service $service did not reach $expected within ${timeout_seconds}s" >&2
+      return 1
+    fi
+    sleep 1
+  done
+}
+
 finish() {
   run_status=$?
   trap - EXIT HUP INT TERM
@@ -54,9 +87,22 @@ finish() {
   if [ "$run_status" -ne 0 ]; then
     capture_diagnostics
   fi
+  scoped_cleanup_status=0
+  resource_label="gitferry.integration.project=$project"
+  for container in $(docker ps --all --quiet --filter "label=$resource_label"); do
+    docker rm --force "$container" >>"$results/work/cleanup.log" 2>&1 \
+      || scoped_cleanup_status=$?
+  done
+  for volume in $(docker volume ls --quiet --filter "label=$resource_label"); do
+    docker volume rm --force "$volume" >>"$results/work/cleanup.log" 2>&1 \
+      || scoped_cleanup_status=$?
+  done
   docker compose -p "$project" -f "$compose_file" down --volumes --remove-orphans \
-    >"$results/work/cleanup.log" 2>&1
+    >>"$results/work/cleanup.log" 2>&1
   cleanup_status=$?
+  if [ "$cleanup_status" -eq 0 ] && [ "$scoped_cleanup_status" -ne 0 ]; then
+    cleanup_status=$scoped_cleanup_status
+  fi
   if docker image inspect "$runtime_image" >/dev/null 2>&1; then
     docker image rm "$runtime_image" >>"$results/work/cleanup.log" 2>&1
     image_cleanup_status=$?
@@ -112,6 +158,8 @@ export GITFERRY_IT_ADMIN_PASSWORD="$admin_password"
 export GITFERRY_IT_USER_PASSWORD="$user_password"
 export GITFERRY_IT_PROJECT="$project"
 export GITFERRY_IT_RUNTIME_IMAGE="$runtime_image"
+export GITFERRY_VERSION=0.1.0.dev0
+export GITFERRY_SOURCE_REVISION=${GITFERRY_CI_SOURCE_SHA:-$(git -C "$root" rev-parse HEAD)}
 export GITFERRY_IT_INSTANCE_NONCE=$($python -c 'import secrets; print(secrets.token_hex(12))')
 export GITFERRY_IT_SOURCE_PORT=${GITFERRY_IT_SOURCE_PORT:-33001}
 export GITFERRY_IT_TARGET_PORT=${GITFERRY_IT_TARGET_PORT:-33002}
@@ -119,7 +167,12 @@ export GITFERRY_IT_SOURCE_URL="http://127.0.0.1:$GITFERRY_IT_SOURCE_PORT"
 export GITFERRY_IT_TARGET_URL="http://127.0.0.1:$GITFERRY_IT_TARGET_PORT"
 
 phase=environment-start
-docker compose -p "$project" -f "$compose_file" up -d --wait --wait-timeout 120 --build
+docker compose -p "$project" -f "$compose_file" up -d --build
+wait_for_service_state source healthy 120
+wait_for_service_state target healthy 120
+wait_for_service_state importer running 120
+wait_for_service_state gitferry-a running 120
+wait_for_service_state gitferry-b running 120
 "$python" "$root/tests/integration/report_contract.py" collect-runtime \
   --results "$results" --project "$project" --compose-file "$compose_file"
 
