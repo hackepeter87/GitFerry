@@ -1,0 +1,104 @@
+# Reproducible Linux integration-run verification
+
+## Result and environment boundary
+
+On 2026-11-20, `make test-integration` completed with run ID `d7430d29c274458b` from the dirty,
+uncommitted workspace. The orchestration host was Darwin 27.2.0/arm64. Docker Server 29.9.3 and
+all tested application/Gitea containers were Linux/arm64; no architecture emulation was observed.
+This proves the Linux container execution path on the local Docker host, not a native Linux host or
+a GitHub-hosted Actions run.
+
+Both instances reported Gitea 1.27.2. Compose retained the configured image pin
+`docker.gitea.com/gitea:1.27.2@sha256:d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd`.
+Docker resolved both running containers to Linux/arm64 image ID
+`sha256:5b1bb1996a19a68ef3bcc669651500f37fb37206446cb777a3ced3b75f25a168`
+and reported the same repository digest. The report records Git HEAD, the dirty flag, and a SHA-256
+over the tested workspace inputs so this result is not confused with the unchanged commit alone.
+
+## Unified execution contract
+
+Local development and `.github/workflows/ci.yml` both invoke `make test-integration`. The runner:
+
+1. creates a unique `gitferry-it-*` Compose project and run image;
+2. executes the existing focused v1/v2/transport-state/comment unit gate;
+3. builds before the isolated transfer and starts fresh project-scoped volumes;
+4. uses two real pinned Gitea instances and separate GitFerry A/B SQLite volumes;
+5. copies only explicit transport directories between sides;
+6. proves from both actual GitFerry importer containers that the opposite Gitea and a public
+   address are unreachable;
+7. requires all existing probe sections and the requirement catalog to pass;
+8. captures diagnostics before cleanup on failure;
+9. removes only project-labeled resources and its recorded run image;
+10. writes the cleanup result before a successful final exit.
+
+The probe has a 900-second default bound and individual harness commands have bounded waits. It
+does not encode a Docker socket path or a macOS-specific host path. Preparatory image/dependency
+downloads can use the build network; the tested importer networks are `internal` and the transfer
+requires no source-side or external network access.
+
+## Requirement-to-evidence map
+
+The generated report contains this map under `execution.required_checks`; missing entries are
+failures, not implicit passes.
+
+| Requirement | Concrete evidence |
+|---|---|
+| Manifest-v1 fixtures retain bytes/digests | `test_existing_v1_examples_validate_without_byte_or_digest_change` in the focused gate |
+| Changed A comment updates the same A comment | `comment_transport_roundtrip.assertions.case_a_updated_same_comment` |
+| New B comment attaches to original A issue | `case_b_b_origin_on_a_parent` |
+| Child-first manifest executes new B issue first | `case_c_comment_before_issue_planned_parent_first` |
+| Equal text, distinct origins remain distinct | `test_identical_text_comments_keep_distinct_origins_and_targets` |
+| Wrong parent is rejected | `test_missing_or_differently_parented_target_is_not_recreated` |
+| Missing author binding blocks | `test_missing_author_mapping_never_falls_back_to_importer` |
+| Drift/stale baseline blocks overwrite | live `comment_drift_blocked_before_any_return_write` plus `test_stale_or_wrong_parent_update_conflicts_without_patch` |
+| Replay/restart/new envelope/unknown do not duplicate | five live restart/replay assertions, all true |
+| Control repository remains intact | `control_repository_change_preserved` |
+| `blocked_parent` is unsent | `test_parent_block_survives_until_confirmed_mapping_and_no_early_post` verifies zero POST |
+| Unknown resolution checks exact target facts | `test_unknown_comment_create_is_not_reposted_and_resolution_checks_parent` plus the live synchronization evidence |
+
+All required report entries passed. Existing probes, rather than duplicate scenarios, supply the
+evidence.
+
+## Interruption evidence
+
+For both the comment hard-exit and lost-response cases, the worker writes and fsyncs a test-only
+synchronization record only after `GiteaCommentClient.create_comment` returns the accepted native
+comment. A newly started worker reads that record and independently verifies the live object using
+the expected target instance, repository, complete expected-parent comment listing, comment ID,
+mapped native author, and exact body. The record's target ID is not passed into GitFerry recovery.
+
+The durable operation therefore remains `outcome_unknown` with no locally confirmed target ID.
+Counts before and after the restarted execution are identical, proving no second POST. The issue
+interruption probe uses the same accepted-response synchronization pattern and verifies the live
+issue after restart. `blocked_parent` remains a distinct focused unit proof: the child has zero
+POSTs until a confirmed parent mapping exists.
+
+These synchronization records make the failure point observable; elapsed sleeps are not used as
+proof that the remote operation completed. They do not provide application reconciliation or an
+exactly-once guarantee.
+
+## Controlled failure and cleanup
+
+`make test-integration-failure-contract` injected exit 86 immediately after all containers became
+healthy. The inner run failed, retained Compose status/image/log diagnostics, reported cleanup as
+passed, and the outer verifier found zero project-labeled containers, networks, volumes, or
+run-specific image. Cleanup did not use global prune and preserved the original nonzero result.
+
+The normal run also left zero run-labeled resources. Its report status is `passed`, cleanup exit is
+0, and `failed_or_not_executed_checks` is empty.
+
+## CI status and remaining limits
+
+The `ubuntu-24.04` GitHub Actions job is prepared with a 30-minute limit, run/attempt-specific
+names, always-uploaded normal and failure-contract artifacts, and `always()` scoped cleanup. It has
+not been executed for this code state because no commit or push was authorized. Therefore:
+
+- locally executed: unit/report checks, controlled Docker failure, full two-Gitea integration;
+- Linux environment executed: Linux/arm64 Docker services and importer contexts on the local host;
+- native Linux host executed: no;
+- GitHub Actions workflow prepared: yes;
+- GitHub Actions hosted runner executed: no.
+
+Known product limits remain unchanged: no historical native timestamp restoration for ordinary
+creates, no atomic server-side precondition between comment preflight and PATCH, no untested Gitea
+permission dimensions, no general exactly-once claim, and no full transfer engine.
