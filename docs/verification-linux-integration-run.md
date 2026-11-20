@@ -111,19 +111,29 @@ The normal run also left zero run-labeled resources. Its report status is `passe
 The `ubuntu-24.04` jobs use immutable Node 24 action commits, stable check contexts `quality` and
 `gitea-integration`, bounded runtimes, run/attempt-specific names, scoped cleanup, and an
 always-executed artifact upload. The positive PR run described above is actual hosted evidence.
-The workflow also exposes an explicit `inject_integration_failure` dispatch input; the deliberately
-red hosted dispatch and an internal-watchdog timeout dispatch are recorded only after they have
-actually run. The hard Actions step timeout remains a backstop; an `always()` diagnostic step runs
-before outer cleanup for partial-report cases. Effective repository rules are recorded only after
-they have been queried. Therefore:
+Final PR-head run `44794200527` passed `quality` in 1m12s and integration in 2m58s. Integrated-main
+run `44794857027` independently passed merge commit
+`24b147abb681cf066fdaf8b863e677065a1546fe` (`quality` 1m22s; integration 2m38s).
+
+Hosted dispatch `44795325443` intentionally remained red with report exit 86, phase
+`environment-start`, retained diagnostics, and successful run-local/outer cleanup. Dispatch
+`44795624522` intentionally remained red with internal-watchdog exit 124, phase
+`controlled-timeout`, retained diagnostics, and successful run-local/outer cleanup. Both uploaded
+their reports after the separate pre-cleanup diagnostic step. The five-minute Actions step timeout
+remains a hard backstop, not a claim that whole-workflow cancellation always publishes artifacts.
+
+Repository ruleset `27751371` is active and was queried both directly and through the effective
+rules on `main`. It has no bypass actors, requires pull requests and resolved review threads,
+requires current-code `quality` and `gitea-integration`, and blocks deletion and non-fast-forward
+updates. Therefore:
 
 - locally executed: unit/report checks, controlled Docker failure, full two-Gitea integration;
 - Linux environment executed: Linux/arm64 Docker services and importer contexts on the local host;
 - native Linux host executed: yes, GitHub-hosted Ubuntu/Linux x86_64;
 - GitHub Actions workflow prepared: yes;
-- GitHub Actions hosted runner executed: yes, positive PR run `44791010437`;
-- deliberately failed hosted dispatch: pending until the workflow is integrated on `main`;
-- repository required-check rules: pending until configured and queried.
+- GitHub Actions hosted runner executed: yes, final PR run `44794200527` and main run `44794857027`;
+- deliberately failed hosted dispatches: yes, failure `44795325443` and timeout `44795624522`;
+- repository required-check rules: active and queried as ruleset `27751371`.
 
 Known product limits remain unchanged: no historical native timestamp restoration for ordinary
 creates, no atomic server-side precondition between comment preflight and PATCH, no untested Gitea

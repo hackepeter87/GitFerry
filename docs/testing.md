@@ -212,16 +212,24 @@ Linux containers; the orchestration host itself was not Linux.
 The controlled failure contract also passed locally. No run-labeled container, network, volume,
 or runtime image remained after either check.
 
-GitHub-hosted run `44791010437` then passed for PR #39 on Ubuntu 24.04/Linux x86_64 with Docker
-Linux/amd64 28.0.4 and no emulation. `quality` passed in 1m22s and `gitea-integration` in 2m45s.
-The report bound PR source commit `b28915f967f0e4f599345bf8381635cae35e085e` separately from
-tested merge checkout and Git HEAD `7cc8cce97b4b47f93f546635a659783f561844bf`, recorded clean
+GitHub-hosted final-head run `44794200527` then passed for PR #39 on Ubuntu 24.04/Linux x86_64.
+`quality` passed in 1m12s and `gitea-integration` in 2m58s. The earlier inspected report from run
+`44791010437` recorded Docker Linux/amd64 28.0.4 with no emulation and bound PR source commit
+separately from tested merge checkout and Git HEAD. It recorded clean
 checkout state, resolved both Gitea containers to image ID
 `sha256:e8be8e1f776fe453b811d88887306b1d7bdf83577789465e5d186924014a57a6`, and passed the
 metadata contract plus every existing mandatory assertion. Both uploaded reports include the
 successful outer workflow cleanup. The controlled-failure report also records exit 86, diagnostics
 captured, phase `environment-start`, and successful run-local cleanup.
-This hosted run is distinct from both the earlier local Linux-container path and the post-merge
-`main` check still required for Issue #2. Exact run facts and the requirement-to-test map are in
+This hosted run is distinct from both the earlier local Linux-container path and integrated-main
+run `44794857027`, which passed merge commit
+`24b147abb681cf066fdaf8b863e677065a1546fe` (`quality` 1m22s; integration 2m38s).
+
+Two controlled top-level dispatches correctly remained failed. Run `44795325443` recorded exit 86
+after environment startup; run `44795624522` recorded internal-watchdog exit 124 and phase
+`controlled-timeout`. Both retained diagnostics, recorded successful run-local and outer cleanup,
+and uploaded the failed report. Active ruleset `27751371` requires the exact `quality` and
+`gitea-integration` contexts on current code and prevents bypass, deletion, and force push.
+Exact run facts and the requirement-to-test map are in
 [`verification-linux-integration-run.md`](verification-linux-integration-run.md) and the generated
 `integration-results/report.json`.
