@@ -1,3 +1,11 @@
+FROM node:24.14.0-bookworm-slim@sha256:d8e448a56fc63242f70026718378bd4b00f8c82e78d20eefb199224a4d8e33d8 AS frontend-build
+
+WORKDIR /build/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY frontend ./
+RUN npm run build
+
 FROM python:3.13.9-slim@sha256:326df678c20c78d465db501563f3492d17c42a4afe33a1f2bf5406a1d56b0e86
 
 ARG GITFERRY_VERSION=0.1.0.dev0
@@ -15,7 +23,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     GITFERRY_RUNTIME_MANAGED=1 \
     GITFERRY_STATE_DB=/var/lib/gitferry/state/gitferry.sqlite3 \
     GITFERRY_PACKAGE_DIR=/var/lib/gitferry/packages \
-    GITFERRY_WORK_DIR=/var/lib/gitferry/work
+    GITFERRY_WORK_DIR=/var/lib/gitferry/work \
+    GITFERRY_FRONTEND_DIR=/app/frontend-dist
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates git \
@@ -28,6 +37,7 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY backend ./backend
 COPY schemas ./schemas
+COPY --from=frontend-build /build/frontend/dist ./frontend-dist
 RUN python -m pip install --no-cache-dir .
 
 USER 10001:10001

@@ -28,6 +28,7 @@ OCI_RUNTIME_ASSERTION_NAMES = frozenset(
         "healthcheck_present",
         "graceful_stop_signal",
         "fresh_volume_initialized",
+        "packaged_frontend_served",
         "container_replacement_preserved_state",
         "identity_binding_preserved",
         "object_mapping_preserved",

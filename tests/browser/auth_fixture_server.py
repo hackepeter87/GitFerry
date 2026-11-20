@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import uvicorn
@@ -11,6 +12,17 @@ import uvicorn
 from gitferry.api import create_app
 from gitferry.auth import AuthService
 from gitferry.state_store import StateStore
+
+
+class MutableClock:
+    def __init__(self) -> None:
+        self.value = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)
+
+    def __call__(self) -> datetime:
+        return self.value
+
+    def expire_current_sessions(self) -> None:
+        self.value += timedelta(hours=9)
 
 
 def main() -> None:
@@ -24,7 +36,8 @@ def main() -> None:
     runtime_root = Path(runtime_root_value).resolve() / args.mode
     runtime_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     database = runtime_root / "state.sqlite3"
-    auth = AuthService(StateStore(database))
+    clock = MutableClock()
+    auth = AuthService(StateStore(database), clock=clock)
     if args.mode == "bootstrapped" and not auth.bootstrap_completed():
         auth.bootstrap_admin("synthetic.admin", "correct synthetic passphrase")
         for name, value in (
@@ -34,8 +47,15 @@ def main() -> None:
             path = runtime_root / name
             path.write_text(value + "\n", encoding="utf-8")
             path.chmod(0o600)
+    application = create_app(auth_service=auth, session_cookie_secure=False)
+
+    @application.post("/__test__/expire-sessions")
+    def expire_sessions() -> dict[str, bool]:
+        clock.expire_current_sessions()
+        return {"expired": True}
+
     uvicorn.run(
-        create_app(auth_service=auth, session_cookie_secure=False),
+        application,
         host="127.0.0.1",
         port=args.port,
         log_level="warning",

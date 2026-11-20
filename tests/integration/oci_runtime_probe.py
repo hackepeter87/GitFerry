@@ -202,6 +202,7 @@ def run_oci_runtime_probe() -> dict[str, Any]:
         create_volume(volume, volumes)
         first_container_id = start_runtime(runtime, volume, containers)
         wait_for_health(runtime)
+        packaged_ui = exec_worker(runtime, "ui")
         first_inspect = json.loads(docker(["inspect", runtime]))[0]
         if first_inspect["HostConfig"].get("Privileged"):
             raise ProbeFailure("runtime unexpectedly uses privileged mode")
@@ -287,6 +288,7 @@ def run_oci_runtime_probe() -> dict[str, Any]:
         assertions = {
             **image_contract,
             "fresh_volume_initialized": seeded["integrity_check"] == "ok",
+            "packaged_frontend_served": all(packaged_ui.values()),
             "container_replacement_preserved_state": after_replacement == seeded,
             "identity_binding_preserved": seeded["binding_id"] == "oci-binding-a-b",
             "object_mapping_preserved": seeded["mapping_target_global_id"] == "12001",
@@ -315,6 +317,7 @@ def run_oci_runtime_probe() -> dict[str, Any]:
             "assertions": assertions,
             "failure_cases": failures,
             "state": seeded,
+            "packaged_frontend": packaged_ui,
         }
     finally:
         for container in reversed(containers):

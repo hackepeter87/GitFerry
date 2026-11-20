@@ -24,7 +24,23 @@ def test_ci_keeps_stable_required_check_contexts() -> None:
     quality_commands = [
         step["run"] for step in jobs["quality"]["steps"] if isinstance(step, dict) and "run" in step
     ]
-    assert quality_commands == ["make setup", "make doctor", "make test", "make container-build"]
+    assert quality_commands == [
+        "make setup",
+        "cd frontend && npx playwright install --with-deps chromium",
+        "make doctor",
+        "make test",
+        "make test-browser",
+        "make container-build",
+    ]
+
+    steps = jobs["quality"]["steps"]
+    by_name = {step["name"]: step for step in steps}
+    browser = by_name["Run browser authentication tests"]
+    diagnostics = by_name["Upload browser diagnostics"]
+    assert browser["timeout-minutes"] == 5
+    assert diagnostics["if"] == "failure()"
+    assert diagnostics["with"]["path"] == "frontend/test-results/"
+    assert diagnostics["with"]["retention-days"] == 14
 
 
 def test_ci_uses_immutable_node24_action_releases() -> None:

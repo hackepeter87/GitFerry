@@ -64,6 +64,24 @@ def test_managed_runtime_reports_ready_only_after_storage_initialization(
     }
 
 
+def test_packaged_frontend_is_served_without_shadowing_api_routes(tmp_path: Path) -> None:
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "index.html").write_text("<h1>synthetic GitFerry UI</h1>", encoding="utf-8")
+    (frontend / "app.js").write_text("window.synthetic = true;", encoding="utf-8")
+
+    with TestClient(create_app(frontend_dir=frontend)) as local_client:
+        root = local_client.get("/")
+        asset = local_client.get("/app.js")
+        health = local_client.get("/healthz")
+
+    assert root.status_code == 200
+    assert "synthetic GitFerry UI" in root.text
+    assert asset.status_code == 200
+    assert asset.headers["content-type"].startswith("text/javascript")
+    assert health.json() == {"status": "ok", "iteration": 1}
+
+
 def test_blueprint_validation_returns_structured_errors(tmp_path: Path) -> None:
     local_client, csrf = authenticated_client(tmp_path)
     response = local_client.post(

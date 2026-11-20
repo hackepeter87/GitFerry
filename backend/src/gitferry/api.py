@@ -5,9 +5,11 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from gitferry.auth import AuthService
 from gitferry.auth_api import (
@@ -26,6 +28,7 @@ def create_app(
     *,
     auth_service: AuthService | None = None,
     session_cookie_secure: bool = True,
+    frontend_dir: Path | None = None,
 ) -> FastAPI:
     readiness = RuntimeStatus()
     cookie_settings = AuthCookieSettings(secure=session_cookie_secure)
@@ -98,6 +101,11 @@ def create_app(
         "/api/v1/blueprints/validate",
         dependencies=[Depends(admin_csrf_dependency(cookie_settings))],
     )(validate_blueprint)
+    configured_frontend = os.environ.get("GITFERRY_FRONTEND_DIR")
+    if frontend_dir is None and configured_frontend:
+        frontend_dir = Path(configured_frontend)
+    if frontend_dir is not None:
+        application.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
     return application
 
 

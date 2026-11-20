@@ -1,12 +1,25 @@
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { defineConfig, devices } from "@playwright/test";
 
 const runtimeRoot =
   process.env.GITFERRY_E2E_ROOT ?? mkdtempSync(join(tmpdir(), "gitferry-e2e-"));
 process.env.GITFERRY_E2E_ROOT = runtimeRoot;
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const python = process.env.GITFERRY_TEST_PYTHON ?? join(repositoryRoot, ".venv", "bin", "python");
+const fixture = join(repositoryRoot, "tests", "browser", "auth_fixture_server.py");
+const adminCli = join(repositoryRoot, "tests", "browser", "admin_cli.py");
+const pythonPath = join(repositoryRoot, "backend", "src");
+process.env.GITFERRY_TEST_PYTHON = python;
+process.env.GITFERRY_TEST_ADMIN_CLI = adminCli;
+process.env.PYTHONPATH = pythonPath;
+
+function quoted(value: string): string {
+  return JSON.stringify(value);
+}
 
 export default defineConfig({
   testDir: "./e2e",
@@ -24,24 +37,22 @@ export default defineConfig({
   },
   webServer: [
     {
-      command:
-        "../.venv/bin/python ../tests/browser/auth_fixture_server.py --mode bootstrapped --port 8089",
+      command: `${quoted(python)} ${quoted(fixture)} --mode bootstrapped --port 8089`,
       url: "http://127.0.0.1:8089/healthz",
       env: {
         ...process.env,
-        PYTHONPATH: "../backend/src",
+        PYTHONPATH: pythonPath,
         GITFERRY_E2E_ROOT: runtimeRoot,
       },
       reuseExistingServer: false,
       timeout: 30_000,
     },
     {
-      command:
-        "../.venv/bin/python ../tests/browser/auth_fixture_server.py --mode unbootstrapped --port 8090",
+      command: `${quoted(python)} ${quoted(fixture)} --mode unbootstrapped --port 8090`,
       url: "http://127.0.0.1:8090/healthz",
       env: {
         ...process.env,
-        PYTHONPATH: "../backend/src",
+        PYTHONPATH: pythonPath,
         GITFERRY_E2E_ROOT: runtimeRoot,
       },
       reuseExistingServer: false,

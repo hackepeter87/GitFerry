@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { nextTick, onMounted, ref } from "vue";
 
 import { ApiError, getAuthStatus, getSession, login, logout, type Principal } from "./api";
 
@@ -11,6 +11,8 @@ const username = ref("");
 const password = ref("");
 const message = ref("");
 const submitting = ref(false);
+const usernameInput = ref<HTMLInputElement>();
+const passwordInput = ref<HTMLInputElement>();
 
 onMounted(initialize);
 
@@ -36,6 +38,7 @@ async function initialize(): Promise<void> {
 async function submitLogin(): Promise<void> {
   message.value = "";
   submitting.value = true;
+  let focusPassword = false;
   try {
     const session = await login(username.value, password.value);
     password.value = "";
@@ -43,14 +46,20 @@ async function submitLogin(): Promise<void> {
   } catch (error) {
     password.value = "";
     message.value = loginMessage(error);
+    focusPassword = true;
   } finally {
     submitting.value = false;
+  }
+  if (focusPassword) {
+    await nextTick();
+    passwordInput.value?.focus();
   }
 }
 
 async function checkSession(): Promise<void> {
   message.value = "";
   submitting.value = true;
+  let focusUsername = false;
   try {
     showAdmin((await getSession()).principal);
   } catch (error) {
@@ -58,11 +67,16 @@ async function checkSession(): Promise<void> {
       principal.value = undefined;
       view.value = "login";
       message.value = "Your session expired or was revoked. Sign in again.";
+      focusUsername = true;
     } else {
       message.value = "The session could not be checked. Try again.";
     }
   } finally {
     submitting.value = false;
+  }
+  if (focusUsername) {
+    await nextTick();
+    usernameInput.value?.focus();
   }
 }
 
@@ -136,9 +150,9 @@ function loginMessage(error: unknown): string {
       <p v-if="message" class="alert" role="alert">{{ message }}</p>
       <form class="login-form" @submit.prevent="submitLogin">
         <label for="username">Username</label>
-        <input id="username" v-model="username" name="username" type="text" autocomplete="username" autocapitalize="none" required :disabled="submitting" />
+        <input id="username" ref="usernameInput" v-model="username" name="username" type="text" autocomplete="username" autocapitalize="none" required :disabled="submitting" />
         <label for="password">Password</label>
-        <input id="password" v-model="password" name="password" type="password" autocomplete="current-password" required :disabled="submitting" />
+        <input id="password" ref="passwordInput" v-model="password" name="password" type="password" autocomplete="current-password" required :disabled="submitting" />
         <button class="primary" type="submit" :disabled="submitting">{{ submitting ? "Signing in…" : "Sign in" }}</button>
       </form>
     </section>
