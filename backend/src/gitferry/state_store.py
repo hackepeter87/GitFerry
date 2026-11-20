@@ -68,6 +68,16 @@ __all__ = [
     "UnsupportedSchemaVersion",
 ]
 
+_MAPPING_PRESERVING_OPERATION_TYPES = frozenset(
+    {
+        "update_issue",
+        "update_comment",
+        "assign_team_repository",
+        "add_team_member",
+        "push_git_bundle",
+    }
+)
+
 
 class StateStore:
     """Short-transaction store; each method configures and closes its connection."""
@@ -118,7 +128,7 @@ class StateStore:
                         "refusing to replace it"
                     )
             for version in range(current + 1, SCHEMA_VERSION + 1):
-                if version == 3:
+                if version in (3, 4):
                     # Rebuilding a referenced table is the documented SQLite migration
                     # pattern. Foreign keys must be disabled outside the transaction and
                     # are checked in full before the connection is accepted again.
@@ -131,7 +141,7 @@ class StateStore:
                     + f"PRAGMA user_version = {version};\nCOMMIT;"
                 )
                 connection.executescript(script)
-                if version == 3:
+                if version in (3, 4):
                     connection.execute("PRAGMA foreign_keys = ON")
                     violations = list(connection.execute("PRAGMA foreign_key_check"))
                     if violations:
@@ -819,6 +829,54 @@ class StateStore:
             connection.close()
         return self.get_operation(operation_id)
 
+    def unblock_operation_on_mappings(
+        self, operation_id: str, parent_origin_ids: tuple[str, ...]
+    ) -> OperationRecord:
+        """Resume a provision step only after every named parent has a target mapping."""
+
+        if not parent_origin_ids:
+            raise ValueError("at least one parent origin is required")
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            operation = connection.execute(
+                "SELECT target_instance_key, status FROM operations WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            if operation is None:
+                raise KeyError(f"unknown operation: {operation_id}")
+            if operation["status"] != "blocked_parent":
+                raise OperationBlocked(f"operation {operation_id} is not blocked on a parent")
+            for parent_origin_id in parent_origin_ids:
+                mapping = connection.execute(
+                    "SELECT 1 FROM object_mappings WHERE origin_id = ? AND target_instance_key = ?",
+                    (parent_origin_id, operation["target_instance_key"]),
+                ).fetchone()
+                if mapping is None:
+                    raise OperationBlocked(
+                        f"parent origin {parent_origin_id} has no confirmed target mapping"
+                    )
+            timestamp = _now()
+            connection.execute(
+                "UPDATE operations SET status = 'prepared', error_reason = NULL, updated_at = ? "
+                "WHERE operation_id = ?",
+                (timestamp, operation_id),
+            )
+            connection.execute(
+                "INSERT INTO operation_events "
+                "(operation_id, from_status, to_status, reason, created_at) "
+                "VALUES (?, 'blocked_parent', 'prepared', 'confirmed parent mappings', ?)",
+                (operation_id, timestamp),
+            )
+            connection.commit()
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return self.get_operation(operation_id)
+
     def mark_outcome_unknown(self, operation_id: str, reason: str) -> OperationRecord:
         _require_text(reason, "reason")
         connection = self._connect()
@@ -884,7 +942,7 @@ class StateStore:
             if origin is None:
                 raise KeyError(f"unknown origin: {operation['origin_id']}")
             now = _now()
-            if operation["operation_type"] in ("update_issue", "update_comment"):
+            if operation["operation_type"] in _MAPPING_PRESERVING_OPERATION_TYPES:
                 mapping = connection.execute(
                     "SELECT * FROM object_mappings WHERE origin_id = ? AND target_instance_key = ?",
                     (operation["origin_id"], operation["target_instance_key"]),
@@ -965,25 +1023,40 @@ class StateStore:
                 raise MappingConflict(
                     "observed target content does not exactly match the persisted intent"
                 )
-            origin = connection.execute(
-                "SELECT object_type FROM object_origins WHERE origin_id = ?",
-                (operation["origin_id"],),
-            ).fetchone()
             now = _now()
-            connection.execute(
-                "INSERT INTO object_mappings "
-                "(origin_id, target_instance_key, target_repository_scope, target_object_type, "
-                "target_global_id, target_issue_index, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    operation["origin_id"],
-                    operation["target_instance_key"],
-                    operation["target_repository_scope"],
-                    origin["object_type"],
-                    target_global_id,
-                    target_issue_index,
-                    now,
-                ),
-            )
+            if operation["operation_type"] in _MAPPING_PRESERVING_OPERATION_TYPES:
+                mapping = connection.execute(
+                    "SELECT * FROM object_mappings WHERE origin_id = ? AND target_instance_key = ?",
+                    (operation["origin_id"], operation["target_instance_key"]),
+                ).fetchone()
+                if mapping is None or (
+                    mapping["target_repository_scope"] != operation["target_repository_scope"]
+                    or mapping["target_global_id"] != target_global_id
+                    or mapping["target_issue_index"] != target_issue_index
+                ):
+                    raise MappingConflict(
+                        "reconciliation does not match the immutable target mapping"
+                    )
+            else:
+                origin = connection.execute(
+                    "SELECT object_type FROM object_origins WHERE origin_id = ?",
+                    (operation["origin_id"],),
+                ).fetchone()
+                connection.execute(
+                    "INSERT INTO object_mappings "
+                    "(origin_id, target_instance_key, target_repository_scope, target_object_type, "
+                    "target_global_id, target_issue_index, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        operation["origin_id"],
+                        operation["target_instance_key"],
+                        operation["target_repository_scope"],
+                        origin["object_type"],
+                        target_global_id,
+                        target_issue_index,
+                        now,
+                    ),
+                )
             connection.execute(
                 "UPDATE operations SET status = 'confirmed', target_global_id = ?, "
                 "target_issue_index = ?, error_reason = NULL, updated_at = ? "

@@ -15,6 +15,7 @@ from metadata_roundtrip_probe import run_metadata_roundtrip_probe
 from openapi_migration_probe import run_openapi_migration_probe
 from permissions_probe import run_permissions_probe
 from persistent_state_probe import run_persistent_state_probe
+from provisioning_probe import run_provisioning_probe
 from support import (
     ADMIN,
     PACKAGE,
@@ -305,6 +306,7 @@ def main() -> None:
         "git_bundle": git_bundle_probe(),
         "metadata": metadata_probe(source_users, target_users),
         "identity_and_permissions": permissions,
+        "durable_provisioning": run_provisioning_probe(access_context),
         "metadata_roundtrip": run_metadata_roundtrip_probe(access_context),
         "persistent_state_restart": run_persistent_state_probe(access_context),
         "portable_transport_roundtrip": run_transport_roundtrip_probe(),

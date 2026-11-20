@@ -1,10 +1,10 @@
-# Iteration-1 tasks
+# Bounded provisioning milestone
 
-- [x] Document requirements, assumptions, module boundaries, threat model, and ADRs.
-- [x] Add versioned instance and transfer schemas with secret-leak tests.
-- [x] Add minimal FastAPI and Vue/TypeScript executable skeletons.
-- [x] Add pinned, automated two-Gitea test environment and synthetic fixtures.
-- [x] Execute and verify Git-bundle plus offline-isolation probe.
-- [x] Execute and verify issue/comment field-fidelity probe.
-- [x] Run all quality gates and update the capability matrix from evidence.
-- [x] Add CI for the same project commands.
+- [x] Configure durable Codex roles and delegation rules.
+- [x] Verify active model availability and run a bounded explorer probe.
+- [x] Add SQLite schema migration for structure origins and journal operation types.
+- [x] Add reusable, verified Git bundle primitives.
+- [x] Add bounded Gitea provisioning client/service and unit tests.
+- [x] Use the application service in the pinned two-Gitea integration path.
+- [x] Verify restart replay, functional permissions and unchanged control objects.
+- [x] Run complete gates and update evidence documentation.

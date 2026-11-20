@@ -151,6 +151,30 @@ Detailed status transitions, commands, transport boundary, and limitations are i
 [`verification-durable-state-restart.md`](verification-durable-state-restart.md). A correctly
 blocked unknown operation is a passing safety test but remains incomplete product work.
 
+## Executed durable provisioning run: 2026-11-20
+
+Run `f6765a2dec4a436a` completed from clean commit `2090642` on a Darwin/arm64 host with Linux/arm64 Docker
+containers, using the pinned Gitea 1.27.2 image digest above. The selected structure path used the
+reusable application service, a separate target-side SQLite state store, and a file bundle. The
+mandatory report checks passed 18/18; run-scoped cleanup also passed.
+
+- Passed: the service created one organization, one selected repository, and the planned
+  `readers`/`writers` teams; Gitea also created its required `Owners` team. All nine bounded
+  operations confirmed and a second-process replay created no new structure or changed refs.
+- Passed: exact refs matched; the reader cloned but could not push, the writer cloned and pushed,
+  and the outsider was denied. The control repository remained unchanged.
+- Passed: no user accounts were created by transfer. The tested team map configured `repo.code`
+  and `repo.issues`; live aggregate permission remains unclaimed beyond the explicitly mapped
+  units.
+- Passed: hard-exit-after-remote and lost-response probes each retained one executing event and
+  `outcome_unknown`; replay sent no second POST, dependent work was `blocked_parent`, and a new
+  package envelope could not bypass the halt.
+- Passed: no credentials appeared in the SQLite state, plan, or report. The schema is v4.
+
+The detailed input/mapping/expectation/evidence table is in
+[`verification-durable-provisioning.md`](verification-durable-provisioning.md). This is local
+evidence only; hosted CI has not run for the current branch.
+
 ## Executed portable transport roundtrip: 2026-11-20
 
 `make test-integration` completed from fresh volumes against the pinned Gitea 1.27.2 image.

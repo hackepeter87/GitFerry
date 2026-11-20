@@ -92,11 +92,14 @@ services:
       GITFERRY_SIDE: B
       GITFERRY_GITEA_URL: http://target:3000
       GITFERRY_IT_USER_PASSWORD: ${GITFERRY_IT_USER_PASSWORD}
+      GITFERRY_IT_ADMIN_PASSWORD: ${GITFERRY_IT_ADMIN_PASSWORD}
       GITFERRY_IT_INSTANCE_NONCE: ${GITFERRY_IT_INSTANCE_NONCE}
     volumes:
       - gitferry-b-state:/state
       - ./transport_worker.py:/probe/transport_worker.py:ro
       - ./comment_transport_worker.py:/probe/comment_transport_worker.py:ro
+      - ./provisioning_worker.py:/probe/provisioning_worker.py:ro
+      - ../../integration-results/package:/package:ro
     networks:
       - target-net
     depends_on:
