@@ -116,6 +116,7 @@ def initialize_runtime(paths: RuntimePaths | None = None) -> RuntimeContext:
     else:
         _create_private_database_file(selected.state_database)
     store = StateStore(selected.state_database)
+    store.validate_integrity()
     return RuntimeContext(paths=selected, store=store)
 
 

@@ -78,6 +78,27 @@ _MAPPING_PRESERVING_OPERATION_TYPES = frozenset(
     }
 )
 
+_EXPECTED_SCHEMA_TABLES = frozenset(
+    {
+        "baselines",
+        "conflicts",
+        "executor_lease",
+        "identity_bindings",
+        "instances",
+        "object_mappings",
+        "object_origins",
+        "operation_events",
+        "operations",
+        "realms",
+        "schema_migrations",
+        "transfer_rounds",
+        "transport_identity_claims",
+        "transport_import_observations",
+        "transport_manifest_objects",
+        "transport_manifests",
+    }
+)
+
 
 class StateStore:
     """Short-transaction store; each method configures and closes its connection."""
@@ -165,6 +186,42 @@ class StateStore:
                 ).lower(),
                 "synchronous": int(connection.execute("PRAGMA synchronous").fetchone()[0]),
             }
+        finally:
+            connection.close()
+
+    def validate_integrity(self) -> None:
+        """Fail unless persisted bytes and schema match the supported state contract."""
+
+        connection = self._connect()
+        try:
+            integrity = [str(row[0]) for row in connection.execute("PRAGMA integrity_check")]
+            if integrity != ["ok"]:
+                raise StateStoreError("state database integrity validation failed")
+
+            tables = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' "
+                    "AND name NOT LIKE 'sqlite_%'"
+                )
+            }
+            migration_versions = tuple(
+                int(row[0])
+                for row in connection.execute(
+                    "SELECT version FROM schema_migrations ORDER BY version"
+                )
+            )
+            if tables != _EXPECTED_SCHEMA_TABLES or migration_versions != tuple(
+                range(1, SCHEMA_VERSION + 1)
+            ):
+                raise StateStoreError(
+                    f"state database schema does not match version {SCHEMA_VERSION}"
+                )
+
+            if list(connection.execute("PRAGMA foreign_key_check")):
+                raise StateStoreError("state database foreign-key validation failed")
+        except sqlite3.DatabaseError as exc:
+            raise StateStoreError("state database integrity validation failed") from exc
         finally:
             connection.close()
 

@@ -142,6 +142,59 @@ def test_runtime_refuses_corrupt_database_without_replacing_it(tmp_path: Path) -
     assert paths.state_database.read_bytes() == original
 
 
+def test_runtime_refuses_database_with_corrupt_table_page(tmp_path: Path) -> None:
+    paths = runtime_paths(tmp_path)
+    context = initialize_runtime(paths)
+    context.store.register_instance(
+        "instance-a",
+        "Synthetic instance A",
+        "https://gitea-a.invalid",
+        "installation-a",
+    )
+
+    connection = sqlite3.connect(paths.state_database)
+    connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    page_size = int(connection.execute("PRAGMA page_size").fetchone()[0])
+    root_page = int(
+        connection.execute(
+            "SELECT rootpage FROM sqlite_master WHERE type = 'table' AND name = 'instances'"
+        ).fetchone()[0]
+    )
+    connection.close()
+
+    page_offset = (root_page - 1) * page_size
+    with paths.state_database.open("r+b") as database:
+        database.seek(page_offset)
+        database.write(bytes(page_size))
+
+    with pytest.raises(StateStoreError, match="integrity validation failed"):
+        initialize_runtime(paths)
+
+    with paths.state_database.open("rb") as database:
+        database.seek(page_offset)
+        assert database.read(page_size) == bytes(page_size)
+
+
+def test_runtime_refuses_current_version_with_incomplete_schema(tmp_path: Path) -> None:
+    paths = runtime_paths(tmp_path)
+    paths.state_database.parent.mkdir(mode=0o700)
+    connection = sqlite3.connect(paths.state_database)
+    connection.execute(
+        "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+    )
+    connection.executemany(
+        "INSERT INTO schema_migrations VALUES (?, 'synthetic')",
+        [(version,) for version in range(1, SCHEMA_VERSION + 1)],
+    )
+    connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    connection.commit()
+    connection.close()
+    paths.state_database.chmod(0o600)
+
+    with pytest.raises(StateStoreError, match="schema does not match version"):
+        initialize_runtime(paths)
+
+
 def test_runtime_rejects_existing_state_database_with_broad_permissions(
     tmp_path: Path,
 ) -> None:
