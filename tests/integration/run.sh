@@ -123,6 +123,12 @@ if [ "${GITFERRY_IT_INJECT_FAILURE:-}" = "after-environment-start" ]; then
   echo "controlled integration failure after environment start" >&2
   exit 86
 fi
+if [ "${GITFERRY_IT_INJECT_FAILURE:-}" = "timeout-after-environment-start" ]; then
+  echo "controlled integration timeout after environment start" >&2
+  while :; do
+    sleep 30
+  done
+fi
 
 phase=synthetic-administration
 for service in source target; do

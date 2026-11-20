@@ -92,10 +92,12 @@ def prepare_results(tmp_path: Path, report: dict[str, object] | None) -> Path:
                     "services": {
                         name: {
                             "configured_image": PINNED_GITEA_IMAGE,
-                            "image_id": f"sha256:{name}",
+                            "image_id": f"sha256:{'a' if name == 'source' else 'b'}" + "0" * 63,
                             "os": "linux",
                             "architecture": "amd64",
-                            "repo_digests": [f"docker.gitea.com/gitea@sha256:{name}"],
+                            "repo_digests": [
+                                "docker.gitea.com/gitea@" + PINNED_GITEA_IMAGE.split("@", 1)[1]
+                            ],
                         }
                         for name in ("source", "target")
                     },
@@ -198,6 +200,7 @@ def test_initialize_records_github_run_identity(
         "GITHUB_RUN_ID": "12345",
         "GITHUB_RUN_ATTEMPT": "2",
         "GITHUB_SHA": "c" * 40,
+        "GITFERRY_CI_SOURCE_SHA": "d" * 40,
         "GITHUB_REF": "refs/pull/2/merge",
         "GITHUB_EVENT_NAME": "pull_request",
         "GITHUB_WORKFLOW_REF": "hackepeter87/GitFerry/.github/workflows/ci.yml@refs/pull/2/merge",
@@ -212,7 +215,8 @@ def test_initialize_records_github_run_identity(
     assert metadata["github"] == {
         "run_id": "12345",
         "run_attempt": "2",
-        "sha": "c" * 40,
+        "source_sha": "d" * 40,
+        "checkout_sha": "c" * 40,
         "ref": "refs/pull/2/merge",
         "event_name": "pull_request",
         "workflow_ref": github_values["GITHUB_WORKFLOW_REF"],
@@ -229,7 +233,8 @@ def test_finalize_rejects_github_sha_that_does_not_match_checkout(tmp_path: Path
     metadata["github"] = {
         "run_id": "12345",
         "run_attempt": "1",
-        "sha": "c" * 40,
+        "source_sha": "a" * 40,
+        "checkout_sha": "c" * 40,
         "ref": "refs/heads/main",
         "event_name": "push",
         "workflow_ref": "hackepeter87/GitFerry/.github/workflows/ci.yml@refs/heads/main",
@@ -246,3 +251,74 @@ def test_finalize_rejects_github_sha_that_does_not_match_checkout(tmp_path: Path
     )
     execution = json.loads((results / "report.json").read_text())["execution"]
     assert "run_metadata_contract" in execution["failed_or_not_executed_checks"]
+
+
+def test_pull_request_source_sha_may_differ_from_tested_merge_sha(tmp_path: Path) -> None:
+    module = report_contract()
+    results = prepare_results(tmp_path, complete_probe_report())
+    metadata_path = results / "work" / "run-metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["platform"]["github_actions"] = True
+    metadata["github"] = {
+        "run_id": "12345",
+        "run_attempt": "1",
+        "source_sha": "c" * 40,
+        "checkout_sha": "a" * 40,
+        "ref": "refs/pull/39/merge",
+        "event_name": "pull_request",
+        "workflow_ref": "hackepeter87/GitFerry/.github/workflows/ci.yml@refs/pull/39/merge",
+        "job": "gitea-integration",
+    }
+
+    assert module.run_metadata_is_complete(metadata)
+
+
+def test_run_metadata_rejects_substituted_gitea_digest(tmp_path: Path) -> None:
+    module = report_contract()
+    results = prepare_results(tmp_path, complete_probe_report())
+    metadata_path = results / "work" / "run-metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["gitea_images"]["services"]["target"]["configured_image"] = (
+        "untrusted.invalid/gitea:1.27.2@sha256:" + "c" * 64
+    )
+    metadata["gitea_images"]["services"]["target"]["repo_digests"] = [
+        "untrusted.invalid/gitea@sha256:" + "c" * 64
+    ]
+
+    assert not module.run_metadata_is_complete(metadata)
+
+
+def test_workflow_cleanup_result_is_added_before_artifact_upload(tmp_path: Path) -> None:
+    module = report_contract()
+    results = prepare_results(tmp_path, complete_probe_report())
+    assert module.finalize(
+        results,
+        run_status=0,
+        cleanup_status=0,
+        phase="probe-complete",
+        diagnostics_captured=False,
+    )
+
+    assert module.record_workflow_cleanup(results, 0)
+    execution = json.loads((results / "report.json").read_text())["execution"]
+    assert execution["workflow_cleanup"]["status"] == "passed"
+    assert execution["required_checks"][-1]["id"] == "workflow_scoped_cleanup"
+    assert json.loads((results / "workflow-cleanup.json").read_text())["exit_code"] == 0
+
+
+def test_workflow_cleanup_failure_keeps_report_failed(tmp_path: Path) -> None:
+    module = report_contract()
+    results = prepare_results(tmp_path, complete_probe_report())
+    assert module.finalize(
+        results,
+        run_status=0,
+        cleanup_status=0,
+        phase="probe-complete",
+        diagnostics_captured=False,
+    )
+
+    assert not module.record_workflow_cleanup(results, 7)
+    execution = json.loads((results / "report.json").read_text())["execution"]
+    assert execution["status"] == "failed"
+    assert execution["workflow_cleanup"]["exit_code"] == 7
+    assert "workflow_scoped_cleanup" in execution["failed_or_not_executed_checks"]

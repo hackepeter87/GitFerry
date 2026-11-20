@@ -12,6 +12,11 @@ on:
         required: false
         default: false
         type: boolean
+      inject_integration_timeout:
+        description: Hold after environment startup until the integration step times out
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -36,6 +41,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Set up project
         run: make setup
+      - name: Run environment doctor
+        run: make doctor
       - name: Run unit tests
         run: make test
       - name: Build container
@@ -43,9 +50,12 @@ jobs:
 
   gitea-integration:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # The job bound deliberately exceeds all bounded test/cleanup/upload steps so
+    # diagnostics are not cut off by the job timeout after a test timeout.
+    timeout-minutes: 55
     env:
       GITFERRY_IT_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+      GITFERRY_CI_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -65,17 +75,47 @@ jobs:
       - name: Run integration doctor
         run: make doctor
       - name: Run Gitea integration
+        timeout-minutes: ${{ (github.event_name == 'workflow_dispatch' && inputs.inject_integration_timeout) && 1 || 20 }}
         env:
-          GITFERRY_IT_INJECT_FAILURE: ${{ (github.event_name == 'workflow_dispatch' && inputs.inject_integration_failure) && 'after-environment-start' || '' }}
+          GITFERRY_IT_INJECT_FAILURE: ${{ (github.event_name == 'workflow_dispatch' && inputs.inject_integration_timeout) && 'timeout-after-environment-start' || (github.event_name == 'workflow_dispatch' && inputs.inject_integration_failure) && 'after-environment-start' || '' }}
         run: make test-integration
       - name: Run integration failure contract
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.inject_integration_failure) }}
+        if: ${{ success() && !(github.event_name == 'workflow_dispatch' && inputs.inject_integration_failure) && !(github.event_name == 'workflow_dispatch' && inputs.inject_integration_timeout) }}
+        timeout-minutes: 10
         run: make test-integration-failure-contract
       - name: Clean integration resources
+        id: cleanup
         if: always()
-        run: make test-clean
+        timeout-minutes: 5
+        run: |
+          set +e
+          make test-clean
+          cleanup_status=$?
+          echo "exit_code=$cleanup_status" >> "$GITHUB_OUTPUT"
+          exit "$cleanup_status"
+      - name: Record workflow cleanup result
+        if: always()
+        timeout-minutes: 3
+        env:
+          CLEANUP_EXIT_CODE: ${{ steps.cleanup.outputs.exit_code || '125' }}
+        run: |
+          found=0
+          record_status=0
+          for results in integration-results integration-failure-results; do
+            if [ -d "$results" ]; then
+              found=1
+              .venv/bin/python tests/integration/report_contract.py \
+                record-workflow-cleanup --results "$results" \
+                --cleanup-status "$CLEANUP_EXIT_CODE" || record_status=$?
+            fi
+          done
+          if [ "$found" -eq 0 ]; then
+            exit 1
+          fi
+          exit "$record_status"
       - name: Upload integration results
         if: always()
+        timeout-minutes: 5
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gitferry-integration-results-${{ github.run_id }}-${{ github.run_attempt }}

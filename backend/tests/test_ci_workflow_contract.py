@@ -21,6 +21,11 @@ def test_ci_keeps_stable_required_check_contexts() -> None:
     assert set(jobs) == {"quality", "gitea-integration"}
     assert all("name" not in jobs[job] for job in jobs)
 
+    quality_commands = [
+        step["run"] for step in jobs["quality"]["steps"] if isinstance(step, dict) and "run" in step
+    ]
+    assert quality_commands == ["make setup", "make doctor", "make test", "make container-build"]
+
 
 def test_ci_uses_immutable_node24_action_releases() -> None:
     expected = {
@@ -45,20 +50,36 @@ def test_injected_failure_still_cleans_and_uploads_diagnostics() -> None:
     document = workflow()
     triggers = document.get("on", document.get(True))
     dispatch = triggers["workflow_dispatch"]["inputs"]["inject_integration_failure"]
+    timeout_dispatch = triggers["workflow_dispatch"]["inputs"]["inject_integration_timeout"]
     assert dispatch["type"] == "boolean"
     assert dispatch["default"] is False
+    assert timeout_dispatch["type"] == "boolean"
+    assert timeout_dispatch["default"] is False
 
-    steps = document["jobs"]["gitea-integration"]["steps"]
+    job = document["jobs"]["gitea-integration"]
+    assert job["timeout-minutes"] == 55
+    assert "pull_request.head.sha" in job["env"]["GITFERRY_CI_SOURCE_SHA"]
+    steps = job["steps"]
     by_name = {step["name"]: step for step in steps}
     integration = by_name["Run Gitea integration"]
     failure_contract = by_name["Run integration failure contract"]
     cleanup = by_name["Clean integration resources"]
+    record_cleanup = by_name["Record workflow cleanup result"]
     upload = by_name["Upload integration results"]
 
     assert "inject_integration_failure" in integration["env"]["GITFERRY_IT_INJECT_FAILURE"]
+    assert "inject_integration_timeout" in integration["env"]["GITFERRY_IT_INJECT_FAILURE"]
+    assert "inject_integration_timeout" in integration["timeout-minutes"]
     assert "inject_integration_failure" in failure_contract["if"]
+    assert "inject_integration_timeout" in failure_contract["if"]
+    assert failure_contract["timeout-minutes"] == 10
     assert cleanup["if"] == "always()"
+    assert cleanup["timeout-minutes"] == 5
+    assert record_cleanup["if"] == "always()"
+    assert record_cleanup["timeout-minutes"] == 3
+    assert "record-workflow-cleanup" in record_cleanup["run"]
     assert upload["if"] == "always()"
-    assert steps.index(cleanup) < steps.index(upload)
+    assert upload["timeout-minutes"] == 5
+    assert steps.index(cleanup) < steps.index(record_cleanup) < steps.index(upload)
     assert upload["with"]["if-no-files-found"] == "error"
     assert upload["with"]["retention-days"] == 14
