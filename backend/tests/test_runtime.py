@@ -195,6 +195,20 @@ def test_runtime_refuses_current_version_with_incomplete_schema(tmp_path: Path) 
         initialize_runtime(paths)
 
 
+def test_runtime_refuses_current_version_with_missing_required_column(
+    tmp_path: Path,
+) -> None:
+    paths = runtime_paths(tmp_path)
+    initialize_runtime(paths)
+    connection = sqlite3.connect(paths.state_database)
+    connection.execute("ALTER TABLE instances DROP COLUMN display_name")
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(StateStoreError, match="schema does not match version"):
+        initialize_runtime(paths)
+
+
 def test_runtime_rejects_existing_state_database_with_broad_permissions(
     tmp_path: Path,
 ) -> None:
