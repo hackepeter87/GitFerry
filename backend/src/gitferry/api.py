@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -22,6 +23,8 @@ from gitferry.auth_api import (
 from gitferry.blueprints import MAX_BLUEPRINT_BYTES, BlueprintValidationError, validate_text
 from gitferry.runtime import RuntimeStatus, initialize_runtime
 from gitferry.state_migrations import SCHEMA_VERSION
+
+HTTP_LOGGER = logging.getLogger("gitferry.http")
 
 
 def create_app(
@@ -58,6 +61,8 @@ def create_app(
         version="0.1.0-dev",
         description="Iteration-1 validation API; no general migration endpoint exists.",
         lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
     )
     if auth_service is not None:
         application.state.auth = auth_service
@@ -83,6 +88,14 @@ def create_app(
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         if request.url.path.startswith("/api/v1/auth/"):
             response.headers["Cache-Control"] = "no-store"
+        route = request.scope.get("route")
+        route_template = getattr(route, "path", "<unmatched>")
+        HTTP_LOGGER.info(
+            "http_request method=%s route=%s status=%d",
+            request.method,
+            route_template,
+            response.status_code,
+        )
         return response
 
     @application.get("/healthz")

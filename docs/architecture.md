@@ -105,7 +105,9 @@ Authentication failures do not disclose whether an account exists. The default c
 requires HTTPS and is relaxed only by explicit localhost-only test construction.
 
 The API currently exposes the protected blueprint-validation slice rather than a general transfer
-control plane. The CLI additionally exposes
+control plane. Machine-readable `/openapi.json` remains available. FastAPI's CDN-based interactive
+documentation pages are disabled because their remote and inline resources conflict with the
+offline, same-origin content-security policy. The CLI additionally exposes
 `transport create`, `transport verify`, and `transport admit`, all backed by the same
 version-selected parser, validator, state store, and operation services used by the integration
 worker. `state resolve-unknown-comment` performs live target/parent/body/author verification before

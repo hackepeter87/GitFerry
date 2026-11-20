@@ -16,7 +16,7 @@ make test
 
 ```text
 make test-browser
-# passed: 4 Playwright Chromium tests
+# passed: 5 Playwright Chromium tests
 ```
 
 ```text
@@ -38,8 +38,10 @@ persistence without the plaintext password, recovery and session revocation, dur
 cookie attributes, rate limiting, public health/readiness, minimal status, fail-closed API behavior,
 role denial and schema migration. The Playwright suite uses synthetic identities and drove
 bootstrap guidance, keyboard login, denied unauthenticated API access, logout, deterministic
-server-side expiry, recovery revocation and refocus behavior through real FastAPI processes and
-file-backed SQLite stores.
+server-side expiry, recovery revocation, refocus behavior and dark-mode field contrast through real
+FastAPI processes and file-backed SQLite stores. ASGI request-log tests verify that only the route
+template, method and status are logged; credentials, usernames and unmatched secret-like paths are
+absent.
 
 The full integration run used fresh run-scoped resources and the pinned Gitea image
 `docker.gitea.com/gitea:1.27.2@sha256:d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd`.

@@ -5,12 +5,40 @@ import { expect, test } from "@playwright/test";
 
 test.describe.configure({ mode: "serial" });
 
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (value: string): number => {
+    const channels = value.match(/[\d.]+/g)?.slice(0, 3).map(Number);
+    if (!channels || channels.length !== 3) throw new Error(`unsupported color: ${value}`);
+    const linear = channels.map((channel) => {
+      const normalized = channel / 255;
+      return normalized <= 0.04045
+        ? normalized / 12.92
+        : ((normalized + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  };
+  const lighter = Math.max(luminance(foreground), luminance(background));
+  const darker = Math.min(luminance(foreground), luminance(background));
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 test("shows an explicit bootstrap prerequisite without a default password", async ({ page }) => {
   await page.goto("http://127.0.0.1:4174");
 
   await expect(page.getByRole("heading", { name: "Administrator bootstrap required" })).toBeVisible();
   await expect(page.getByText("--password-file")).toBeVisible();
   await expect(page.getByLabel("Password")).toHaveCount(0);
+});
+
+test("keeps login fields readable with the operating system dark preference", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/");
+  const colors = await page.getByLabel("Username").evaluate((input) => {
+    const style = getComputedStyle(input);
+    return { foreground: style.color, background: style.backgroundColor };
+  });
+
+  expect(contrastRatio(colors.foreground, colors.background)).toBeGreaterThanOrEqual(4.5);
 });
 
 test("supports keyboard login, denied credentials, authenticated state, and logout", async ({

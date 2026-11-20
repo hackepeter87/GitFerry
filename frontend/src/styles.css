@@ -175,5 +175,6 @@ footer { padding: 1.25rem 0 0; font-size: 0.78rem; text-align: center; }
   .command-note, .identity { border-color: #6c5947; background: #25241e; }
   code { color: #f0d4b9; }
   input, button { border-color: #708076; background: #17221b; }
+  input { color: #eef4ef; }
   button:hover:not(:disabled) { background: #26352b; }
 }

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from gitferry.api import create_app
 from gitferry.auth import AuthService
@@ -271,3 +273,27 @@ def test_security_headers_are_present_without_reflecting_credentials(tmp_path: P
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
     assert response.headers["permissions-policy"] == "camera=(), microphone=(), geolocation=()"
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_asgi_request_logs_allowlist_route_metadata_without_secrets(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    client, _ = configured_app(tmp_path)
+    password = "never-log-this-synthetic-password"  # noqa: S105 - synthetic redaction probe
+    token_like_path = "never-log-this-synthetic-token"  # noqa: S105 - synthetic probe
+
+    with caplog.at_level(logging.INFO, logger="gitferry.http"):
+        denied = client.post(
+            "/api/v1/auth/login",
+            json={"username": "synthetic.admin", "password": password},
+            headers={"sec-fetch-site": "same-origin"},
+        )
+        missing = client.get(f"/{token_like_path}")
+
+    assert denied.status_code == 401
+    assert missing.status_code == 404
+    assert "method=POST route=/api/v1/auth/login status=401" in caplog.text
+    assert "method=GET route=<unmatched> status=404" in caplog.text
+    assert password not in caplog.text
+    assert "synthetic.admin" not in caplog.text
+    assert token_like_path not in caplog.text

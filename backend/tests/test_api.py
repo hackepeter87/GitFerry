@@ -35,6 +35,12 @@ def test_health_reports_iteration_status() -> None:
     assert response.json() == {"status": "ok", "iteration": 1}
 
 
+def test_openapi_remains_available_without_broken_cdn_documentation_pages() -> None:
+    assert client.get("/openapi.json").status_code == 200
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404
+
+
 def test_unmanaged_development_runtime_reports_ready() -> None:
     with TestClient(create_app()) as local_client:
         response = local_client.get("/readyz")
