@@ -1,18 +1,58 @@
 # GitFerry agent rules
 
-The project-owner requirements and `docs/requirements.md` define scope. Never claim a migration capability unless a real Gitea integration test supports it.
+The project-owner requirements, public GitHub issues/milestones, and `docs/requirements.md` define
+scope. Never claim a migration capability unless a real Gitea integration test supports it.
 
 ## Required workflow
 
 - Use the installed, version-matched ProjectAtlas skill and MCP tools before broad source reads. Run `atlas_init` only when project-local state is absent, then use `atlas_watch_once` after edits.
-- Keep the full transfer engine, production LDAP provisioning, full web UI, productive-data migration, and GitLab support out of iteration 1.
+- Treat the current release milestone and its issues as the executable scope. GitLab support and
+  productive-data migration remain outside the approved roadmap.
 - Work in small testable slices. Do not weaken a test or expectation to make a run green.
-- Never commit, push, tag, or open a pull request without explicit human approval.
+- Before implementation, ensure a public issue defines the problem, result, scope, exclusions,
+  acceptance criteria, tests, documentation impact, dependencies, and release milestone. Keep
+  private operating detail out of public artifacts.
+- Use a dedicated branch and pull request for each delivery slice. A current-commit AI review,
+  required CI, documentation, compatibility evidence, and integrated-main verification are
+  mandatory before closing the issue.
+- Commits, pushes, pull requests, and regular merges are authorized for the owner-approved
+  roadmap. Stable release publication, production changes, paid services, material scope changes,
+  and changes to other repositories or accounts require separate owner approval.
+- Do not weaken repository rules, required checks, review controls, or acceptance criteria to
+  approve your own change. Control-rule changes require a separate risk review.
 - Treat blueprints, package archives, API data, paths, and filenames as untrusted input.
 - Never put credentials, tokens, private keys, internal hostnames, or real directory data in source, fixtures, logs, reports, or exported blueprints.
 - Use only synthetic test identities and data.
 - Do not disable TLS verification as a normal mode. Support explicit CA references instead.
 - Do not modify Gitea databases directly as a migration mechanism.
+
+## Agent roles and delegation
+
+- The main agent owns planning, architecture, integration, milestone acceptance, and unclear failures. Use the repository model/profile defaults in `.codex/`.
+- Delegate a substantial, bounded routine task when doing so reduces total model work or elapsed time. Bundle related routine work; do not spawn an agent for a trivial step.
+- Use `explorer` for read-only discovery, `mechanic` for pattern-driven edits inside an explicit file boundary, and `reviewer` for targeted risk review. Prefer deterministic tools, formatters, codemods, or scripts for fully specified transformations.
+- Give each subagent only the relevant files, constraints, expected result, and checks. Require a short report covering changes or evidence, checks, and open problems.
+- Keep at most three subagents active in addition to the main agent. Assign non-overlapping file ownership; sequence dependent or overlapping work.
+- If the configured role model is unavailable, name the replacement and its changed cost/capability class before use. Never allow an economical role to inherit the main model silently.
+- After one failed attempt, narrow or correct the task if evidence supports it. After two failed attempts on the same problem, the main agent reassesses and takes over or chooses a different approach.
+- The main agent reviews delegated results, integrates them, runs the applicable aggregate gates, and remains responsible for every support claim.
+
+## GitHub delivery and recovery
+
+- The public issue and milestone are authoritative for scope. The private GitHub Project adds
+  operational fields and must not contradict them. Status flows through Backlog, Ready, In
+  Progress, In Review, and Done.
+- On start or resume, inspect the working tree, current branch, open pull requests, active Project
+  items, and required checks before selecting work. Reuse an existing issue/branch/PR; never create
+  parallel work for the same acceptance criteria.
+- Keep work resumable in GitHub: update issue/PR state, concrete blockers, current review findings,
+  and next safe action before a natural execution boundary.
+- Review the actual current diff, requirements, and test evidence. A summary or stale review tied to
+  an earlier commit is not approval.
+- Prefer squash merge after required checks and review pass. Verify the resulting `main` commit;
+  a green pull-request commit is not proof for a different merge commit.
+- Build release candidates once. Record source commit, version, digest, and evidence; do not pass an
+  untested rebuild off as the accepted artifact.
 
 ## Test truthfulness
 

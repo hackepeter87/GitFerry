@@ -1,6 +1,10 @@
 # GitFerry
 
-GitFerry is an open-source, platform-independent tool for controlled Gitea-to-Gitea repository transport, including selected Gitea metadata and identity mappings. Iteration 1 is a verified foundation and feasibility study, not a complete migration product.
+GitFerry is an open-source, platform-independent administration tool for controlled file-mediated
+Gitea-to-Gitea repository transport, including selected Gitea metadata and explicit identity
+mappings. The current `0.1.0.dev0` code is a verified foundation, not yet an installable complete
+migration product; the versioned delivery plan is tracked in GitHub and the
+[release roadmap](docs/roadmap.md).
 
 ## Current scope
 
@@ -14,7 +18,7 @@ GitFerry is an open-source, platform-independent tool for controlled Gitea-to-Gi
   an isolated two-database A → B → A file-roundtrip proof
 - compatible transport-manifest v2 support for normal issue comments, explicit stable parents,
   mapped native authors, body changes, and controlled restart/reconciliation
-- architecture, ADRs, test evidence, and capability matrix
+- architecture, ADRs, test evidence, capability matrix, and GitHub issue-first delivery process
 
 Not yet implemented: a general transfer engine, production LDAP provisioning, a complete UI, productive-data migration, or GitLab support.
 
@@ -66,6 +70,7 @@ gitferry transport admit --database state.sqlite3 --local-instance instance-b \
 - [Manifest v2 comment evidence](docs/verification-manifest-v2-comments.md)
 - [Reproducible Linux integration-run evidence](docs/verification-linux-integration-run.md)
 - [Roadmap](docs/roadmap.md)
+- [Delivery and release evidence](docs/release.md)
 - [Verified upstream references](docs/references.md)
 - [Architecture decisions](docs/decisions/)
 

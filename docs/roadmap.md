@@ -1,59 +1,94 @@
-# Prioritized roadmap
+# GitFerry release roadmap
 
-## Recommended next slice
+Public GitHub issues and version milestones are authoritative for executable scope. The private
+**GitFerry Roadmap** Project adds operational status and risk metadata without replacing them. No
+calendar dates are invented. A milestone closes only after its integrated user flow and failure
+paths pass on the exact accepted revision or artifact.
 
-Build one cohesive bounded provisioning flow that composes the already proven Git bundle,
-organization/team/repository structure, explicit identity mappings, functional permission checks,
-and supported issue/comment metadata. Acceptance: one selected synthetic repository is provisioned
-through shared application services, every native write still uses the durable journal and local
-trust decisions, and a repeat run creates no duplicate structure or metadata. This is not yet a
-general transfer engine.
+## 0.1.0 — GitHub foundation and autonomous delivery
 
-The consolidated integration runner is implemented and passed locally with Linux/arm64 service
-containers, deterministic interruption evidence, required-report validation, controlled-failure
-diagnostics, and scoped cleanup. The same entry point is wired to an `ubuntu-24.04` GitHub Actions
-job. Because this workspace was neither committed nor pushed, the hosted Linux run remains an
-explicit open verification step; do not describe the workflow definition as a completed CI run.
+Adopt the existing implementation without recreating it; execute hosted Linux CI; enforce stable
+pull-request gates; complete the product capability baseline; and prove resumable issue-first
+delivery through two dependent implementation cycles.
 
-The portable issue-manifest v1 slice is complete: schema, examples, CLI, SQLite migration,
-transactional admission, isolated A → B → A execution, restart replay, repackaging, and drift
-blocking have real Gitea 1.27.2 evidence.
+- [#1](https://github.com/hackepeter87/GitFerry/issues/1) adopts the local application and process
+  foundation.
+- [#2](https://github.com/hackepeter87/GitFerry/issues/2) runs and enforces hosted CI.
+- [#3](https://github.com/hackepeter87/GitFerry/issues/3) completes the requirement/capability
+  evidence matrix.
+- [#4](https://github.com/hackepeter87/GitFerry/issues/4) composes the bounded durable provisioning
+  service already under development.
+- [#5](https://github.com/hackepeter87/GitFerry/issues/5) owns integrated milestone acceptance and
+  the resume proof.
 
-The bounded manifest-v2 normal-comment slice is also complete: v1 compatibility, typed parent
-origins, mapped authors, body baselines, parent-first execution, conflict/restart handling, three
-separate-state roundtrip cases, and both hard-exit and lost-response probes have real Gitea 1.27.2
-evidence. Parent moves, deletion, review comments, and timelines remain outside this slice.
+The workflow definition alone is not hosted-CI evidence. The milestone requires actual GitHub
+Actions runs and effective repository rules.
 
-## P0: Close feasibility evidence
+## 0.2.0 — First operable provisioning flow
 
-1. Execute the prepared expanded two-instance job on a hosted Linux runner after an explicitly
-   approved commit/push. Acceptance: two clean rebuilds retain the same semantic required checks,
-   publish reports, and leave no run resources.
-2. Add pull request and review probes. Acceptance: every author/time/state/relation field is classified.
-3. Probe LFS, wiki, attachments, and release assets independently. Acceptance: no capability inherits ordinary-Git results.
+Deliver persistent OCI operation, protected administration, secret-reference/TLS connection
+profiles, a durable execution service, and a guided first-import UI. The integrated acceptance must
+provision selected repositories to an empty functional target without manual manifest or SQLite
+editing and preserve confirmed progress across browser and process restart.
 
-## P1: Safe package and job core
+Owning issues: [#6](https://github.com/hackepeter87/GitFerry/issues/6)–[#11](https://github.com/hackepeter87/GitFerry/issues/11).
 
-1. Add a signed envelope around immutable manifest bytes and safe streaming package IO. Acceptance:
-   traversal, link escape, size/count limits, tampering, signer mismatch, and signature failures are
-   tested. Do not change transport-manifest v1 bytes in place.
-2. Extend the bounded SQLite operation journal only when another proven write type needs it. The
-   current issue-create restart/crash slice is complete; general jobs, distributed execution, and
-   exactly-once semantics remain out of scope.
-3. Implement disk preflight and a separate 30 GB benchmark. Acceptance: runtime, peak RSS, and disk use are recorded.
+## 0.3.0 — Identities, directories, and effective permissions
 
-## P2: Metadata and identity slices
+Deliver explicit realm-qualified mapping and conflict administration, a supported Gitea
+authentication-source bootstrap adapter, organization/team/repository rights, late mapping, and
+separate real LDAP and AD qualification. OpenLDAP evidence is never treated as complete AD
+evidence. Both temporary-offline and no-user-transfer provisioning modes receive functional-user
+acceptance.
 
-1. Persist the verified organization/team/repository plan and explicit collision outcomes.
-2. Persist identity candidates keyed by realm, login, external ID, and OU, with manual ambiguity resolution.
-3. Reuse the verified functional-user permission checks as post-provision validation.
-4. Add an LDAP integration test environment, followed by a separate AD-specific qualification.
+Owning issues: [#12](https://github.com/hackepeter87/GitFerry/issues/12)–[#16](https://github.com/hackepeter87/GitFerry/issues/16).
 
-## P3: Product workflows
+## 0.4.0 — Agreed data-scope completeness
 
-1. Bootstrap export/import.
-2. Full-by-default provision with selective override.
-3. Roundtrip baselines, drift conflicts, and unrelated-project invariants.
-4. CLI and guided web UI over the same services.
+Inventory every selected class and implement or visibly constrain the agreed transfer scope for
+ordinary Git, LFS, wikis, issues, labels, comments, attachments, releases, pull requests, reviews,
+and other discovered metadata. Missing package entries never imply deletion, and an incomplete
+transfer is never reported as complete.
 
-Each item must update `docs/capability-matrix.md` with a real test result before a support claim is made.
+Owning issues: [#17](https://github.com/hackepeter87/GitFerry/issues/17)–[#21](https://github.com/hackepeter87/GitFerry/issues/21).
+
+## 0.5.0 — End-to-end return transfer
+
+Unify Git and supported metadata in one guided A → B → A flow. Preserve origins and local trust,
+compare the original central baseline independently from the confirmed offline import state, halt
+on relevant drift or unknown outcomes, and keep control repositories unaffected. Replay, restart,
+or a new package identity must not bypass completed work or conflicts.
+
+Owning issues: [#22](https://github.com/hackepeter87/GitFerry/issues/22)–[#26](https://github.com/hackepeter87/GitFerry/issues/26).
+
+## 0.6.0 — Operations and transport hardening
+
+Add a signed outer envelope without changing manifest-v1/v2 bytes; local signer trust; streaming
+capacity and retention controls; safe cancellation/resume; backup, restore, and upgrade; and an
+approximately 30 GB practical qualification. Restore must retain origins, bindings, baselines,
+conflicts, and unknown outcomes.
+
+Owning issues: [#27](https://github.com/hackepeter87/GitFerry/issues/27)–[#32](https://github.com/hackepeter87/GitFerry/issues/32).
+
+## 1.0.0 — Acceptance-ready application
+
+Complete fresh-install and operating documentation; exercise every promised UI workflow on a
+fresh installation; and build OCI/offline candidates once. Record source commit, versions,
+digests, SBOM, compatibility, and test evidence, then test those exact artifacts. The resulting
+technical candidate is not a stable release.
+
+Owning issues: [#33](https://github.com/hackepeter87/GitFerry/issues/33)–[#36](https://github.com/hackepeter87/GitFerry/issues/36).
+
+Stable publication, stable channels, `latest`, and productive installation remain a separate owner
+decision after technical candidate acceptance.
+
+## Persistent product limits
+
+Until replaced by field-specific real-instance evidence:
+
+- GitFerry provides no general exactly-once guarantee across SQLite and Gitea.
+- Regular create endpoints do not restore historical native timestamps; origin timestamps remain
+  separate facts.
+- The read-before-PATCH comment check is not an atomic Gitea server-side version precondition.
+- Unsupported or untested object classes cannot be described as transferred.
+- Transport integrity hashes do not authenticate origin until the signed envelope is delivered.

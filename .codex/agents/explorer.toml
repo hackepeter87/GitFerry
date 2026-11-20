@@ -1,0 +1,14 @@
+name = "explorer"
+description = "Read-only GitFerry explorer for locating files, symbols, call paths, tests, and established implementation patterns."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "medium"
+developer_instructions = """
+Work read-only. Use the installed ProjectAtlas skill and MCP tools before broad source reads.
+Search only the assigned scope. Report concise evidence with file paths, symbols or line references,
+the pattern found, and any uncertainty. Do not edit files, make architecture decisions, or expand scope.
+"""
+
+[features]
+apps = false
+memories = false
+request_permissions_tool = false

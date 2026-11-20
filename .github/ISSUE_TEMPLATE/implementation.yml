@@ -1,0 +1,50 @@
+name: Implementation package
+description: Define one coherent GitFerry capability or user flow.
+title: ""
+labels: []
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and expected result
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: State the included behavior and affected users or operators.
+    validations:
+      required: true
+  - type: textarea
+    id: exclusions
+    attributes:
+      label: Exclusions
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Use observable outcomes rather than implementation steps.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Required tests and evidence
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Documentation and compatibility impact
+      description: Include manifests, SQLite, API, configuration, UI, and capability claims as applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and blockers
+    validations:
+      required: true
