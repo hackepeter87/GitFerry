@@ -23,20 +23,33 @@ CLI / Web UI
      |
 REST API (input/auth boundary)
      |
-Application services (shared by CLI and UI)
+Shared application services (worker now; CLI and UI callers later)
      |
-+----+----------+-----------+-------------+
-| Gitea adapter | blueprints| packages    | identity mapping
-+----+----------+-----------+-------------+
-     |                     |
-Gitea REST + Git        SQLite job/audit state + local payload volume
++----------------------+-----------------+-------------+
+| Shared application service (durable provisioning)    |
++----------+-----------+-------------+----------------+
+| Gitea adapter | blueprints | packages | identity map |
++----------+-----------+-------------+----------------+
+     |                         |
+Gitea REST + Git       SQLite state + local payload volume
 ```
 
-Jobs are server-side records and do not depend on a browser session. SQLite stores control state; large Git/package bytes use bounded streaming on a persistent volume. No Docker socket is mounted into the application.
+Jobs are server-side records and do not depend on a browser session. The shared application service
+is the reusable execution boundary used by the worker and intended for later CLI and UI callers.
+SQLite stores control state;
+large Git/package bytes use bounded streaming on a persistent volume. No Docker socket is mounted
+into the application.
 
 ## Core state model
 
-Each bounded transfer round records source identity, target identity, selection, comparison-rule version, baseline, desired state, last observation, operation intent hash, and object ID mappings. A target object is one of: absent, explicitly mapped, foreign, or unknown after an interrupted write. Only absent and explicitly mapped states can proceed automatically. Roundtrip compares selected-object baselines before applying any change; unrelated projects are outside the selection and cannot be addressed.
+Each bounded transfer round records source identity, target identity, selection, comparison-rule version,
+baseline, desired state, last observation, operation intent hash, and object ID mappings. Durable
+provisioning prepares intent before remote I/O, commits no SQLite transaction across the remote call,
+and atomically commits mapping plus confirmation afterward. A target object is one of: absent,
+explicitly mapped, foreign, or unknown after an interrupted write. Only absent and explicitly mapped
+states can proceed automatically. A collision fails closed; an unknown parent blocks dependents.
+Roundtrip compares selected-object baselines before applying any change; unrelated projects are
+outside the selection and cannot be addressed.
 
 An external directory identity, a local Gitea account, a historical native author, and a current permission subject are distinct records. Login or email equality never connects them implicitly. Issue mappings distinguish the global object ID from the repository issue index; comment mappings retain their global ID and mapped issue relation.
 
@@ -48,6 +61,13 @@ typed parent-issue origins and qualified authors; portable `issue_comment` norma
 internal comment origin namespace. Local operation status, leases, file locks, credentials,
 approvals, and conflict resolutions never cross that boundary. Neither version is a complete
 package or transfer engine.
+
+Durable provisioning uses schema v4 for structure origins/replicas and journal operation types.
+Remote writes occur outside SQLite transactions. Exact team-unit verification is required for the
+bounded proof; the live permission claim is limited to the explicitly configured `repo.code` and
+`repo.issues` units. Credentials remain outside SQLite, plans, reports, and transport files. If a
+remote outcome is uncertain, the operation remains `outcome_unknown` and dependent operations are
+halted until explicit evidence-based reconciliation.
 
 ## Security and trust boundaries
 

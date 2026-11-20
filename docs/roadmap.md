@@ -17,7 +17,8 @@ delivery through two dependent implementation cycles.
 - [#3](https://github.com/hackepeter87/GitFerry/issues/3) completes the requirement/capability
   evidence matrix.
 - [#4](https://github.com/hackepeter87/GitFerry/issues/4) composes the bounded durable provisioning
-  service already under development.
+  service. Local evidence is complete for the accepted bounded flow; hosted CI, review, merge, and
+  integrated-main verification remain pending.
 - [#5](https://github.com/hackepeter87/GitFerry/issues/5) owns integrated milestone acceptance and
   the resume proof.
 
