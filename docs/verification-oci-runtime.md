@@ -47,15 +47,40 @@ scoped deployment was then removed with its volume.
 
 Executed gates:
 
-- `make test`: 161 backend tests plus Ruff, formatting, MyPy, and the Vue production build;
+- `make test`: 167 backend tests plus Ruff, formatting, MyPy, and the Vue production build;
 - `make test-integration`: passed, including the 21 OCI assertions and the existing Gitea probes;
 - `make test-integration-failure-contract`: passed with the injected failure retained;
 - `make test-clean`: passed; no run-scoped container or volume remained.
 
+The final clean local run `7d6bda77d2b24d06` was bound to source commit
+`3f34768690056acab15896a4762a509bc7f6100f`. It passed all 19 required checks and all 21 OCI
+assertions on the same Darwin/arm64 host and Linux/arm64 Docker server. Its report recorded an empty
+`failed_or_not_executed_checks` list and successful run-scoped cleanup.
+
 ## Hosted evidence
 
-Hosted GitHub Actions evidence is pending until the Issue #6 pull request runs against its exact
-head. A local Linux container is not represented as a hosted Actions runner.
+GitHub Actions run
+[`44821485414`](https://github.com/hackepeter87/GitFerry/actions/runs/44821485414) verified pull
+request #45 with source commit `3f34768690056acab15896a4762a509bc7f6100f`. GitHub checked out
+the generated pull-request merge commit `54a8c51df7d1769578dd7b5f1f6d5d471b416e1a`; the report
+records both identities so that merge-ref evidence is not mistaken for evidence against another
+source revision.
+
+The hosted environment was Linux x86_64 on an X64 GitHub-hosted runner with Docker 28.0.4. The
+Gitea containers used Linux/amd64 images without observed emulation and retained the pinned Gitea
+1.27.2 digest. The `quality` job passed in 1m11s and `gitea-integration` passed in 3m12s. The
+integration report recorded:
+
+- all 20 hosted mandatory checks as `passed` and no failed or unexecuted checks;
+- all 21 OCI runtime assertions as true;
+- successful cleanup limited to Compose project `gitferry-it-gha-44821485414-1`;
+- successful final workflow-scoped cleanup.
+
+The same job also executed the controlled failure contract. Its deliberately failed probe returned
+exit code 86, preserved the original failure, captured diagnostics, marked the unexecuted mandatory
+checks as failed, and completed both run-scoped and final workflow cleanup successfully. The
+published artifact `gitferry-integration-results-44821485414-1` contains both reports and their
+diagnostics. This is hosted CI evidence, not a released or published OCI image.
 
 ## Remaining limits
 
