@@ -136,18 +136,19 @@ def audit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         findings.append(findings_evidence)
     if not milestone:
         findings.append("missing issue milestone")
-    if (
-        milestone
-        and project.get("Target release")
-        and not milestone.startswith(project["Target release"])
-    ):
+    milestone_release = milestone.split()[0] if milestone else ""
+    body_release = sections.get("Target release", "").strip()
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", milestone_release):
+        findings.append("milestone lacks an exact release version")
+    if milestone_release != project.get("Target release"):
         findings.append("milestone does not match project target release")
-    if (
-        milestone
-        and sections.get("Target release")
-        and not milestone.startswith(sections["Target release"].split()[0])
-    ):
+    if milestone_release != body_release:
         findings.append("milestone does not match body target release")
+    state = _text(issue.get("state")).lower()
+    if state not in {"open", "closed"}:
+        findings.append("missing or invalid issue state")
+    elif (state == "closed") != (project.get("Status") == "Done"):
+        findings.append("issue state contradicts project status")
     if project.get("Status") not in VALID_STATUS:
         findings.append("invalid project status")
     if project.get("Needs Decision") not in {"Yes", "No"}:

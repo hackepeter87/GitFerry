@@ -39,6 +39,7 @@ One bounded delivery slice with a checkpoint.
 def snapshot(**changes: object) -> dict[str, object]:
     issue = {
         "number": 48,
+        "state": "open",
         "body": BODY,
         "labels": ["type:feature", "area:planning", "priority:p1", "risk:low"],
         "milestone": "0.4.0",
@@ -190,3 +191,16 @@ def test_github_export_requires_complete_project_and_normalizes_fields() -> None
     project["totalCount"] = 2
     with pytest.raises(ValueError, match="incomplete"):
         issue_audit.github_snapshots([issue], project)
+
+
+def test_release_prefix_and_project_completion_cannot_hide_mismatch() -> None:
+    data = snapshot()
+    data["project"]["Target release"] = "0.4"
+    assert (
+        "milestone does not match project target release"
+        in issue_audit.audit_snapshot(data)["findings"]
+    )
+    data = snapshot(state="closed")
+    assert "issue state contradicts project status" in issue_audit.audit_snapshot(data)["findings"]
+    data["project"]["Status"] = "Done"
+    assert issue_audit.audit_snapshot(data)["status"] == "passed"
