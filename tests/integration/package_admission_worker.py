@@ -12,21 +12,24 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 import plan_worker
+from fastapi.testclient import TestClient
+from gitferry.api import create_app
+from gitferry.auth import AuthService
 from gitferry.connection_probe import LocalReferences, approve_connection, probe_connection
 from gitferry.connection_profiles import ConnectionProfile, ProfileService
 from gitferry.gitea_plan_adapter import GiteaPlanAdapter
 from gitferry.package_admission import PackageAdmissionConflict, PackageAdmissions
-from gitferry.package_archive import receive_package_archive
 from gitferry.plan_runner import PlanRunner
 from gitferry.runtime import RuntimePaths
 from gitferry.state_store import StateStore
 from gitferry.transfer_plans import PlanService
 
 ROOT = Path("/state/package-admission")
-DATABASE = ROOT / "state.sqlite3"
+DATABASE = ROOT / "state" / "state.sqlite3"
 URL = "http://target:3000"
 HTTPS = "https://localhost:34443"
 PACKAGE_REF = "source-export-real"
@@ -77,18 +80,88 @@ def _unreachable(host: str, port: int) -> bool:
         return True
 
 
+def _api_login(client: TestClient) -> dict[str, str]:
+    response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "username": "synthetic.admin",
+            "password": "synthetic integration passphrase",
+        },
+    )
+    response.raise_for_status()
+    csrf = client.cookies.get("gitferry_csrf")
+    if not csrf:
+        raise RuntimeError("managed package API login did not issue a CSRF cookie")
+    return {"x-gitferry-csrf": csrf}
+
+
+def _managed_upload(state: StateStore, paths: RuntimePaths) -> dict[str, Any]:
+    archive = Path("/package/source-export-real.zip")
+    archive_size = archive.stat().st_size
+    archive_digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    auth = AuthService(state)
+    if not auth.bootstrap_completed():
+        auth.bootstrap_admin("synthetic.admin", "synthetic integration passphrase")
+    environment = {
+        "GITFERRY_RUNTIME_MANAGED": "1",
+        "GITFERRY_STATE_DB": str(paths.state_database),
+        "GITFERRY_PACKAGE_DIR": str(paths.package_directory),
+        "GITFERRY_WORK_DIR": str(paths.work_directory),
+        "GITFERRY_SECRET_DIR": str(ROOT / "secrets"),
+        "GITFERRY_CA_DIR": str(ROOT),
+    }
+    with patch.dict(os.environ, environment, clear=False):
+        with TestClient(
+            create_app(auth_service=auth, session_cookie_secure=False),
+            base_url="http://testserver",
+        ) as client:
+            headers = {
+                **_api_login(client),
+                "content-type": "application/zip",
+                "x-gitferry-archive-size": str(archive_size),
+            }
+            with archive.open("rb") as stream:
+                uploaded = client.put(
+                    f"/api/v1/package-uploads/{PACKAGE_REF}",
+                    content=stream,
+                    headers=headers,
+                )
+            uploaded.raise_for_status()
+            detail = client.get(f"/api/v1/package-uploads/{PACKAGE_REF}")
+            detail.raise_for_status()
+            resumed = client.post(
+                f"/api/v1/package-uploads/{PACKAGE_REF}/resume",
+                json={},
+                headers=_api_login(client),
+            )
+            resumed.raise_for_status()
+            listed = client.get("/api/v1/package-uploads")
+            listed.raise_for_status()
+    return {
+        "uploaded": uploaded.json(),
+        "detail": detail.json(),
+        "resumed": resumed.json(),
+        "listed": listed.json(),
+        "archive_size": archive_size,
+        "archive_sha256": archive_digest,
+    }
+
+
 def _initialize() -> tuple[PackageAdmissions, str, dict[str, Any]]:
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
-    for directory in (ROOT / "packages", ROOT / "work", ROOT / "secrets"):
+    for directory in (DATABASE.parent, ROOT / "packages", ROOT / "work", ROOT / "secrets"):
         directory.mkdir(mode=0o700, exist_ok=True)
     shutil.copyfile("/tmp/package-admission-trusted.pem", ROOT / "trusted.pem")
     shutil.copyfile("/tmp/package-admission-trusted.key", ROOT / "trusted.key")
     _mint_user_tokens(ROOT / "secrets")
     state = StateStore(DATABASE)
+    DATABASE.chmod(0o600)
     paths = RuntimePaths(DATABASE, ROOT / "packages", ROOT / "work")
-    receive_package_archive(
-        Path("/package/source-export-real.zip"), paths.package_directory / PACKAGE_REF
-    )
+    before_upload = _counts(PackageAdmissions(state, paths))
+    upload = _managed_upload(state, paths)
+    after_upload = _counts(PackageAdmissions(state, paths))
+    if before_upload != after_upload:
+        raise RuntimeError("package upload changed admission state before explicit setup")
     state.register_instance(
         SOURCE, "Synthetic source", "https://source.invalid", "source-export-install"
     )
@@ -111,6 +184,15 @@ def _initialize() -> tuple[PackageAdmissions, str, dict[str, Any]]:
     approve_connection(
         profiles, TARGET, expected_revision=1, evidence_digest=evidence["evidence_digest"]
     )
+    evidence["upload"] = {
+        "status": upload["uploaded"]["status"],
+        "package_ref": upload["detail"]["package_ref"],
+        "digest": upload["detail"]["package_digest"],
+        "archive_sha256": upload["archive_sha256"],
+        "resumed_status": upload["resumed"]["status"],
+        "listed": len(upload["listed"]),
+        "counts_unchanged": before_upload == after_upload,
+    }
     return PackageAdmissions(state, paths), PACKAGE_REF, evidence
 
 
@@ -149,7 +231,15 @@ def _counts(service: PackageAdmissions) -> dict[str, int]:
     with service.state.read_connection() as connection:
         return {
             table: connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]  # noqa: S608
-            for table in ("package_receipts", "object_origins", "object_mappings", "operations")
+            for table in (
+                "instances",
+                "realms",
+                "identity_bindings",
+                "package_receipts",
+                "object_origins",
+                "object_mappings",
+                "operations",
+            )
         }
 
 
@@ -270,6 +360,7 @@ def initial() -> dict[str, Any]:
         "target_only": _unreachable("source", 3000),
         "external_unreachable": _unreachable("1.1.1.1", 80),
         "source_exports_rows": source_exports_rows,
+        "upload": evidence["upload"],
     }
 
 
@@ -279,6 +370,9 @@ def replay() -> dict[str, Any]:
     service = PackageAdmissions(state, paths)
     before_events = (ROOT / "remote-events.jsonl").read_text(encoding="utf-8").splitlines()
     before_objects = _counts(service)
+    before_upload = _counts(service)
+    upload = _managed_upload(state, paths)
+    after_upload = _counts(service)
     receipt = service.admit(
         PACKAGE_REF,
         target_instance_key=TARGET,
@@ -326,6 +420,11 @@ def replay() -> dict[str, Any]:
         "no_extra_posts": len(before_events) == len(after_events),
         "no_extra_objects": before_objects == _counts(service),
         "package_digest": service.artifact(PACKAGE_REF).digest_sha256,
+        "upload_package_ref": upload["detail"]["package_ref"],
+        "upload_digest": upload["detail"]["package_digest"],
+        "upload_archive_sha256": upload["archive_sha256"],
+        "upload_resumed_status": upload["resumed"]["status"],
+        "upload_counts_unchanged": before_upload == after_upload,
     }
 
 

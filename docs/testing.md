@@ -589,3 +589,43 @@ failure contract retained diagnostics and cleaned successfully; `make test-clean
 GitFerry test containers or volumes. These are local working-tree results; exact-commit review,
 hosted checks and integrated-main verification are required separately. The complete target
 intake/identity-prerequisite browser flow and milestone 0.2 acceptance remain open.
+
+## Durable target archive upload (Issue #10)
+
+The prior source-export slice is integrated as PR #55, `de6fcf4`, with exact-main hosted
+[CI run 44870014502](https://github.com/hackepeter87/GitFerry/actions/runs/44870014502) passing
+23 required checks. That evidence is distinct from this target-upload working-tree evidence.
+
+Local run `965a38877500458d` passed all 22 mandatory checks and 21 source/package assertions.
+Both actual Gitea versions were 1.27.2 at the unchanged image digest recorded above; host
+Darwin/arm64, Docker server and containers Linux/arm64, no observed emulation. Cleanup exited
+0 and no required check was failed or unexecuted. The report identifies a dirty working tree
+based on `de6fcf4`, not an exact clean commit or a hosted run.
+
+The existing target-only worker now uses the normal managed application lifespan and
+administrator-authenticated raw ZIP PUT/list/detail/resume API. It admits no origins, bindings,
+receipts or operations during upload. Only after explicit local setup does it invoke the existing
+admission/plan execution and validate Git, issue and comment authors/relationships. A separate
+process uploads the same bytes/ID again and checks the same package digest, no additional
+remote writes/objects and unchanged local admission counts. Existing network-isolation and
+v1/v2 compatibility assertions remain required. Added mandatory assertions are
+`target_upload_files_only_before_local_setup` and `target_upload_replay_persistent_identity`;
+negative report-contract cases reject either missing assertion.
+
+`make doctor` and `make test` passed (457 backend tests, Ruff/format, MyPy over 55 source files,
+frontend type check/build). The subsequently added receive-timeout test passed with the other
+12 upload tests. Those tests also cover actual process exits after archive/package publication,
+new-process recovery, size/content conflicts, unsafe existing destinations and auth/CSRF.
+All 29 Chromium browser cases passed, including six upload cases: raw request contract,
+GET-only reload, explicit resume error, distinct IDs for subsequent files, lost-reply ID reuse
+and stale-detail-response rejection. Browser response fixtures prove UI behavior; the managed
+API integration separately supplies real-Gitea evidence. They do not yet prove the complete
+Issue #10 first-import browser flow.
+
+An initial controlled-failure attempt overlapped the normal integration run and failed to bind
+its fixed localhost ports. It is not accepted failure-contract evidence; these two entry points
+must run sequentially on one host. The failed report was retained before the sequential retry.
+The sequential failure-contract run `failure-20261121053914-93206` passed: deliberate exit 86,
+failed report, retained diagnostics, and run-scoped cleanup exit 0. `make test-clean` then
+reported no remaining GitFerry integration projects. The final focused browser rerun also
+checks keyboard submission and a 390-pixel ready-receipt layout without horizontal overflow.

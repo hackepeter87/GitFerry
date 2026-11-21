@@ -52,9 +52,10 @@ Git bundles to that package without changing metadata v1/v2 bytes. PR #53 is int
 `5c7d303` with hosted-main run `44862775964` passing all 23 mandatory checks. Local
 receipt/admission and translation into the existing durable plan are integrated through PR #54,
 main `9e6b2f4`, with hosted-main run `44866950765` passing all 23 mandatory checks. Guided source
-capture and verified download are the current delivery slice; target intake, local identity
-decisions and the complete wizard remain
-open acceptance work; this does not close Issue #10 or milestone 0.2.
+capture and verified download are integrated through PR #55, main `de6fcf4`, with hosted-main
+run `44870014502` passing all 23 mandatory checks. Durable target archive upload is the current
+delivery slice; local identity decisions, admission/plan review in the browser and the complete
+wizard remain open acceptance work. Issue #10 and milestone 0.2 remain open.
 The [plan guide](transfer-plans.md) describes the current boundary without claiming a complete
 first-import wizard.
 

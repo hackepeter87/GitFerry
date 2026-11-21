@@ -61,6 +61,8 @@ def complete_probe_report() -> dict[str, object]:
                     "package_replay_process_restart_no_extra_posts_or_objects",
                     "api_queue_background_download",
                     "api_restart_replay_no_source_access",
+                    "target_upload_files_only_before_local_setup",
+                    "target_upload_replay_persistent_identity",
                 ),
                 True,
             ),
@@ -530,6 +532,8 @@ def test_application_plan_assertion_is_required(tmp_path: Path, assertion: str) 
         "package_replay_process_restart_no_extra_posts_or_objects",
         "api_queue_background_download",
         "api_restart_replay_no_source_access",
+        "target_upload_files_only_before_local_setup",
+        "target_upload_replay_persistent_identity",
     ],
 )
 def test_source_capture_assertion_is_required(tmp_path: Path, assertion: str) -> None:

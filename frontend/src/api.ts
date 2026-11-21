@@ -144,6 +144,29 @@ export interface SourceExportRecipient {
   installation_marker: string;
 }
 
+export type PackageUploadStatus = "receiving" | "validating" | "ready" | "failed";
+export interface PackageUploadSummary {
+  package_id: string;
+  sender: { instance_key: string; installation_marker: string };
+  recipient: { instance_key: string; installation_marker: string };
+  repositories: string[];
+  metadata_present: boolean;
+  inventory_complete: false;
+  limitations: string[];
+}
+export interface PackageUpload {
+  upload_id: string;
+  status: PackageUploadStatus;
+  archive_size: number;
+  archive_sha256: string | null;
+  package_ref: string | null;
+  package_digest: string | null;
+  error_code: string | null;
+  created_at: string;
+  updated_at: string;
+  summary: PackageUploadSummary | null;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -202,6 +225,28 @@ export function logout(): Promise<void> {
 
 export function listConnections(): Promise<ConnectionProfile[]> {
   return request("/api/v1/connections");
+}
+
+export function listPackageUploads(): Promise<PackageUpload[]> {
+  return request("/api/v1/package-uploads");
+}
+
+export function getPackageUpload(uploadId: string): Promise<PackageUpload> {
+  return request(`/api/v1/package-uploads/${encodeURIComponent(uploadId)}`);
+}
+
+export function uploadPackageArchive(uploadId: string, file: File): Promise<PackageUpload> {
+  return request(`/api/v1/package-uploads/${encodeURIComponent(uploadId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/zip", "X-GitFerry-Archive-Size": String(file.size) },
+    body: file,
+  });
+}
+
+export function resumePackageUpload(uploadId: string): Promise<PackageUpload> {
+  return request(`/api/v1/package-uploads/${encodeURIComponent(uploadId)}/resume`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+  });
 }
 
 export function browseConnection(

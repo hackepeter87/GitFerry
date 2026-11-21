@@ -24,6 +24,8 @@ from gitferry.blueprints import MAX_BLUEPRINT_BYTES, BlueprintValidationError, v
 from gitferry.connection_profiles import ProfileConflict, ProfileValidationError
 from gitferry.gitea_plan_adapter import GiteaPlanAdapter
 from gitferry.package_api import create_package_admission_router
+from gitferry.package_upload_api import create_package_upload_router
+from gitferry.package_uploads import PackageUploads
 from gitferry.plan_api import create_plan_router
 from gitferry.plan_runner import BackgroundPlanWorker, PlanRunner
 from gitferry.profile_api import create_profile_router, profile_error
@@ -65,6 +67,9 @@ def create_app(
                     ),
                 )
                 application.state.export_jobs = SourceExportJobs(
+                    application.state.runtime.store, application.state.runtime.paths
+                )
+                application.state.package_uploads = PackageUploads(
                     application.state.runtime.store, application.state.runtime.paths
                 )
                 application.state.plan_worker = BackgroundPlanWorker(
@@ -156,6 +161,7 @@ def create_app(
     application.include_router(create_plan_router(cookie_settings))
     application.include_router(create_package_admission_router(cookie_settings))
     application.include_router(create_source_export_router(cookie_settings))
+    application.include_router(create_package_upload_router(cookie_settings))
     application.post(
         "/api/v1/blueprints/validate",
         dependencies=[Depends(admin_csrf_dependency(cookie_settings))],
