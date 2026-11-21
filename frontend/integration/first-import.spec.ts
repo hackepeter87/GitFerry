@@ -4,17 +4,27 @@ import { writeFileSync } from "node:fs";
 
 const archive = process.env.GITFERRY_INTEGRATION_ARCHIVE;
 const evidencePath = process.env.GITFERRY_INTEGRATION_EVIDENCE;
+const sourceDownload = process.env.GITFERRY_INTEGRATION_SOURCE_DOWNLOAD;
+let secureSessionChecked = false;
 
 function record(value: Record<string, unknown>): void {
   if (!evidencePath) throw new Error("browser evidence path is required");
-  writeFileSync(evidencePath, JSON.stringify({ status: "passed", ...value }));
+  writeFileSync(evidencePath, JSON.stringify({ status: "passed", secure_session: secureSessionChecked, ...value }));
 }
 async function login(page: Page): Promise<void> {
+  expect((await page.request.get("/api/v1/plans")).status()).toBe(401);
   await page.goto("/");
   await page.getByLabel("Username").fill("synthetic.admin");
   await page.getByLabel("Password", { exact: true }).fill("synthetic integration passphrase");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Administration", exact: true })).toBeVisible();
+  const cookies = await page.context().cookies();
+  const session = cookies.find((cookie) => cookie.name === "__Host-gitferry_session");
+  expect(session).toMatchObject({ secure: true, httpOnly: true, sameSite: "Strict", path: "/" });
+  expect(await page.evaluate(async () => (await fetch("/api/v1/auth/logout", {
+    method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+  })).status)).toBe(403);
+  secureSessionChecked = true;
 }
 async function intake(page: Page): Promise<import("@playwright/test").Locator> {
   await page.locator(".package-row").first().click();
@@ -51,7 +61,39 @@ test("phase1 receives the actual source archive without admitting identities", a
   record({ uploaded: true, upload_id: uploadId });
 });
 
-test("phase2 confirms local decisions and executes the real first import", async ({ page }) => {
+test("phase0 selects an approved repository and downloads its export", async ({ page }) => {
+  if (!sourceDownload) throw new Error("source download path is required");
+  await login(page);
+  await page.getByLabel("Source connection").selectOption("source");
+  await expect(page.getByLabel("Organization")).toBeVisible();
+  await page.getByLabel("Organization").selectOption("source-export-lab");
+  for (const name of ["source-export-lab/selected", "source-export-lab/selected-extra"]) {
+    const repository = page.locator(".browse-grid label").filter({ has: page.locator("span", { hasText: new RegExp(`^${name}$`) }) }).getByRole("checkbox");
+    await expect(repository).toBeVisible();
+    await repository.check();
+  }
+  await page.getByLabel("Recipient registration").selectOption("target");
+  await page.getByLabel("Include membership records").check();
+  const queuedResponse = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/v1/exports");
+  await page.getByRole("button", { name: "Create and queue export" }).click();
+  const queued = await queuedResponse;
+  expect(queued.ok()).toBeTruthy();
+  const queuedJob = await queued.json();
+  const row = page.locator(".export-list li").last();
+  await expect(row.locator(".export-status")).toHaveText("ready", { timeout: 60_000 });
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  const downloadPromise = page.waitForEvent("download");
+  const responsePromise = page.waitForResponse((response) => response.url().includes("/api/v1/exports/") && response.url().endsWith("/download"));
+  await row.getByRole("link", { name: "Download archive" }).click();
+  const download = await downloadPromise;
+  const response = await responsePromise;
+  await download.saveAs(sourceDownload);
+  record({ source_capture: true, selected_repository: "source-export-lab/selected", downloaded: true,
+    queue_status: queuedJob.status, export_id: queuedJob.export_id, download_header_sha256: response.headers()["x-archive-sha256"],
+    download_header_bytes: Number(response.headers()["content-length"]) });
+});
+
+async function prepareTargetPlan(page: Page): Promise<{ blocked: boolean; missing: string | null }> {
   await login(page);
   const panel = await intake(page);
   await panel.getByLabel(/Local sender display name/).fill("Captured source");
@@ -90,14 +132,30 @@ test("phase2 confirms local decisions and executes the real first import", async
   await expect(panel.getByRole("button", { name: "Prepare draft for Transfer plans" })).toBeEnabled();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await panel.getByRole("button", { name: "Prepare draft for Transfer plans" }).click();
+  return { blocked, missing };
+}
+
+test("phase2 confirms local decisions and previews the real first import", async ({ page }) => {
+  const { blocked, missing } = await prepareTargetPlan(page);
   const plans = page.locator(".plans-panel");
+  await expect(plans.getByRole("button", { name: "Start reviewed plan" })).toBeDisabled();
+  await plans.getByRole("button", { name: "Request prerequisite preview" }).click();
+  await expect(plans.locator(".preview-box dd").filter({ hasText: /^passed$/ })).toBeVisible({ timeout: 60_000 });
+  await expect(plans.getByRole("button", { name: "Start reviewed plan" })).toBeEnabled();
+  record({ preview_ready: true, review_missing_bindings: Boolean(missing && !missing.endsWith("None")),
+    blocked_without_bindings: blocked });
+});
+
+test("phase5 executes the reviewed real first import", async ({ page }) => {
+  await login(page);
+  const plans = page.locator(".plans-panel");
+  await expect(plans.locator(".preview-box dd").filter({ hasText: /^passed$/ })).toBeVisible();
   await expect(plans.getByRole("button", { name: "Start reviewed plan" })).toBeEnabled();
   await plans.getByRole("button", { name: "Start reviewed plan" }).focus();
   await page.keyboard.press("Enter");
   await expect(plans.locator(".plan-detail-heading")).toContainText("Confirmed", { timeout: 60_000 });
   await page.screenshot({ path: test.info().outputPath("real-first-import-confirmed.png"), fullPage: true });
-  record({ confirmed: true, review_missing_bindings: Boolean(missing && !missing.endsWith("None")),
-    blocked_without_bindings: blocked });
+  record({ confirmed: true });
 });
 
 test("phase3 observes the confirmed plan after an application process restart", async ({ page }) => {
@@ -112,4 +170,22 @@ test("phase3 observes the confirmed plan after an application process restart", 
   await expect(page.locator(".plan-detail-heading")).toContainText("Confirmed");
   expect(mutations).toEqual([]);
   record({ read_only: true });
+});
+
+
+test("phase4 rejects an occupied target before execution", async ({ page }) => {
+  await prepareTargetPlan(page);
+  const plans = page.locator(".plans-panel");
+  await expect(plans.getByRole("button", { name: "Start reviewed plan" })).toBeDisabled();
+  await plans.getByRole("button", { name: "Request prerequisite preview" }).click();
+  await expect(plans.locator(".preview-box dd").filter({ hasText: /^blocked$/ })).toBeVisible({ timeout: 60_000 });
+  await expect(plans.locator(".preview-box")).toContainText("structure:");
+  await expect(plans.getByRole("button", { name: "Start reviewed plan" })).toBeDisabled();
+  const conflict = plans.locator(".operation-list li").filter({ hasText: "Conflict — review required" });
+  await expect(conflict).toHaveCount(1);
+  await conflict.getByText("Operation details", { exact: true }).click();
+  await expect(conflict).toContainText("already exists but is not bound to this origin");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  record({ collision_blocked: true });
 });

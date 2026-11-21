@@ -25,6 +25,7 @@ from support import (
     api,
     docker_copy,
     docker_service_exec,
+    run,
 )
 
 REPOSITORY = "source-export-lab/selected"
@@ -52,6 +53,11 @@ ASSERTIONS = frozenset(
         "target_upload_files_only_before_local_setup",
         "target_upload_replay_persistent_identity",
         "guided_browser_first_import",
+        "guided_browser_source_export",
+        "guided_browser_target_collision",
+        "guided_browser_preview_no_remote_write",
+        "guided_browser_production_runtime",
+        "guided_selected_set_and_control",
         "guided_browser_restart_read_only",
     }
 )
@@ -94,6 +100,11 @@ def _worker(mode: str) -> dict[str, Any]:
         "gitferry-a", ["python", "/probe/source_export_worker.py", mode], timeout=240, check=False
     )
     if result.returncode:
+        diagnostic = docker_service_exec(
+            "gitferry-a", ["cat", "/state/source-export/browser-server.log"], check=False
+        )
+        if diagnostic.returncode == 0:
+            (WORK / "source-browser-server.log").write_text(diagnostic.stdout)
         evidence = {"mode": mode, "exit_code": result.returncode}
         for line in result.stderr.splitlines():
             if line.startswith("GITFERRY_PROBE_ERROR "):
@@ -105,25 +116,37 @@ def _worker(mode: str) -> dict[str, Any]:
     return json.loads(result.stdout)
 
 
-def _target_worker(mode: str) -> dict[str, Any]:
+def _target_worker(mode: str, context: str = "normal") -> dict[str, Any]:
     result = docker_service_exec(
-        "gitferry-b", ["python", "/probe/package_admission_worker.py", mode], timeout=240
+        "gitferry-b",
+        ["python", "/probe/package_admission_worker.py", mode, "--context", context],
+        timeout=240,
+        check=False,
     )
     if result.returncode:
+        evidence = {"mode": mode, "context": context, "exit_code": result.returncode}
+        for line in result.stderr.splitlines():
+            if line.startswith("GITFERRY_PROBE_ERROR "):
+                evidence.update(json.loads(line.removeprefix("GITFERRY_PROBE_ERROR ")))
+        (WORK / "target-browser-worker-failure.json").write_text(json.dumps(evidence, indent=2))
         raise ProbeFailure(f"package admission worker {mode} failed with exit {result.returncode}")
     return json.loads(result.stdout)
 
 
-def _run_browser(archive: Path, phase: str, base_url: str) -> dict[str, Any]:
-    evidence = WORK / f"browser-{phase}.json"
+def _run_browser(
+    archive: Path, phase: str, base_url: str, *, evidence_name: str | None = None
+) -> dict[str, Any]:
+    evidence_name = evidence_name or phase
+    evidence = WORK / f"browser-{evidence_name}.json"
     environment = {
         **os.environ,
         "GITFERRY_INTEGRATION_ARCHIVE": str(archive),
         "GITFERRY_INTEGRATION_EVIDENCE": str(evidence),
         "GITFERRY_INTEGRATION_APP_URL": base_url,
-        "GITFERRY_INTEGRATION_BROWSER_OUTPUT": str(WORK / ("browser-" + phase)),
+        "GITFERRY_INTEGRATION_BROWSER_OUTPUT": str(WORK / ("browser-" + evidence_name)),
+        "GITFERRY_INTEGRATION_SOURCE_DOWNLOAD": str(archive),
     }
-    with (WORK / f"browser-{phase}.log").open("wb") as log:
+    with (WORK / f"browser-{evidence_name}.log").open("wb") as log:
         result = subprocess.run(  # noqa: S603
             [
                 shutil.which("npx") or "/usr/bin/npx",
@@ -150,6 +173,10 @@ def _run_browser(archive: Path, phase: str, base_url: str) -> dict[str, Any]:
 def run_source_export_probe() -> dict[str, Any]:
     worker_path = Path(__file__).with_name("source_export_worker.py")
     docker_copy(worker_path, "gitferry-a:/probe/source_export_worker.py")
+    for service in ("gitferry-a", "gitferry-b"):
+        docker_copy(
+            worker_path.with_name("browser_runtime.py"), f"{service}:/probe/browser_runtime.py"
+        )
     docker_copy(worker_path.with_name("plan_worker.py"), "gitferry-a:/probe/plan_worker.py")
     docker_copy(
         worker_path.with_name("package_admission_worker.py"),
@@ -176,9 +203,21 @@ def run_source_export_probe() -> dict[str, Any]:
         docker_copy(token_path, "gitferry-a:/tmp/source-export-admin-token")
     finally:
         token_path.unlink()
-    captured = _worker("capture")
+    _worker("prepare-browser")
     archive_host = PACKAGE / "source-export-real.zip"
-    docker_copy("gitferry-a:/state/source-export/source-export.zip", archive_host)
+    _worker("start-browser")
+    try:
+        with browser_tunnel(COMPOSE, service="gitferry-a") as base_url:
+            source_browser = _run_browser(archive_host, "phase0", base_url)
+    finally:
+        _worker("stop-browser")
+    if not archive_host.is_file() or archive_host.stat().st_size == 0:
+        raise ProbeFailure("source browser did not download an archive")
+    docker_copy(archive_host, "gitferry-a:/state/source-export/source-export-browser.zip")
+    docker_copy(
+        WORK / "browser-phase0.json", "gitferry-a:/state/source-export/browser-evidence.json"
+    )
+    captured = _worker("capture")
     replay = _worker("replay")
     archive_digest = hashlib.sha256(archive_host.read_bytes()).hexdigest()
     extracted = WORK / "source-export-target-receive"
@@ -214,7 +253,9 @@ def run_source_export_probe() -> dict[str, Any]:
         with browser_tunnel(COMPOSE) as base_url:
             uploaded = _run_browser(archive_host, "phase1", base_url)
             _target_worker("browser-upload")
-            browser = _run_browser(archive_host, "phase2", base_url)
+            _run_browser(archive_host, "phase2", base_url)
+            preview = _target_worker("browser-preview")
+            browser = _run_browser(archive_host, "phase5", base_url)
         docker_copy(
             WORK / "browser-phase2.json",
             "gitferry-b:/state/package-admission/browser-evidence.json",
@@ -241,6 +282,39 @@ def run_source_export_probe() -> dict[str, Any]:
         finally:
             _target_worker("stop-browser")
     target_replay = _target_worker("replay")
+    runtimes = {}
+    image_ids = {}
+    for service, context in (("gitferry-a", "source-export"), ("gitferry-b", "package-admission")):
+        runtimes[service] = json.loads(
+            docker_service_exec(service, ["cat", f"/state/{context}/browser-runtime.json"]).stdout
+        )
+        container = run([*COMPOSE, "ps", "-q", service]).stdout.strip()
+        image_ids[service] = run(
+            ["docker", "inspect", "--format", "{{.Image}}", container]
+        ).stdout.strip()
+    built_image = run(
+        [
+            "docker",
+            "image",
+            "inspect",
+            "--format",
+            "{{.Id}}",
+            os.environ["GITFERRY_IT_RUNTIME_IMAGE"],
+        ]
+    ).stdout.strip()
+    collision_before = _target_worker("collision-snapshot")
+    _target_worker("prepare-browser", "collision")
+    _target_worker("start-browser", "collision")
+    try:
+        with browser_tunnel(COMPOSE) as base_url:
+            _run_browser(archive_host, "phase1", base_url, evidence_name="collision-upload")
+            collision_browser = _run_browser(archive_host, "phase4", base_url)
+        collision = _target_worker("collision-result", "collision")
+        (WORK / "collision-evidence.json").write_text(
+            json.dumps({"before": collision_before, "after": collision}, indent=2)
+        )
+    finally:
+        _target_worker("stop-browser", "collision")
     # Keep bounded, credential-free comparison facts before the runner cleans up
     # the isolated instances, including when a later assertion fails.
     evidence_keys = (
@@ -299,7 +373,7 @@ def run_source_export_probe() -> dict[str, Any]:
         and replay["unchanged"],
         "api_queue_background_download": (
             captured["api_queue_status"] in {"queued", "running", "ready"}
-            and captured["api_queue_export_id"] == "source-export-real"
+            and captured["api_queue_export_id"] == captured["job"]["export_id"]
             and captured["api_delivery"]["status"] == "ready"
             and captured["api_delivery"]["capture_status"] == "captured"
             and captured["api_download"]["archive_sha256"] == captured["archive_sha256"]
@@ -372,6 +446,42 @@ def run_source_export_probe() -> dict[str, Any]:
     assertions["guided_browser_first_import"] = (
         browser["status"] == "passed" and browser["confirmed"]
     )
+    assertions["guided_browser_source_export"] = (
+        source_browser["status"] == "passed"
+        and source_browser["source_capture"]
+        and source_browser["downloaded"]
+        and source_browser["selected_repository"] == REPOSITORY
+        and archive_digest == captured["archive_sha256"]
+    )
+    assertions["guided_browser_target_collision"] = (
+        collision_browser["collision_blocked"]
+        and collision["blocked"]
+        and collision["no_remote_writes"]
+        and collision["snapshot"] == collision_before
+    )
+    assertions["guided_browser_preview_no_remote_write"] = (
+        preview["passed"] and preview["no_remote_writes"]
+    )
+    assertions["guided_selected_set_and_control"] = (
+        set(target_package["selected_repositories"]) == {REPOSITORY, REPOSITORY + "-extra"}
+        and target_package["unselected_absent"]
+        and {item["repository"] for item in package.document["repositories"]}
+        == set(target_package["selected_repositories"])
+    )
+    assertions["guided_browser_production_runtime"] = (
+        source_browser["secure_session"]
+        and browser["secure_session"]
+        and restart["secure_session"]
+        and set(image_ids.values()) == {built_image}
+        and all(
+            runtime["uid"] == 10001
+            and runtime["gid"] == 10001
+            and runtime["installed_application"]
+            and runtime["secure_cookie_policy"]
+            and runtime["production_entrypoint"] == "gitferry.server"
+            for runtime in runtimes.values()
+        )
+    )
     assertions["guided_browser_restart_read_only"] = (
         restart["status"] == "passed" and restart["read_only"]
     )
@@ -380,10 +490,13 @@ def run_source_export_probe() -> dict[str, Any]:
     return {
         "status": "passed",
         "assertions": assertions,
+        "browser_runtime": runtimes,
+        "image_id": built_image,
+        "browser_image_ids": image_ids,
         "repository": REPOSITORY,
         "archive": {"sha256": archive_digest, "bytes": archive_host.stat().st_size},
         "limits": [
-            "One real private repository on pinned Gitea 1.27.2",
+            "Two selected private repositories and an excluded source control; Gitea 1.27.2",
             "Capture is read-only after setup; Git upload-pack POSTs are transport reads",
             "Target import uses one fresh package and synthetic local identity bindings",
         ],

@@ -12,12 +12,14 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import httpx
 import plan_worker
+from browser_runtime import serve
 from fastapi.testclient import TestClient
 from gitferry.api import create_app
 from gitferry.auth import AuthService
@@ -37,6 +39,7 @@ HTTPS = "https://localhost:34443"
 PACKAGE_REF = "source-export-real"
 TARGET = "target"
 SOURCE = "source"
+CONTEXT = "normal"
 
 
 def remote(method: str, path: str, *, username: str = "gitferry-admin", **kwargs: Any) -> Any:
@@ -59,6 +62,11 @@ def remote(method: str, path: str, *, username: str = "gitferry-admin", **kwargs
 
 def _mint_user_tokens(secrets: Path) -> None:
     for username in ("gitferry-admin", "issue-author", "comment-author"):
+        if CONTEXT == "collision":
+            # Operator credentials are local to B; copy no application facts or database.
+            shutil.copyfile(Path("/state/package-admission/secrets") / username, secrets / username)
+            (secrets / username).chmod(0o600)
+            continue
         token = remote(
             "POST",
             f"/users/{username}/tokens",
@@ -94,7 +102,12 @@ def _api_login(client: TestClient) -> dict[str, str]:
     csrf = client.cookies.get("gitferry_csrf")
     if not csrf:
         raise RuntimeError("managed package API login did not issue a CSRF cookie")
-    return {"x-gitferry-csrf": csrf}
+    # Test-side HTTP client explicitly carries its own session over the isolated
+    # loopback tunnel. The actual browser separately exercises secure cookies.
+    return {
+        "x-gitferry-csrf": csrf,
+        "cookie": "; ".join(f"{key}={value}" for key, value in client.cookies.items()),
+    }
 
 
 def _managed_upload(state: StateStore, paths: RuntimePaths) -> dict[str, Any]:
@@ -245,16 +258,18 @@ def _counts(service: PackageAdmissions) -> dict[str, int]:
         }
 
 
-def _git_visibility() -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+def _git_visibility(
+    scope: str = "source-export-lab/selected",
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     """Wait for Gitea's post-receive metadata, not merely a successful Git push."""
     deadline = time.monotonic() + 20
     observations: list[dict[str, Any]] = []
     while time.monotonic() < deadline:
         try:
-            repository = remote("GET", "/repos/source-export-lab/selected", timeout=2)
+            repository = remote("GET", f"/repos/{scope}", timeout=2)
             observations.append({"repository_empty": repository.get("empty")})
             if repository.get("empty") is False:
-                branch = remote("GET", "/repos/source-export-lab/selected/branches/main", timeout=2)
+                branch = remote("GET", f"/repos/{scope}/branches/main", timeout=2)
                 return repository, branch, observations
         except httpx.HTTPStatusError as error:
             status = error.response.status_code
@@ -388,8 +403,6 @@ def prepare_browser() -> dict[str, Any]:
 
 
 def serve_browser() -> None:
-    import uvicorn
-
     os.environ.update(
         {
             "GITFERRY_RUNTIME_MANAGED": "1",
@@ -402,13 +415,7 @@ def serve_browser() -> None:
     )
     plan_worker.ROOT, plan_worker.URL = ROOT, URL
     with plan_worker.proxy():
-        uvicorn.run(
-            create_app(session_cookie_secure=False),
-            host="0.0.0.0",  # noqa: S104 -- isolated test container interface
-            port=8080,
-            access_log=False,
-            timeout_graceful_shutdown=10,
-        )
+        serve(ROOT)
 
 
 def start_browser() -> dict[str, Any]:
@@ -417,7 +424,7 @@ def start_browser() -> dict[str, Any]:
         raise RuntimeError("browser server already has a registered process")
     with (ROOT / "browser-server.log").open("ab") as log:
         process = subprocess.Popen(  # noqa: S603
-            [sys.executable, __file__, "serve-browser"],
+            [sys.executable, __file__, "serve-browser", "--context", CONTEXT],
             stdout=log,
             stderr=subprocess.STDOUT,
             start_new_session=True,
@@ -511,24 +518,40 @@ def browser_result() -> dict[str, Any]:
     repository, refs_remote, git_visibility = _git_visibility()
     issue = remote("GET", "/repos/source-export-lab/selected/issues/1")
     comments = remote("GET", "/repos/source-export-lab/selected/issues/1/comments")
-    bundle = next((ROOT / "packages" / PACKAGE_REF / "bundles").glob("*.bundle"))
-    bundle_refs = {
-        line.split(maxsplit=1)[1]: line.split(maxsplit=1)[0]
-        for line in subprocess.run(
-            [shutil.which("git") or "/usr/bin/git", "bundle", "list-heads", str(bundle)],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.splitlines()
-        # Bundle HEAD is a symbolic/default-branch alias, not a transferred ref.
-        if line.split(maxsplit=1)[1].startswith("refs/")
-    }
+    artifact = service.artifact(PACKAGE_REF)
+    transferred = {}
+    for selected in artifact.document["repositories"]:
+        target, branch, _ = _git_visibility(selected["repository"])
+        bundle = artifact.directory / selected["bundle"]["path"]
+        heads = {
+            line.split(maxsplit=1)[1]: line.split(maxsplit=1)[0]
+            for line in subprocess.run(
+                [shutil.which("git") or "/usr/bin/git", "bundle", "list-heads", str(bundle)],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.splitlines()
+            if line.split(maxsplit=1)[1].startswith("refs/")
+        }
+        if heads != {"refs/heads/main": branch["commit"]["id"]}:
+            raise RuntimeError("selected repository refs differ from the received bundle")
+        transferred[selected["repository"]] = {"target_id": str(target["id"]), "refs": heads}
+    try:
+        remote("GET", "/repos/source-export-lab/not-selected")
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code != 404:
+            raise
+    else:
+        raise RuntimeError("unselected source repository was transferred")
+    bundle_refs = transferred["source-export-lab/selected"]["refs"]
     events = (ROOT / "remote-events.jsonl").read_text(encoding="utf-8").splitlines()
     with service.state.read_connection() as connection:
         source_exports_rows = connection.execute("SELECT count(*) FROM source_exports").fetchone()[
             0
         ]
     return {
+        "selected_repositories": transferred,
+        "unselected_absent": True,
         "status": result["status"],
         "package_digest": admitted["digest_sha256"],
         "review_missing_bindings": browser["review_missing_bindings"],
@@ -634,7 +657,75 @@ def replay() -> dict[str, Any]:
     }
 
 
+def collision_snapshot() -> dict[str, Any]:
+    teams = remote("GET", "/orgs/source-export-lab/teams")
+    # Gitea enumerates this permission set in varying order; retain every value.
+    for team in teams:
+        team["units"] = sorted(team["units"])
+    return {
+        "repository": remote("GET", "/repos/source-export-lab/selected"),
+        "issues": remote("GET", "/repos/source-export-lab/selected/issues"),
+        "comments": remote("GET", "/repos/source-export-lab/selected/issues/1/comments"),
+        "teams": teams,
+    }
+
+
+def browser_preview() -> dict[str, Any]:
+    state = StateStore(DATABASE)
+    plans = PlanService(state).list()
+    if (
+        len(plans) != 1
+        or plans[0]["status"] != "draft"
+        or plans[0]["preview"]["status"] != "passed"
+    ):
+        raise RuntimeError("browser did not finish a separate draft preview")
+    if any(step["status"] not in {"prepared", "blocked_parent"} for step in plans[0]["operations"]):
+        raise RuntimeError("preview changed an operation to an execution state")
+    events = ROOT / "remote-events.jsonl"
+    observed = (
+        [json.loads(line) for line in events.read_text().splitlines()] if events.exists() else []
+    )
+    writes = [event for event in observed if not event["path"].endswith("/git-upload-pack")]
+    with state.read_connection() as connection:
+        sent = connection.execute(
+            "SELECT count(*) FROM operation_events WHERE to_status='executing'"
+        ).fetchone()[0]
+    if writes or sent:
+        raise RuntimeError("preview sent a target write before operator confirmation")
+    return {
+        "passed": True,
+        "no_remote_writes": True,
+        "generation": plans[0]["preview"]["generation"],
+    }
+
+
+def collision_result() -> dict[str, Any]:
+    state = StateStore(DATABASE)
+    plans = PlanService(state).list()
+    if len(plans) != 1:
+        raise RuntimeError("collision probe must contain exactly one draft")
+    plan = plans[0]
+    if plan["status"] != "draft" or plan["preview"]["status"] != "blocked":
+        raise RuntimeError("occupied target was not blocked before execution")
+    if not any(step["status"] == "conflict" for step in plan["operations"]):
+        raise RuntimeError("collision did not preserve the operation conflict")
+    if any(
+        step["status"] not in {"prepared", "conflict", "blocked_parent"}
+        for step in plan["operations"]
+    ):
+        raise RuntimeError("collision probe sent or confirmed an operation")
+    with state.read_connection() as connection:
+        sent = connection.execute(
+            "SELECT count(*) FROM operation_events WHERE to_status='executing'"
+        ).fetchone()[0]
+    events = ROOT / "remote-events.jsonl"
+    if sent or (events.exists() and events.read_text().strip()):
+        raise RuntimeError("collision preview performed a target write")
+    return {"blocked": True, "no_remote_writes": True, "snapshot": collision_snapshot()}
+
+
 def main() -> None:
+    global CONTEXT, ROOT, DATABASE
     parser = argparse.ArgumentParser()
     actions = {
         "initial": initial,
@@ -644,13 +735,32 @@ def main() -> None:
         "stop-browser": stop_browser,
         "browser-upload": browser_upload_evidence,
         "browser-result": browser_result,
+        "browser-preview": browser_preview,
+        "collision-snapshot": collision_snapshot,
+        "collision-result": collision_result,
     }
     parser.add_argument("mode", choices=(*actions, "serve-browser"))
+    parser.add_argument("--context", choices=("normal", "collision"), default="normal")
     args = parser.parse_args()
+    CONTEXT = args.context
+    if CONTEXT == "collision":
+        ROOT = Path("/state/package-collision")
+        DATABASE = ROOT / "state" / "state.sqlite3"
     if args.mode == "serve-browser":
         serve_browser()
         return
-    print(json.dumps(actions[args.mode](), sort_keys=True))
+    try:
+        print(json.dumps(actions[args.mode](), sort_keys=True))
+    except Exception as error:
+        evidence = {
+            "exception_type": type(error).__name__,
+            "frames": [
+                {"file": Path(frame.filename).name, "function": frame.name, "line": frame.lineno}
+                for frame in traceback.extract_tb(error.__traceback__)
+            ],
+        }
+        print("GITFERRY_PROBE_ERROR " + json.dumps(evidence), file=sys.stderr)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

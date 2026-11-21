@@ -40,6 +40,7 @@ def complete_probe_report() -> dict[str, object]:
     report: dict[str, object] = {
         "source_exports": {
             "status": "passed",
+            "image_id": "sha256:" + "a" * 64,
             "assertions": dict.fromkeys(
                 (
                     "source_capture_confirmed",
@@ -64,6 +65,11 @@ def complete_probe_report() -> dict[str, object]:
                     "target_upload_files_only_before_local_setup",
                     "target_upload_replay_persistent_identity",
                     "guided_browser_first_import",
+                    "guided_browser_source_export",
+                    "guided_browser_target_collision",
+                    "guided_browser_preview_no_remote_write",
+                    "guided_browser_production_runtime",
+                    "guided_selected_set_and_control",
                     "guided_browser_restart_read_only",
                 ),
                 True,
@@ -144,6 +150,7 @@ def complete_probe_report() -> dict[str, object]:
         },
         "oci_runtime": {
             "status": "passed",
+            "image_id": "sha256:" + "a" * 64,
             "assertions": {
                 "non_root_user": True,
                 "version_label": True,
@@ -153,6 +160,8 @@ def complete_probe_report() -> dict[str, object]:
                 "graceful_stop_signal": True,
                 "fresh_volume_initialized": True,
                 "packaged_frontend_served": True,
+                "installed_admin_security": True,
+                "runtime_hardening": True,
                 "container_replacement_preserved_state": True,
                 "identity_binding_preserved": True,
                 "object_mapping_preserved": True,
@@ -537,6 +546,11 @@ def test_application_plan_assertion_is_required(tmp_path: Path, assertion: str) 
         "target_upload_files_only_before_local_setup",
         "target_upload_replay_persistent_identity",
         "guided_browser_first_import",
+        "guided_browser_source_export",
+        "guided_browser_target_collision",
+        "guided_browser_preview_no_remote_write",
+        "guided_browser_production_runtime",
+        "guided_selected_set_and_control",
         "guided_browser_restart_read_only",
     ],
 )
@@ -544,4 +558,20 @@ def test_source_capture_assertion_is_required(tmp_path: Path, assertion: str) ->
     module = report_contract()
     report = complete_probe_report()
     del report["source_exports"]["assertions"][assertion]
+    assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize("image_id", [None, "sha256:" + "b" * 64])
+def test_browser_and_runtime_must_use_the_same_image(tmp_path: Path, image_id) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    report["source_exports"]["image_id"] = image_id
+    assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize("assertion", ["installed_admin_security", "runtime_hardening"])
+def test_installed_application_security_is_required(tmp_path: Path, assertion: str) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    del report["oci_runtime"]["assertions"][assertion]
     assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))

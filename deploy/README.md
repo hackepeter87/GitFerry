@@ -1,17 +1,22 @@
-# OCI deployment foundation
+# OCI installation and first import
 
-This Compose example exercises the accepted local runtime boundary and packages the same-origin
-administrator frontend. It does not complete a transfer workflow or claim productive-data
-migration.
+This Compose example runs the same-origin administration frontend and durable application worker.
+Use the [guided first-import workflow](../docs/first-import.md) after local setup. Productive-data
+migration, a stable release and qualification of later data classes are not claimed.
 
 ## Prepare and start
 
 1. Build the current checkout with `make container-build`, or set `GITFERRY_IMAGE` to an image
    reference that includes an immutable digest.
 2. Copy `.env.example` to an operator-owned `.env` outside version control.
-3. Create the two token files named by the environment file with mode `0600`. They are mounted as
-   Compose secrets and are not embedded in the image or SQLite. The current runtime only preserves
-   these references; connection-profile execution is delivered separately.
+3. Create the credential directory and the two token files named by the environment file. Give
+   credential files mode `0600` and make them readable by the container UID `10001` (on Linux,
+   assign ownership to `10001:10001`; the directory needs traversal permission for that UID).
+   The original `source_api_token` and `target_api_token` aliases remain Compose secrets.
+   Additional files in `GITFERRY_CREDENTIAL_DIR` are read-only local aliases: for example, a file
+   named `comment-author` supplies that explicitly bound author's token. Never put token values
+   in `.env`, configuration exports or SQLite. Adding another author file does not require editing
+   the Compose file. A technical administrator token is not a substitute for an author token.
 4. Create the CA directory. Add only the internal CA certificates required by local connection
    profiles. TLS verification remains enabled.
 5. Run `docker compose --env-file .env -f deploy/compose.yaml up -d --wait`.
@@ -49,9 +54,11 @@ For recovery, use the same pattern and replace only the final CLI command with:
 gitferry admin recover --database "$GITFERRY_STATE_DB" --password-file "$temporary"
 ```
 
-Recovery revokes all existing sessions. MFA, SSO, multi-administrator management, and a general
-transfer UI are not implemented. Terminate TLS in front of the service so secure cookies are
-protected in deployment.
+Recovery revokes all existing sessions. MFA, SSO and multi-administrator management are not
+implemented. Terminate TLS in front of the service so secure cookies are protected in deployment.
+Configure and approve connections in the UI, then follow the first-import guide. The profile and
+author-reference fields contain filenames/aliases only. Missing or unreadable files and CAs block
+the prerequisite check; they never trigger a fallback to another account.
 
 ## Persistent storage and replacement
 

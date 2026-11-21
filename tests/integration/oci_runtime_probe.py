@@ -69,6 +69,13 @@ def start_runtime(name: str, volume: str, containers: list[str]) -> str:
             f"gitferry.integration.project={COMPOSE_PROJECT}",
             "--network",
             "none",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001",
             "-v",
             f"{volume}:/var/lib/gitferry",
             "-v",
@@ -203,8 +210,17 @@ def run_oci_runtime_probe() -> dict[str, Any]:
         first_container_id = start_runtime(runtime, volume, containers)
         wait_for_health(runtime)
         packaged_ui = exec_worker(runtime, "ui")
+        security = exec_worker(runtime, "security")
         first_inspect = json.loads(docker(["inspect", runtime]))[0]
-        if first_inspect["HostConfig"].get("Privileged"):
+        host_config = first_inspect["HostConfig"]
+        runtime_hardening = {
+            "read_only_rootfs": host_config.get("ReadonlyRootfs") is True,
+            "all_capabilities_dropped": "ALL" in (host_config.get("CapDrop") or []),
+            "no_new_privileges": "no-new-privileges:true" in (host_config.get("SecurityOpt") or []),
+        }
+        if not all(runtime_hardening.values()):
+            raise ProbeFailure(f"runtime hardening mismatch: {runtime_hardening}")
+        if host_config.get("Privileged"):
             raise ProbeFailure("runtime unexpectedly uses privileged mode")
         if any("docker.sock" in mount.get("Source", "") for mount in first_inspect["Mounts"]):
             raise ProbeFailure("runtime unexpectedly mounts a Docker socket")
@@ -289,6 +305,21 @@ def run_oci_runtime_probe() -> dict[str, Any]:
             **image_contract,
             "fresh_volume_initialized": seeded["integrity_check"] == "ok",
             "packaged_frontend_served": all(packaged_ui.values()),
+            "installed_admin_security": set(security)
+            == {
+                "cli_admin_bootstrap",
+                "cli_password_not_logged",
+                "unauthenticated_plans_401",
+                "secure_session_cookie",
+                "http_only_session_cookie",
+                "strict_session_cookie",
+                "authenticated_session_200",
+                "missing_csrf_403",
+                "logout_204",
+                "revoked_session_401",
+            }
+            and all(security.values()),
+            "runtime_hardening": all(runtime_hardening.values()),
             "container_replacement_preserved_state": after_replacement == seeded,
             "identity_binding_preserved": seeded["binding_id"] == "oci-binding-a-b",
             "object_mapping_preserved": seeded["mapping_target_global_id"] == "12001",
@@ -318,6 +349,8 @@ def run_oci_runtime_probe() -> dict[str, Any]:
             "failure_cases": failures,
             "state": seeded,
             "packaged_frontend": packaged_ui,
+            "admin_security": security,
+            "runtime_hardening": runtime_hardening,
         }
     finally:
         for container in reversed(containers):

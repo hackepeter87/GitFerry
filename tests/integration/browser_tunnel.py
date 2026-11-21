@@ -39,13 +39,13 @@ with socket.create_connection(('127.0.0.1', 8080), timeout=10) as peer:
 
 
 @contextmanager
-def browser_tunnel(compose: Sequence[str]) -> Iterator[str]:
+def browser_tunnel(compose: Sequence[str], service: str = "gitferry-b") -> Iterator[str]:
     stopping = threading.Event()
 
     class Handler(socketserver.BaseRequestHandler):
         def handle(self) -> None:
             process = subprocess.Popen(  # noqa: S603 -- fixed target in the test's Compose project
-                [*compose, "exec", "-T", "gitferry-b", "python", "-u", "-c", _REMOTE],
+                [*compose, "exec", "-T", service, "python", "-u", "-c", _REMOTE],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,

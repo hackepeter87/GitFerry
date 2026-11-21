@@ -29,6 +29,8 @@ OCI_RUNTIME_ASSERTION_NAMES = frozenset(
         "graceful_stop_signal",
         "fresh_volume_initialized",
         "packaged_frontend_served",
+        "installed_admin_security",
+        "runtime_hardening",
         "container_replacement_preserved_state",
         "identity_binding_preserved",
         "object_mapping_preserved",
@@ -347,10 +349,17 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                         "target_upload_files_only_before_local_setup",
                         "target_upload_replay_persistent_identity",
                         "guided_browser_first_import",
+                        "guided_browser_source_export",
+                        "guided_browser_target_collision",
+                        "guided_browser_preview_no_remote_write",
+                        "guided_browser_production_runtime",
+                        "guided_selected_set_and_control",
                         "guided_browser_restart_read_only",
                     }
                 ),
-            ),
+            )
+            and bool(_value(report, "source_exports.image_id"))
+            and _value(report, "source_exports.image_id") == _value(report, "oci_runtime.image_id"),
             "tests/integration/source_export_probe.py",
             "source_exports.assertions",
         ),
