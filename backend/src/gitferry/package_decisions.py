@@ -2,31 +2,22 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import sqlite3
 from dataclasses import asdict
 from typing import Annotated, Any
-from urllib.parse import quote
 
-import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from gitferry.application_package import PackageArtifact, load_package_metadata
 from gitferry.comment_operations import resolve_author_binding
-from gitferry.connection_probe import (
-    ConnectionUnavailable,
-    LocalReferences,
-    _json,
-    probe_connection,
-)
-from gitferry.connection_profiles import ProfileService, normalize_url
-from gitferry.gitea_provisioning import verify_account
+from gitferry.connection_probe import LocalReferences
+from gitferry.connection_profiles import normalize_url
 from gitferry.package_admission import PackageAdmissionConflict, PackageAdmissions, _authority
 from gitferry.package_selection import _selector
-from gitferry.source_catalog import _SourceReferences
 from gitferry.state_codec import canonical_json
 from gitferry.state_store import BindingConflict, OperationBlocked
+from gitferry.target_accounts import check_target_account
 from gitferry.transport_state import _check_endpoint
 
 Reference = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")]
@@ -208,58 +199,14 @@ class PackageDecisions:
         artifact = self._artifact(package_ref, request)
         with self.state.read_connection() as connection:
             authority = self._authority(connection, artifact, request)
-        profiles = ProfileService(self.state)
-        profile = profiles.get(request.target_instance_key)
-        refs = _SourceReferences(self.references, profile.credential_ref, profile.ca_ref)
-        evidence = probe_connection(
-            profiles,
-            profile.instance_key,
-            expected_revision=request.profile_revision,
-            references=refs,
+        observed = check_target_account(
+            self.state,
+            target_instance_key=request.target_instance_key,
+            profile_revision=request.profile_revision,
+            target_login=request.target_login,
+            credential_ref=request.credential_ref,
+            references=self.references,
         )
-        if evidence["requires_approval"]:
-            raise PackageAdmissionConflict("target connection changed; local approval required")
-        token = (
-            self.references.token(request.credential_ref)
-            if request.credential_ref
-            else refs.token(profile.credential_ref)
-        )
-        context, ca_digest = refs.tls(profile.ca_ref)
-        if ca_digest != evidence["observed_identity"]["ca_digest"]:
-            raise PackageAdmissionConflict("target CA changed")
-
-        async def read() -> dict[str, Any]:
-            async with httpx.AsyncClient(
-                base_url=profile.base_url + "/api/v1/",
-                verify=context,
-                headers={"Authorization": "token " + token, "Accept-Encoding": "identity"},
-                follow_redirects=False,
-                trust_env=False,
-                timeout=10,
-            ) as client:
-                path = (
-                    "user"
-                    if request.credential_ref
-                    else "users/" + quote(request.target_login, safe="")
-                )
-                account, fingerprint = await _json(client, path)
-                if fingerprint != evidence["observed_identity"]["certificate_sha256"]:
-                    raise ConnectionUnavailable("target TLS identity changed")
-                if token in canonical_json(account):
-                    raise ConnectionUnavailable("remote response reflected a credential")
-                return account
-
-        async def bounded() -> dict[str, Any]:
-            return await asyncio.wait_for(read(), timeout=15)
-
-        try:
-            account = asyncio.run(bounded())
-        except (TimeoutError, httpx.HTTPError) as error:
-            raise ConnectionUnavailable("target account check failed") from error
-        identifier = account.get("id")
-        if type(identifier) is not int or not 0 < identifier <= 2**63 - 1:
-            raise PackageAdmissionConflict("invalid native account ID")
-        verify_account(account, request.target_login, identifier)
         artifact = self._artifact(package_ref, request)
         with self.state.read_connection() as connection:
             if self._authority(connection, artifact, request) != authority:
@@ -267,7 +214,7 @@ class PackageDecisions:
         return {
             "authority_digest": authority,
             "target_login": request.target_login,
-            "target_account_id": str(identifier),
+            "target_account_id": observed["target_account_id"],
             "credential_checked": request.credential_ref is not None,
         }
 
