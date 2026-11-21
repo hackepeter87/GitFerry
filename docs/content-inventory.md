@@ -40,7 +40,7 @@ not reported as empty. A requested class with a missing page, permission failure
 identity, unsupported endpoint, or stale source is blocked/failed with an unknown count. An
 unrequested class is visible as excluded. Absence in a package never means delete.
 
-Requested label transfer, issue label assignments, split or additional team units, direct
+Requested label transfer, issue label/milestone/assignee relationships, split or additional team units, direct
 collaborators, and other unsupported requested content block the selected transfer scope.
 Technical administrative owner teams remain an explicit exclusion; target ownership is local. Inventory does not add a metadata
 transfer claim, a signature, a hard disk quota, or a 30 GB qualification.

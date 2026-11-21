@@ -1,6 +1,6 @@
 # ADR 0024: Selected-content inventory and transfer completeness
 
-Status: proposed for Issue #17
+Status: accepted
 
 ## Context
 
@@ -51,10 +51,12 @@ are not enforced disk quotas or a 30 GB qualification.
 
 The desktop, REST API and CLI present the same stored facts and decisions. A complete transfer
 cannot be claimed for excluded, unknown or unsupported requested content. Real synthetic fixtures
-and direct test-harness enumeration must qualify available classes before this ADR is accepted.
-Current local evidence includes 53 broad tests, 17 focused inventory/package tests and 7 browser
-tests passing; a complete real-instance integration run is still in progress and is not acceptance
-evidence yet.
+and independent direct test-harness enumeration qualify the 19 available classes against Gitea
+1.27.2. The existing integration entry point requires these observations, explicit empty and
+unsupported cases, and the desktop inventory-bound export/file receipt/import/restart flow.
+Unit and browser regressions cover failed/incomplete reads, immutable facts, source drift,
+package tampering, local authority and compatibility. Run-specific evidence belongs in Issue #17,
+its delivery PR and Actions artifacts.
 Old manifest fixtures and supported bounded first-import behavior remain regression gates.
 No additional content transfer capability is claimed by inventory support alone; Issues #18–#20
 own their existing feasibility and implementation contracts.

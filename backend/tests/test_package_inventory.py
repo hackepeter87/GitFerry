@@ -200,6 +200,7 @@ def test_drift_blocks_export_without_replacing_inventory(tmp_path, monkeypatch):
     "change",
     [
         "source",
+        "installation-marker",
         "repo",
         "organization",
         "team",
@@ -221,6 +222,8 @@ def test_v2_inventory_tampering_cannot_pass_package_inspection(tmp_path, monkeyp
     classes = {c["content_class"]: c for c in repo["classes"]}
     if change == "source":
         document["source_instance_key"] = "unrelated"
+    elif change == "installation-marker":
+        document["source_installation_marker"] = "rebuilt-source-installation"
     elif change == "repo":
         repo["native_id"] = "99"
     elif change == "organization":
