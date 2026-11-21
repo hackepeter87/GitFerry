@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ApiError, cancelPlan, getPlan, listPlans, preparePlan, queuePlan, type PlanOperation, type PlanStatus, type TransferPlan } from "./api";
+import { ApiError, cancelPlan, getPlan, listPlans, preparePlan, queuePlan, requestPlanPreview, type PlanOperation, type PlanStatus, type TransferPlan } from "./api";
 
 const emit = defineEmits<{ (event: "session-expired"): void }>();
 const props = defineProps<{ preparedPlan?: TransferPlan }>();
@@ -20,6 +20,10 @@ let disposed = false;
 const MAX_POLLS = 24;
 
 const active = computed(() => Boolean(selected.value && ["queued", "preflighting", "running"].includes(selected.value.status)));
+const preview = computed(() => selected.value?.preview ?? null);
+const previewPending = computed(() => Boolean(preview.value && ["queued", "checking"].includes(preview.value.status)));
+const previewReady = computed(() => Boolean(preview.value?.status === "passed" && preview.value.plan_digest === selected.value?.digest));
+const previewTerminal = computed(() => Boolean(selected.value && ["draft", "blocked", "failed", "cancelled"].includes(selected.value.status)));
 const request = computed(() => selected.value?.document.inventory?.request ?? {});
 const repositories = computed(() => {
   const structures = Array.isArray(request.value.repositories) ? request.value.repositories as Array<Record<string, unknown>> : [];
@@ -31,6 +35,10 @@ const repositories = computed(() => {
   return [...scopes.values()];
 });
 const unsupported = computed(() => Array.isArray(request.value.unsupported_items) ? request.value.unsupported_items.map(String) : []);
+const requiredBytes = computed(() => {
+  const value = selected.value?.document.required_bytes;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+});
 const limitations = computed(() => selected.value?.document.inventory?.limitations ?? []);
 const unresolved = computed(() => selected.value?.operations?.some((item) => ["outcome_unknown", "conflict", "failed"].includes(item.status)) ?? false);
 const selectedActors = computed(() => {
@@ -116,12 +124,12 @@ async function prepareDraft(): Promise<void> {
 
 async function queue(): Promise<void> {
   const plan = selected.value;
-  if (!plan || saving.value || detailLoading.value || unresolved.value || unsupported.value.length > 0 || !["draft", "blocked", "failed", "cancelled"].includes(plan.status)) return;
+  if (!plan || saving.value || detailLoading.value || unresolved.value || unsupported.value.length > 0 || !previewReady.value || !["draft", "blocked", "failed", "cancelled"].includes(plan.status)) return;
   stopPolling();
   const current = ++generation;
   error.value = ""; notice.value = ""; saving.value = true;
   try {
-    const value = await queuePlan(plan.plan_id, plan.digest);
+    const value = await queuePlan(plan.plan_id, plan.digest, plan.preview?.generation);
     if (disposed || current !== generation) return;
     selected.value = value;
     replaceSummary(value);
@@ -129,6 +137,22 @@ async function queue(): Promise<void> {
     schedulePoll(current, 0);
   } catch (cause) { if (!disposed) handleError(cause, "Queueing could not be confirmed. Refresh before trying again."); }
   finally { saving.value = false; }
+}
+
+async function requestPreview(): Promise<void> {
+  const plan = selected.value;
+  if (!plan || saving.value || !previewTerminal.value) return;
+  stopPolling();
+  const current = ++generation;
+  error.value = ""; notice.value = ""; saving.value = true;
+  try {
+    const value = await requestPlanPreview(plan.plan_id, plan.digest);
+    if (disposed || current !== generation) return;
+    selected.value = value; replaceSummary(value);
+    notice.value = "Read-only prerequisite preview requested. Execution will recheck before writing.";
+    schedulePoll(current, 0);
+  } catch (cause) { if (!disposed && current === generation) handleError(cause, "The prerequisite preview could not be requested. Refresh and try again."); }
+  finally { if (!disposed && current === generation) saving.value = false; }
 }
 
 async function cancel(): Promise<void> {
@@ -156,7 +180,7 @@ function replaceSummary(plan: TransferPlan): void {
 
 function schedulePoll(current: number, count: number): void {
   stopPolling();
-  if (!active.value || disposed || current !== generation) return;
+  if ((!active.value && !previewPending.value) || disposed || current !== generation) return;
   if (count >= MAX_POLLS) { notice.value = "Live refresh paused. The server continues working; refresh to check its status."; return; }
   const id = selectedId.value!;
   pollTimer = window.setTimeout(async () => {
@@ -215,12 +239,14 @@ function handleError(cause: unknown, fallback: string): void {
         </button>
       </nav>
       <article v-if="selected" class="plan-detail" aria-labelledby="plan-detail-title">
-        <div class="plan-detail-heading"><div><p class="kicker">Selected plan</p><h3 id="plan-detail-title">{{ selected.round_key }}</h3><p class="supporting">Status: <strong>{{ statusLabel(selected.status) }}</strong><span v-if="selected.reason"> · {{ selected.reason }}</span></p></div><div class="actions"><button v-if="['draft','blocked','failed','cancelled'].includes(selected.status)" class="primary" type="button" :disabled="saving || unresolved || detailLoading || unsupported.length > 0" @click="queue">{{ saving ? "Queueing…" : "Start reviewed plan" }}</button><button v-if="['draft','queued','preflighting','running'].includes(selected.status)" type="button" :disabled="saving || selected.cancel_requested" @click="cancel">Cancel plan</button></div></div>
+        <div class="plan-detail-heading"><div><p class="kicker">Selected plan</p><h3 id="plan-detail-title">{{ selected.round_key }}</h3><p class="supporting">Status: <strong>{{ statusLabel(selected.status) }}</strong><span v-if="selected.reason"> · {{ selected.reason }}</span></p></div><div class="actions"><button v-if="previewTerminal" type="button" :disabled="saving || detailLoading" @click="requestPreview">{{ preview?.status ? "Retry prerequisite preview" : "Request prerequisite preview" }}</button><button v-if="['draft','blocked','failed','cancelled'].includes(selected.status)" class="primary" type="button" :disabled="saving || unresolved || detailLoading || unsupported.length > 0 || !previewReady" @click="queue">{{ saving ? "Queueing…" : "Start reviewed plan" }}</button><button v-if="['draft','queued','preflighting','running'].includes(selected.status)" type="button" :disabled="saving || selected.cancel_requested" @click="cancel">Cancel plan</button></div></div>
         <p v-if="detailLoading" class="status-line" aria-live="polite">Refreshing plan details…</p>
+        <section class="preview-box" aria-labelledby="preview-title"><h4 id="preview-title">Read-only prerequisite preview</h4><p v-if="!preview">Request a preview before starting this plan. It observes target prerequisites only; execution rechecks them before any write.</p><dl v-else><div><dt>Status</dt><dd>{{ preview.status }}</dd></div><div v-if="preview.scope"><dt>Scope</dt><dd>{{ preview.scope }}</dd></div><div><dt>Updated</dt><dd>{{ preview.updated_at }}</dd></div><div v-if="preview.reason"><dt>Reason</dt><dd>{{ preview.reason }}</dd></div></dl><p v-if="preview && preview.status === 'passed' && !previewReady" class="alert" role="status">This preview belongs to an older plan digest. Request a fresh preview.</p><p v-if="preview && ['queued','checking'].includes(preview.status)" class="supporting" role="status">Preview is running. Start remains disabled until it passes.</p><p v-if="preview && ['blocked','failed'].includes(preview.status)" class="alert" role="status">Preview did not pass. Resolve the reason, then retry explicitly.</p><p class="supporting">A passed preview is evidence, not a guarantee; the executor performs its own checks.</p></section>
         <details class="evidence-box"><summary>Connection and plan verification details</summary><dl><div><dt>Target</dt><dd><code>{{ selected.target_instance_key }}</code></dd></div><div><dt>Profile revision</dt><dd>{{ selected.profile_revision }}</dd></div><div><dt>Approved identity evidence</dt><dd><code>{{ selected.evidence_digest }}</code></dd></div><div><dt>Current plan digest</dt><dd><code>{{ selected.digest }}</code></dd></div></dl><p class="supporting">These local references bind review to the target connection and immutable plan contents. They do not contain credentials.</p></details>
-        <p v-if="unresolved" class="alert" role="status">An operation needs local reconciliation or conflict resolution before this plan can continue. Requeueing does not resolve it.</p>
+        <p v-if="unresolved" class="alert" role="status">An operation needs local reconciliation or conflict resolution before this plan can continue. Requeueing does not resolve it. <a href="https://github.com/hackepeter87/GitFerry/blob/main/docs/transfer-plans.md#recovery" target="_blank" rel="noopener noreferrer">Open the operator recovery guide</a>.</p>
         <section v-if="unsupported.length" aria-labelledby="unsupported-title"><h4 id="unsupported-title">Selected contents are not supported</h4><p class="alert" role="status">Revise this selection before starting a transfer.</p><ul><li v-for="item in unsupported" :key="item">{{ item }}</li></ul></section>
         <section aria-labelledby="scope-title"><h4 id="scope-title">Selected repository scope</h4><p v-if="!repositories.length" class="supporting">No repositories are included in this plan.</p><ul v-else class="scope-list"><li v-for="(repository, index) in repositories" :key="`${String(repository.repository ?? index)}-${index}`"><strong>{{ String(repository.repository ?? "Unnamed repository") }}</strong><span v-if="repository.organization">Organization: {{ String(repository.organization) }}</span><span v-if="repository.bundle">Git bundle selected for this repository.</span></li></ul><p v-if="selected.document.inventory?.inventory_complete === false" class="supporting limitation-note">This is an explicit selection, not a complete source inventory.</p></section>
+        <section aria-labelledby="storage-title"><h4 id="storage-title">Required local free-space estimate</h4><p v-if="requiredBytes !== null" class="storage-estimate">{{ requiredBytes.toLocaleString() }} bytes</p><p v-else class="alert">The server did not provide a storage estimate. Refresh the plan before proceeding.</p><p class="supporting">This saved plan requires this much free space on each package and working filesystem. The bounded estimate includes 64 MiB plus three times the selected bundle bytes; it is not a measured remote Gitea capacity requirement or a guarantee about Git expansion. Prerequisite preview and execution check local free space again.</p></section>
         <section v-if="selectedActors.length" aria-labelledby="actors-title"><h4 id="actors-title">Locally confirmed identities</h4><ul><li v-for="actor in selectedActors" :key="String(actor.binding_id)">{{ actor.source_realm_key }} / {{ actor.source_login }} → {{ actor.target_login }} (target account {{ actor.target_account_id }})</li></ul></section>
         <section aria-labelledby="operations-title"><h4 id="operations-title">Operations and dependency evidence</h4><p v-if="!selected.operations?.length" class="supporting">No operation details were returned.</p><ol v-else class="operation-list"><li v-for="operation in selected.operations" :key="operation.operation_id"><div><strong>{{ operationLabel(operation) }}</strong><span v-if="operation.target_repository_scope"> · {{ operation.target_repository_scope }}</span></div><span class="operation-status" :data-status="operation.status">{{ operationStatus(operation.status) }}</span><details v-if="operationContent(operation)"><summary>Content to apply</summary><pre class="operation-content">{{ operationContent(operation) }}</pre></details><details v-if="operation.operation_id || operation.target_global_id"><summary>Operation details</summary><dl><div><dt>Operation ID</dt><dd><code>{{ operation.operation_id }}</code></dd></div><div v-if="dependencies(operation).length"><dt>Depends on</dt><dd>{{ dependencies(operation).join(", ") }}</dd></div><div v-if="operation.target_global_id"><dt>Target ID</dt><dd><code>{{ operation.target_global_id }}</code></dd></div><div v-if="operation.error_reason"><dt>Reason</dt><dd>{{ operation.error_reason }}</dd></div></dl></details></li></ol></section>
         <form v-if="selected.document.inventory?.request" class="selection-copy" @submit.prevent="prepareDraft">
@@ -238,6 +264,8 @@ function handleError(cause: unknown, fallback: string): void {
 
 <style scoped>
 .selection-copy { margin-top: 1.25rem; }
+.preview-box { margin-top: 1rem; padding: .85rem; border-left: .25rem solid #2b6f4a; background: #eef5ef; }
+.preview-box h4 { margin: 0 0 .5rem; }
 .operation-status { display: inline-block; margin-inline-start: .5rem; }
 .operation-content { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .plans-panel { margin-top: 2rem; padding-top: 1.5rem; border-top: .0625rem solid #ccd4cd; }

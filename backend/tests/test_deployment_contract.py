@@ -40,6 +40,11 @@ def test_reference_deployment_uses_secret_and_ca_references() -> None:
     assert set(document["secrets"]) == {"source_api_token", "target_api_token"}
     assert service["environment"]["GITFERRY_SOURCE_TOKEN_FILE"].startswith("/run/secrets/")
     assert service["environment"]["GITFERRY_TARGET_TOKEN_FILE"].startswith("/run/secrets/")
-    ca_mount = next(volume for volume in service["volumes"] if isinstance(volume, dict))
-    assert ca_mount["target"] == "/etc/gitferry/ca"
+    mounts = {volume["target"]: volume for volume in service["volumes"] if isinstance(volume, dict)}
+    ca_mount = mounts["/etc/gitferry/ca"]
+    assert ca_mount["type"] == "bind"
     assert ca_mount["read_only"] is True
+    credential_mount = mounts["/run/secrets"]
+    assert credential_mount["type"] == "bind"
+    assert credential_mount["source"] == "${GITFERRY_CREDENTIAL_DIR:-./secrets}"
+    assert credential_mount["read_only"] is True

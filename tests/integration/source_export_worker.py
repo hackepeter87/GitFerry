@@ -7,8 +7,9 @@ import hashlib
 import json
 import os
 import shutil
+import signal
+import subprocess
 import sys
-import threading
 import time
 import traceback
 from pathlib import Path
@@ -16,6 +17,7 @@ from typing import Any
 
 import httpx
 import plan_worker
+from browser_runtime import serve
 from fastapi.testclient import TestClient
 from gitferry.api import create_app
 from gitferry.application_package import inspect_package
@@ -23,6 +25,7 @@ from gitferry.auth import AuthService
 from gitferry.connection_probe import LocalReferences, approve_connection, probe_connection
 from gitferry.connection_profiles import ConnectionProfile, ProfileService
 from gitferry.runtime import RuntimePaths
+from gitferry.source_export_jobs import SourceExportJobs
 from gitferry.source_exports import SourceExports
 from gitferry.state_store import StateStore
 
@@ -104,6 +107,14 @@ def _setup_source_repository(token: str) -> None:
         json={"name": "selected", "private": True, "auto_init": True},
     )
     _admin_request(token, "PUT", f"/teams/{team['id']}/repos/source-export-lab/selected")
+    for name in ("selected-extra", "not-selected"):
+        _admin_request(
+            token,
+            "POST",
+            "/orgs/source-export-lab/repos",
+            json={"name": name, "private": True, "auto_init": True},
+        )
+    _admin_request(token, "PUT", f"/teams/{team['id']}/repos/source-export-lab/selected-extra")
 
 
 def _service() -> SourceExports:
@@ -143,21 +154,6 @@ def _api_application(state: StateStore):
     if not auth.bootstrap_completed():
         auth.bootstrap_admin("synthetic.admin", "synthetic integration passphrase")
     return create_app(auth_service=auth, session_cookie_secure=False)
-
-
-def _wait_for_ready(client: TestClient, export_id: str) -> dict[str, Any]:
-    deadline = time.monotonic() + 180
-    poll_wait = threading.Event()
-    while time.monotonic() < deadline:
-        response = client.get(f"/api/v1/exports/{export_id}")
-        response.raise_for_status()
-        job = response.json()
-        if job["status"] in {"ready", "failed"}:
-            if job["status"] == "failed":
-                raise RuntimeError("source export delivery failed")
-            return job
-        poll_wait.wait(timeout=min(0.1, max(0.0, deadline - time.monotonic())))
-    raise RuntimeError("source export delivery did not reach a terminal state")
 
 
 def _api_login(client: TestClient) -> dict[str, str]:
@@ -218,6 +214,8 @@ def capture() -> dict[str, Any]:
     (ROOT / "secrets" / "source-token").write_text(token, encoding="ascii")
     (ROOT / "secrets" / "source-token").chmod(0o600)
     state = StateStore(DATABASE)
+    AuthService(state).bootstrap_admin("synthetic.admin", "synthetic integration passphrase")
+    DATABASE.chmod(0o600)
     profiles = ProfileService(state)
     plan_worker.ROOT = ROOT
     plan_worker.URL = "http://source:3000"
@@ -244,96 +242,89 @@ def capture() -> dict[str, Any]:
         approve_connection(
             profiles, SOURCE, expected_revision=1, evidence_digest=evidence["evidence_digest"]
         )
-        request = {
-            "version": 1,
-            "source_instance_key": SOURCE,
-            "source_profile_revision": 1,
-            "recipient_instance_key": RECIPIENT,
-            "repositories": [{"repository": REPOSITORY, "global_id": ""}],
-            "include_metadata": True,
-            "include_members": True,
-        }
-        request["repositories"][0]["global_id"] = str(
-            _source_request("GET", "/repos/" + REPOSITORY).json()["id"]
-        )
-        with TestClient(_api_application(state), base_url="http://testserver") as client:
-            client.get("/readyz").raise_for_status()
-            headers = _api_login(client)
-            queued = client.post(
-                "/api/v1/exports",
-                json={"export_id": "source-export-real", "request": request},
-                headers=headers,
-            )
-            queued.raise_for_status()
-            if queued.status_code != 202:
-                raise RuntimeError("source queue did not acknowledge acceptance")
-            delivered = _wait_for_ready(client, "source-export-real")
-            api_archive = _download(client, "source-export-real", ROOT / "source-export.zip")
-        service = SourceExports(
-            state,
-            RuntimePaths(DATABASE, PACKAGE_DIR, WORK_DIR),
-            LocalReferences(ROOT / "secrets", ROOT / "ca"),
-        )
-        # Preserve the capture record's historical `captured` semantics while
-        # recording the separate API delivery state and streamed response facts.
-        captured = service.get("source-export-real")
-        artifact = inspect_package(PACKAGE_DIR / "source-export-real")
-        archive = ROOT / "source-export.zip"
-        manifest = artifact.directory / "metadata" / "manifest.json"
-        events = [
-            json.loads(line) for line in (ROOT / "remote-events.jsonl").read_text().splitlines()
-        ]
-        return {
-            "job": captured,
-            "api_queue_status": queued.json()["status"],
-            "api_queue_export_id": queued.json().get("export_id"),
-            "api_delivery": delivered,
-            "api_download": api_archive,
-            "package_digest": artifact.digest_sha256,
-            "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
-            "archive_bytes": archive.stat().st_size,
-            "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
-            "proxy_calls": events,
-            "source_api_writes": [
-                call
-                for call in events
-                if call["method"] in {"POST", "PUT", "PATCH", "DELETE"}
-                and "/git-upload-pack" not in call["path"]
-            ],
-            "git_upload_pack_posts": [
-                call
-                for call in events
-                if call["method"] == "POST" and call["path"].endswith("/git-upload-pack")
-            ],
-            "source_db": str(DATABASE),
-            "source_db_sha256": hashlib.sha256(DATABASE.read_bytes()).hexdigest(),
-            "source_exports_rows": len(service.list()),
-            "source_target_unreachable": _unreachable("target", 3000),
-            "source_external_unreachable": _unreachable("1.1.1.1", 80),
-            "package": str(archive),
-        }
+        return {"status": "prepared"}
+
+
+def capture_result() -> dict[str, Any]:
+    state = StateStore(DATABASE)
+    service = SourceExports(
+        state,
+        RuntimePaths(DATABASE, PACKAGE_DIR, WORK_DIR),
+        LocalReferences(ROOT / "secrets", ROOT / "ca"),
+    )
+    jobs = service.list()
+    if len(jobs) != 1:
+        raise RuntimeError("browser did not create exactly one source export")
+    export_id = jobs[0]["export_id"]
+    captured = service.get(export_id)
+    (ROOT / "browser-export-id").write_text(export_id)
+    artifact = inspect_package(PACKAGE_DIR / export_id)
+    archive = ROOT / "source-export-browser.zip"
+    if not archive.is_file():
+        raise RuntimeError("browser archive was not copied into source container")
+    browser_evidence = json.loads((ROOT / "browser-evidence.json").read_text())
+    archive_info = {
+        "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+        "archive_bytes": archive.stat().st_size,
+        "header_sha256": browser_evidence.get("download_header_sha256", ""),
+        "header_bytes": browser_evidence.get("download_header_bytes", 0),
+    }
+    manifest = artifact.directory / "metadata" / "manifest.json"
+    events = [json.loads(line) for line in (ROOT / "remote-events.jsonl").read_text().splitlines()]
+    return {
+        "job": captured,
+        "api_queue_status": browser_evidence["queue_status"],
+        "api_queue_export_id": browser_evidence["export_id"],
+        "api_delivery": SourceExportJobs(state, RuntimePaths(DATABASE, PACKAGE_DIR, WORK_DIR)).get(
+            export_id
+        ),
+        "api_download": archive_info,
+        "package_digest": artifact.digest_sha256,
+        "archive_sha256": archive_info["archive_sha256"],
+        "archive_bytes": archive_info["archive_bytes"],
+        "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        "proxy_calls": events,
+        "source_api_writes": [
+            call
+            for call in events
+            if call["method"] in {"POST", "PUT", "PATCH", "DELETE"}
+            and "/git-upload-pack" not in call["path"]
+        ],
+        "git_upload_pack_posts": [
+            call
+            for call in events
+            if call["method"] == "POST" and call["path"].endswith("/git-upload-pack")
+        ],
+        "source_db": str(DATABASE),
+        "source_db_sha256": hashlib.sha256(DATABASE.read_bytes()).hexdigest(),
+        "source_exports_rows": len(service.list()),
+        "source_target_unreachable": _unreachable("target", 3000),
+        "source_external_unreachable": _unreachable("1.1.1.1", 80),
+        "package": str(archive),
+    }
 
 
 def replay() -> dict[str, Any]:
     state = StateStore(DATABASE)
     service = _service()
-    before = service.get("source-export-real")
+    export_id = (ROOT / "browser-export-id").read_text().strip()
+    before = service.get(export_id)
     events_before = (ROOT / "remote-events.jsonl").read_text(encoding="utf-8").splitlines()
     # Keep the original core replay proof, then repeat the browser command too.
     # The source TLS proxy is no longer running in this fresh process.
-    captured_again = service.run("source-export-real")
+    captured_again = service.run(export_id)
     replay_archive = ROOT / "source-export-replay.zip"
     with TestClient(_api_application(state), base_url="http://testserver") as client:
         client.get("/readyz").raise_for_status()
         headers = _api_login(client)
         after = client.post(
             "/api/v1/exports",
-            json={"export_id": "source-export-real", "request": before["request"]},
+            json={"export_id": export_id, "request": before["request"]},
             headers=headers,
         )
         after.raise_for_status()
         details = after.json()
-        downloaded = _download(client, "source-export-real", replay_archive)
+        downloaded = _download(client, export_id, replay_archive)
     events_after = (ROOT / "remote-events.jsonl").read_text(encoding="utf-8").splitlines()
     return {
         "status": before["status"],
@@ -341,16 +332,87 @@ def replay() -> dict[str, Any]:
         "archive_sha256": downloaded["archive_sha256"],
         "api_status": details["status"],
         "no_source_access": events_before == events_after,
-        "unchanged": before == captured_again == service.get("source-export-real"),
+        "unchanged": before == captured_again == service.get(export_id),
     }
+
+
+def serve_browser() -> None:
+    os.environ.update(
+        {
+            "GITFERRY_RUNTIME_MANAGED": "1",
+            "GITFERRY_STATE_DB": str(DATABASE),
+            "GITFERRY_PACKAGE_DIR": str(PACKAGE_DIR),
+            "GITFERRY_WORK_DIR": str(WORK_DIR),
+            "GITFERRY_SECRET_DIR": str(ROOT / "secrets"),
+            "GITFERRY_CA_DIR": str(ROOT / "ca"),
+        }
+    )
+    plan_worker.ROOT, plan_worker.URL = ROOT, "http://source:3000"
+    with plan_worker.proxy():
+        serve(ROOT)
+
+
+def start_browser() -> dict[str, Any]:
+    pid_path = ROOT / "browser-server.pid"
+    if pid_path.exists():
+        raise RuntimeError("source browser server already has a registered process")
+    with (ROOT / "browser-server.log").open("ab") as log:
+        process = subprocess.Popen(  # noqa: S603 -- fixed worker entrypoint
+            [sys.executable, __file__, "serve-browser"],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    pid_path.write_text(str(process.pid))
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError("source browser server stopped before readiness")
+        try:
+            if (
+                httpx.get("http://localhost:8080/healthz", timeout=1, trust_env=False).status_code
+                == 200
+            ):
+                return {"status": "ready", "pid": process.pid}
+        except httpx.HTTPError:
+            pass
+        time.sleep(0.1)
+    raise RuntimeError("source browser server readiness timed out")
+
+
+def stop_browser() -> dict[str, Any]:
+    pid_path = ROOT / "browser-server.pid"
+    pid = int(pid_path.read_text())
+    command = Path(f"/proc/{pid}/cmdline").read_bytes()
+    if b"source_export_worker.py" not in command or b"serve-browser" not in command:
+        raise RuntimeError("source browser process identity changed")
+    os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        status = Path(f"/proc/{pid}/stat")
+        if not status.exists() or status.read_text().split(") ", 1)[1].startswith("Z"):
+            pid_path.unlink()
+            return {"status": "stopped"}
+        time.sleep(0.1)
+    raise RuntimeError("source browser server did not stop")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("capture", "replay"))
+    actions = {
+        "capture": capture_result,
+        "prepare-browser": capture,
+        "replay": replay,
+        "start-browser": start_browser,
+        "stop-browser": stop_browser,
+    }
+    parser.add_argument("mode", choices=(*actions, "serve-browser"))
     args = parser.parse_args()
+    if args.mode == "serve-browser":
+        serve_browser()
+        return
     try:
-        print(json.dumps(capture() if args.mode == "capture" else replay(), sort_keys=True))
+        print(json.dumps(actions[args.mode](), sort_keys=True))
     except Exception as error:
         # Retain useful code locations without exception messages, request data,
         # credentials or private runtime paths in publishable diagnostics.

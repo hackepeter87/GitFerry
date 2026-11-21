@@ -1,11 +1,14 @@
 """Closed, credential-free diagnostics shared by plan execution and its interfaces."""
 
+from __future__ import annotations
+
 from enum import Enum
 
 from gitferry.state_store import OperationBlocked
 
 
 class PreflightCheck(Enum):
+    JOURNAL = "journal: reconcile the selected operation before requesting another check"
     SELECTION = "selection: review supported content and target selection"
     STORAGE = "storage: check available package and workspace capacity"
     CONNECTION = "connection: check local credentials, CA and approved target identity"
@@ -20,7 +23,8 @@ class PreflightCheck(Enum):
 
 
 class PreflightBlocked(OperationBlocked):
-    def __init__(self, check: PreflightCheck):
+    def __init__(self, check: PreflightCheck, scope: str | None = None):
         # Only the closed catalog reaches durable diagnostics, never exception text.
         super().__init__(check.value)
         self.check = check
+        self.scope = scope

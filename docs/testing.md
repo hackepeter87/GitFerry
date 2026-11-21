@@ -20,6 +20,31 @@
 
 Mocks do not replace Gitea integration evidence.
 
+## First-import delivery checks
+
+The common `make test-integration` entry runs the packaged source and target applications in
+their isolated Gitea networks. `frontend/integration/first-import.spec.ts` selects two source
+repositories while excluding a control, creates a durable export, downloads its archive, uploads those exact bytes to the
+target, makes explicit local identity decisions and requests a prerequisite preview before
+execution. The core controls use bounded Tab navigation and visible-focus checks; file inputs
+receive synthetic files through the browser test driver. The desktop viewports (1024×768 and 1440×900) also check the actual plan storage estimate,
+overflow and accessibility. Mobile qualification is not required by the owner; desktop keyboard
+operation, visible focus and readable errors remain mandatory. The target is then inspected for Git refs, native authors and the comment parent.
+The browser and application process are restarted before observing the same confirmed plan and
+checking replay for additional writes or objects. Source/target state remains separate.
+
+`backend/tests/test_plan_previews.py` covers schema migration, competing requests/executors,
+authority changes, closed diagnostics, CSRF, exact-generation queueing and an actual subprocess
+termination while a preview is checking. `frontend/e2e/plans.spec.ts` separately covers blocked
+and stale preview presentation, keyboard start, reload and browser disconnection; simulated
+remote writes in that suite are not real-Gitea evidence.
+
+The report contract rejects a missing source-browser assertion just as it rejects missing
+existing transport, interruption or cleanup evidence. Record the exact tested commit, run,
+review and acceptance outcome in the delivery issue/PR and Actions artifacts. The historical
+records below describe their original scopes; they do not approve later changed code or accept
+the complete 0.2 milestone.
+
 ## Connection profile evidence (Issue #8)
 
 Local run `68707345dbc14eeb` passed against the unchanged pinned Gitea 1.27.2 instances

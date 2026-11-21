@@ -96,14 +96,45 @@ def create_plan_router(settings: AuthCookieSettings) -> APIRouter:
         worker(request)
         try:
             value = await _json_body(request)
-            if set(value) != {"digest"} or not isinstance(value["digest"], str):
-                raise PlanConflict("Queue request must contain exactly digest")
-            result = service(request).queue(plan_id, value["digest"])
+            if set(value) not in ({"digest"}, {"digest", "preview_generation"}) or not isinstance(
+                value["digest"], str
+            ):
+                raise PlanConflict("Invalid queue request")
+            if "preview_generation" in value and (
+                type(value["preview_generation"]) is not int or value["preview_generation"] < 1
+            ):
+                raise PlanConflict("Invalid prerequisite review generation")
+            result = service(request).queue(
+                plan_id, value["digest"], preview_generation=value.get("preview_generation")
+            )
             request.app.state.plan_worker.wake.set()
             return result
         except PlanConflict:
             raise AuthBoundaryError(
-                409, "plan_conflict", "Transfer plan cannot be queued"
+                409,
+                "plan_conflict",
+                "Transfer plan cannot be queued. Refresh and review the plan and prerequisites.",
+            ) from None
+        except StateStoreError:
+            raise AuthBoundaryError(
+                503, "state_unavailable", "Local state is unavailable"
+            ) from None
+
+    @router.post("/{plan_id}/preview", dependencies=write)
+    async def preview(plan_id: str, request: Request) -> dict[str, Any]:
+        worker(request)
+        try:
+            value = await _json_body(request)
+            if set(value) != {"digest"} or not isinstance(value["digest"], str):
+                raise PlanConflict("Invalid prerequisite review request")
+            result = service(request).request_preview(plan_id, value["digest"])
+            request.app.state.plan_worker.wake.set()
+            return result
+        except PlanConflict:
+            raise AuthBoundaryError(
+                409,
+                "preview_conflict",
+                "Review the current plan and local approval before checking the target",
             ) from None
         except StateStoreError:
             raise AuthBoundaryError(

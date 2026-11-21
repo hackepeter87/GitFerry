@@ -8,7 +8,8 @@ migration product; the versioned delivery plan is tracked in GitHub and the
 
 ## Current scope
 
-- FastAPI backend and Vue 3/TypeScript frontend skeletons
+- FastAPI backend, CLI and authenticated Vue 3/TypeScript administration frontend
+- durable source export/download, package intake, explicit local identity decisions and first-import plans
 - versioned instance and transfer blueprint schemas with secret references
 - two-instance Gitea 1.27.2 integration environment
 - Git bundle, explicit identity/team permission, metadata roundtrip, and Gitea import probes
@@ -23,6 +24,10 @@ migration product; the versioned delivery plan is tracked in GitHub and the
 Not yet implemented: a general transfer engine, production LDAP provisioning, a complete UI, productive-data migration, or GitLab support.
 
 ## Quick start
+
+For an OCI installation, administrator bootstrap and mounted credential prerequisites, see
+[the deployment guide](deploy/README.md), then [guided first import](docs/first-import.md).
+The commands below prepare the development/test environment.
 
 Prerequisites: Git, Python 3.11+, Node.js 24+, Docker Desktop/Engine with Compose v2+, and enough local disk space for the test volumes.
 

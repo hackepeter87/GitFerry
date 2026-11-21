@@ -1,7 +1,13 @@
 # Guided first import
 
-Implementation is in progress under Issue #10. The complete workflow is not yet accepted.
-The durable plan service is already available; see [transfer plans](transfer-plans.md).
+The guided first-import flow is the administrator's normal path from source selection to a
+reviewed, executable local plan. It remains bounded by the inventory and fidelity limits below;
+this guide does not claim general migration completeness. See [transfer plans](transfer-plans.md)
+for durable execution and prerequisite preview behavior.
+
+The supported administration workflow targets desktop browsers (viewport width at least
+1024 CSS pixels). Mobile and touch-device qualification are outside this delivery. Keyboard
+operation and readable error, prerequisite and result states remain required.
 
 ## Source selection
 
@@ -38,19 +44,40 @@ source-provided clone URLs are not used as connection authority.
 A namespace page is not a content inventory. `inventory_complete` remains false: metadata classes,
 authors, rights, payloads and fidelity limitations must be inventoried and reviewed before an
 export or import plan can be accepted. Browsing creates no object mappings, identity bindings or
-executable operations. The remaining export, package receipt, binding and end-to-end UI steps are
-tracked by Issue #10; no manual manifest or SQLite editing is the intended user workflow.
+executable operations. The subsequent export, package receipt, binding and plan steps are reached
+through the panels below; no manual manifest or SQLite editing is the intended user workflow.
 
-## Current browser step
+## Guided administrator workflow
 
-Choose a locally approved source, then an organization and repositories. Source reads start only
-after explicit selection. Selections survive page and organization navigation within this view;
-the summary supports removing an earlier selection. Changing or refreshing the source clears
-the selection. Reloading the browser also clears this preliminary selection; no durable transfer
-has been submitted yet. Loading and failed pages never imply complete inventory or authorization
-to execute. Export/import execution remains unavailable until the subsequent steps are delivered.
+Use the source selection, export, package intake and transfer-plan sections in order:
 
-## Portable package file boundary (in progress)
+1. Choose a locally approved source connection, browse organizations and repositories, and
+   explicitly select repositories. Source reads recheck the approved profile and never accept a
+   page-supplied URL or credential.
+2. Create or download the source export. Select the local recipient registration and whether
+   supported metadata or membership proposals are included. Export jobs are durable and show
+   prepared, queued, running, ready, or failed state.
+3. Upload the archive through package intake. The receiver validates bytes, digests, paths and
+   manifest relationships before admitting package facts. Admission is not target authorization.
+4. Review and confirm the local sender/installation and each source realm. For each author, choose
+   the explicit target account and credential reference; review missing bindings, permissions,
+   collisions, unsupported items and waiting parents. Source claims never approve target identity
+   or permissions.
+5. Review the included metadata and choose whether to apply team/member changes. Review the
+   generated selection and digest, then prepare a draft in Transfer plans. Review operations,
+   actors, limitations, the saved local free-space estimate, and target prerequisites. Request the read-only prerequisite preview before starting.
+6. A passed preview is tied to the exact plan digest and generation. Start only after that gate.
+   The worker rechecks prerequisites while holding the executor lock, then records durable
+   operation states. Closing or refreshing the browser does not cancel queued work.
+7. Refresh until the plan is confirmed, blocked, failed, or cancelled. On restart, confirmed
+   operations replay as no-ops; an unknown write is blocked for explicit reconciliation and is
+   never silently retried.
+
+Changing or refreshing the source clears the preliminary selection. Loading or failed pages never
+imply complete inventory or authorization to execute. A preview is evidence for review, not a
+guarantee: execution performs its own checks before any write.
+
+## Portable package file boundary
 
 An application package combines a versioned `package.json` selection descriptor with Git bundles
 and an optional unchanged v1/v2 metadata manifest. Issue-author relationships are explicit in
@@ -74,7 +101,6 @@ compression, links, special files, undeclared files, duplicate names and path tr
 rejected. Existing destinations are preserved. Reports say `validated-files-only` and
 `execution_authorized: false`. No database, credential or network access is used by these commands.
 
-These are application-core building blocks for the wizard. Administrators are not expected to
-assemble descriptors manually in the final workflow. Source export, durable receipt registration,
-local identity decisions and automatic plan composition remain open in Issue #10. See
+The guided workflow uses these application-core services. Administrators do not assemble
+descriptors manually. See
 [ADR 0013](decisions/0013-application-package-and-file-receipt.md) for the trust boundary.

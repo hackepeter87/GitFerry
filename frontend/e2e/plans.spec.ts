@@ -17,7 +17,8 @@ const plan = {
   plan_id: "a".repeat(64), digest: "b".repeat(64), target_instance_key: "target.synthetic",
   profile_revision: 2, evidence_digest: "c".repeat(64), round_key: "review-round", status: "draft",
   cancel_requested: false, reason: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
-  document: { inventory: { request: { repositories: [{ organization: "synthetic-org", repository: "synthetic-org/synthetic-repo" }] }, inventory_complete: false, limitations: ["Selected explicit inputs only; not a complete remote inventory"] } },
+  preview: { generation: 1, plan_digest: "b".repeat(64), status: "passed", reason: null, scope: "synthetic-org/synthetic-repo", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+  document: { required_bytes: 67121152, inventory: { request: { repositories: [{ organization: "synthetic-org", repository: "synthetic-org/synthetic-repo" }] }, inventory_complete: false, limitations: ["Selected explicit inputs only; not a complete remote inventory"] } },
   operations: [{ operation_id: "op.synthetic", operation_type: "create_repository", target_repository_scope: "synthetic-org/synthetic-repo", status: "prepared", target_global_id: null, error_reason: null }],
 };
 
@@ -27,7 +28,7 @@ test.describe("transfer plan review (mocked API)", () => {
     await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [current] }));
     await page.route(/\/api\/v1\/plans\/a[^?]*$/, async (route) => {
       if (route.request().url().endsWith("/queue")) {
-        expect(route.request().postDataJSON()).toEqual({ digest: plan.digest });
+        expect(route.request().postDataJSON()).toEqual({ digest: plan.digest, preview_generation: 1 });
         current = { ...current, status: "queued" };
       } else if (route.request().url().endsWith("/cancel")) {
         current = { ...current, status: "cancelled" };
@@ -36,8 +37,11 @@ test.describe("transfer plan review (mocked API)", () => {
     });
     await signIn(page);
     await expect(page.getByRole("heading", { name: "Transfer plans" })).toBeVisible();
-    await expect(page.getByText("synthetic-org/synthetic-repo", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Selected repository scope" }).getByText("synthetic-org/synthetic-repo", { exact: true })).toBeVisible();
     await expect(page.getByText("This is an explicit selection, not a complete source inventory.")).toBeVisible();
+    await expect(page.locator(".storage-estimate")).toHaveText("67,121,152 bytes");
+    await page.setViewportSize({ width: 1024, height: 768 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1024);
     await page.getByText("Connection and plan verification details", { exact: true }).click();
     await expect(page.getByText("Approved identity evidence")).toBeVisible();
     const start = page.getByRole("button", { name: "Start reviewed plan" });
@@ -61,6 +65,11 @@ test("real backend/simulated remote: queues, survives browser close, and confirm
   expect(seeded.ok()).toBeTruthy();
   const seededPlan = await seeded.json();
   await signIn(page);
+  await expect(page.getByRole("button", { name: "Start reviewed plan" })).toBeDisabled();
+  await page.getByRole("button", { name: "Request prerequisite preview" }).click();
+  await expect(page.locator(".preview-box dd").filter({ hasText: /^passed$/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start reviewed plan" })).toBeEnabled();
+  expect(await (await page.request.get("http://127.0.0.1:8089/__test__/plan-gate")).json()).toEqual({ started: false });
   await page.getByRole("button", { name: "Start reviewed plan" }).focus();
   await page.keyboard.press("Enter");
   await expect.poll(async () => (await page.request.get("http://127.0.0.1:8089/__test__/plan-gate")).json()).toMatchObject({ started: true });
@@ -99,6 +108,7 @@ test("mocked unresolved parent and child stay distinct and cannot be requeued", 
   await signIn(page);
   await expect(page.getByText("Reconciliation required — may already be written", { exact: true })).toBeVisible();
   await expect(page.getByText("Waiting for parent — not sent", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open the operator recovery guide" })).toHaveAttribute("href", /docs\/transfer-plans\.md#recovery$/);
   await expect(page.getByRole("button", { name: "Start reviewed plan" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Cancel plan" })).toHaveCount(0);
 });
@@ -124,4 +134,45 @@ test("mocked delayed detail cannot replace the newly selected plan", async ({ pa
   await staleResponse;
   await expect(page.getByRole("heading", { name: "newly-selected", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "review-round", exact: true })).toHaveCount(0);
+});
+
+test("blocked prerequisite preview cannot queue a plan", async ({ page }) => {
+  const blocked = { ...plan, preview: { ...plan.preview, status: "blocked", reason: "missing synthetic parent" } };
+  let queued = false;
+  await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [blocked] }));
+  await page.route(/\/api\/v1\/plans\/a[^?]*$/, async (route) => {
+    if (route.request().url().endsWith("/preview")) return route.fulfill({ json: blocked });
+    if (route.request().url().endsWith("/queue")) queued = true;
+    await route.fulfill({ json: blocked });
+  });
+  await signIn(page);
+  await expect(page.getByRole("button", { name: "Start reviewed plan" })).toBeDisabled();
+  await page.getByRole("button", { name: "Retry prerequisite preview" }).click();
+  await expect(page.getByText("missing synthetic parent")).toBeVisible();
+  expect(queued).toBe(false);
+});
+
+test("passes the exact preview generation and surfaces stale-generation conflicts", async ({ page }) => {
+  let queueBody: Record<string, unknown> | undefined;
+  await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [plan] }));
+  await page.route(/\/api\/v1\/plans\/a[^?]*$/, async (route) => {
+    if (route.request().url().endsWith("/queue")) { queueBody = route.request().postDataJSON(); return route.fulfill({ status: 409, json: { error: { code: "plan_conflict", message: "Transfer plan cannot be queued. Refresh and review the plan and prerequisites." } } }); }
+    await route.fulfill({ json: plan });
+  });
+  await signIn(page);
+  await page.getByRole("button", { name: "Start reviewed plan" }).click();
+  await expect(page.getByRole("alert")).toContainText("Refresh and review the plan and prerequisites.");
+  expect(queueBody).toEqual({ digest: plan.digest, preview_generation: 1 });
+});
+
+test("reloads plans with GET only and does not request a preview", async ({ page }) => {
+  const writes: string[] = [];
+  await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [plan] }));
+  await page.route(/\/api\/v1\/plans\/a[^?]*$/, async (route) => {
+    if (route.request().method() !== "GET") writes.push(new URL(route.request().url()).pathname);
+    await route.fulfill({ json: plan });
+  });
+  await signIn(page);
+  await page.reload();
+  expect(writes).toEqual([]);
 });

@@ -41,6 +41,7 @@ class GiteaPlanAdapter:
         self.admin: GiteaProvisioningClient | None = None
         self.request: PlanRequest | None = None
         self.preflight_digest: str | None = None
+        self.scope: str | None = None
         # Imported lazily so the existing issue/comment operations remain independent.
         from gitferry.gitea_bundles import GiteaBundlePusher
 
@@ -62,10 +63,11 @@ class GiteaPlanAdapter:
 
     def preflight(self, plan: dict[str, Any]) -> None:
         self.check = PreflightCheck.SELECTION
+        self.scope = None
         try:
             self._preflight(plan)
         except Exception:
-            raise PreflightBlocked(self.check) from None
+            raise PreflightBlocked(self.check, self.scope) from None
 
     def _preflight(self, plan: dict[str, Any]) -> None:
         document = plan["document"]
@@ -119,13 +121,16 @@ class GiteaPlanAdapter:
             raise OperationBlocked("technical account changed since connection approval")
         self.check = PreflightCheck.STRUCTURE
         for repository in request.repositories:
+            self.scope = repository.repository
             preflight_provisioning_operations(
                 self.state, self.admin, repository.provisioning(request.target_instance_key)
             )
+        self.scope = None
         metadata = self._metadata(plan)
         # Resolve every actor before any target mutation. A token for the issue
         # author or technical administrator cannot stand in for a comment author.
         for operation in metadata:
+            self.scope = operation.target_repository_scope
             self.check = PreflightCheck.AUTHOR_CREDENTIAL
             binding_id = str(operation.intent["author_binding_id"])
             if binding_id in self.issues:
@@ -272,6 +277,7 @@ class GiteaPlanAdapter:
             )
         )
         for repository in self.request.repositories:
+            self.scope = repository.repository
             if repository.bundle:
                 from gitferry.provisioning import BundleIntent
 

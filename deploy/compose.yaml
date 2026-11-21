@@ -24,10 +24,15 @@ services:
     volumes:
       - gitferry-data:/var/lib/gitferry
       - type: bind
+        source: ${GITFERRY_CREDENTIAL_DIR:-./secrets}
+        target: /run/secrets
+        read_only: true
+      - type: bind
         source: ${GITFERRY_CA_DIR:-./ca}
         target: /etc/gitferry/ca
         read_only: true
     secrets:
+      # Keep the original two aliases; additional author aliases come from the directory.
       - source_api_token
       - target_api_token
     tmpfs:
@@ -44,6 +49,6 @@ volumes:
 
 secrets:
   source_api_token:
-    file: ${GITFERRY_SOURCE_TOKEN_FILE:-./secrets/source-api-token}
+    file: ${GITFERRY_SOURCE_TOKEN_FILE:-./secrets/source_api_token}
   target_api_token:
-    file: ${GITFERRY_TARGET_TOKEN_FILE:-./secrets/target-api-token}
+    file: ${GITFERRY_TARGET_TOKEN_FILE:-./secrets/target_api_token}

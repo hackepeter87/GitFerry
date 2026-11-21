@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -496,5 +496,21 @@ CREATE TABLE package_uploads (
     CHECK (status != 'ready' OR (archive_sha256 IS NOT NULL AND package_digest IS NOT NULL
                                AND summary_json IS NOT NULL))
 );
+""",
+    12: """
+CREATE TABLE plan_previews (
+    plan_id TEXT NOT NULL REFERENCES transfer_plans(plan_id),
+    generation INTEGER NOT NULL CHECK (generation > 0),
+    plan_digest TEXT NOT NULL CHECK (length(plan_digest) = 64),
+    status TEXT NOT NULL CHECK (status IN ('queued','checking','passed','blocked','failed')),
+    reason TEXT,
+    scope TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (plan_id, generation),
+    CHECK ((status IN ('blocked','failed')) = (reason IS NOT NULL))
+);
+CREATE UNIQUE INDEX plan_previews_active ON plan_previews(plan_id)
+    WHERE status IN ('queued','checking');
 """,
 }

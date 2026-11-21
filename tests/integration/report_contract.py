@@ -29,6 +29,8 @@ OCI_RUNTIME_ASSERTION_NAMES = frozenset(
         "graceful_stop_signal",
         "fresh_volume_initialized",
         "packaged_frontend_served",
+        "installed_admin_security",
+        "runtime_hardening",
         "container_replacement_preserved_state",
         "identity_binding_preserved",
         "object_mapping_preserved",
@@ -43,7 +45,12 @@ OCI_RUNTIME_ASSERTION_NAMES = frozenset(
         "corrupt_database_failed_closed",
         "read_only_directory_failed_closed",
         "symlink_path_failed_closed",
+        "documented_compose_installation",
     }
+)
+
+REFERENCE_COMPOSE_ASSERTION_NAMES = frozenset(
+    {"exact_image", "healthy", "non_root", "aliases_readable", "installed_admin_security"}
 )
 
 
@@ -347,10 +354,17 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                         "target_upload_files_only_before_local_setup",
                         "target_upload_replay_persistent_identity",
                         "guided_browser_first_import",
+                        "guided_browser_source_export",
+                        "guided_browser_target_collision",
+                        "guided_browser_preview_no_remote_write",
+                        "guided_browser_production_runtime",
+                        "guided_selected_set_and_control",
                         "guided_browser_restart_read_only",
                     }
                 ),
-            ),
+            )
+            and bool(_value(report, "source_exports.image_id"))
+            and _value(report, "source_exports.image_id") == _value(report, "oci_runtime.image_id"),
             "tests/integration/source_export_probe.py",
             "source_exports.assertions",
         ),
@@ -432,9 +446,22 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         ),
         (
             "persistent_non_root_oci_runtime",
-            _all_required_true(report, "oci_runtime.assertions", OCI_RUNTIME_ASSERTION_NAMES),
+            _all_required_true(report, "oci_runtime.assertions", OCI_RUNTIME_ASSERTION_NAMES)
+            and _all_required_true(
+                report, "oci_runtime.reference_compose", REFERENCE_COMPOSE_ASSERTION_NAMES
+            )
+            and isinstance(_value(report, "oci_runtime.reference_compose.image_id"), str)
+            and (
+                re.fullmatch(
+                    r"sha256:[0-9a-f]{64}",
+                    _value(report, "oci_runtime.reference_compose.image_id"),
+                )
+                is not None
+                and _value(report, "oci_runtime.reference_compose.image_id")
+                == _value(report, "oci_runtime.image_id")
+            ),
             "tests/integration/oci_runtime_probe.py",
-            "oci_runtime.assertions",
+            "oci_runtime.assertions and oci_runtime.reference_compose",
         ),
         (
             "provisioning_crash_and_lost_response_halt_replay",

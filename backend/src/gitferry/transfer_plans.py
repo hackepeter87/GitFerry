@@ -8,6 +8,7 @@ import sqlite3
 from collections.abc import Mapping
 from typing import Any, cast
 
+from gitferry.plan_diagnostics import PreflightCheck
 from gitferry.state_codec import find_secret_field, now
 from gitferry.state_store import StateStore
 
@@ -259,7 +260,9 @@ class PlanService:
                     "SELECT * FROM plan_events WHERE plan_id=? ORDER BY event_id", (plan_id,)
                 )
             ]
-        return self._row(row, ops, events)
+        result = self._row(row, ops, events)
+        result["preview"] = self._latest_preview(connection, plan_id)
+        return result
 
     def create(
         self,
@@ -394,13 +397,150 @@ class PlanService:
         )
         return self._read(c, plan_id)
 
-    def queue(self, plan_id: str, digest: str) -> dict[str, Any]:
+    @staticmethod
+    def _latest_preview(c: sqlite3.Connection, plan_id: str) -> dict[str, Any] | None:
+        row = c.execute(
+            "SELECT * FROM plan_previews WHERE plan_id=? ORDER BY generation DESC LIMIT 1",
+            (plan_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def _journal_blocked(c: sqlite3.Connection, plan_id: str) -> bool:
+        return (
+            c.execute(
+                "SELECT 1 FROM plan_steps s JOIN operations selected USING(operation_id) "
+                "JOIN operations other ON other.origin_id=selected.origin_id "
+                "AND other.target_instance_key=selected.target_instance_key "
+                "WHERE s.plan_id=? AND other.status IN "
+                "('executing','outcome_unknown','conflict','failed') LIMIT 1",
+                (plan_id,),
+            ).fetchone()
+            is not None
+        )
+
+    def request_preview(self, plan_id: str, digest: str) -> dict[str, Any]:
+        """Persist read-only target work; this never authorizes execution."""
+        with self.store.transaction() as c:
+            row = self._get_row(c, plan_id)
+            if digest != row["digest"] or row["status"] not in {
+                "draft",
+                "blocked",
+                "failed",
+                "cancelled",
+            }:
+                raise PlanConflict("plan is not available for prerequisite review")
+            self._validate(c, row)
+            previous = self._latest_preview(c, plan_id)
+            if previous and previous["status"] in {"queued", "checking"}:
+                return self._read(c, plan_id)
+            generation = previous["generation"] + 1 if previous else 1
+            timestamp = now()
+            c.execute(
+                "INSERT INTO plan_previews VALUES (?,?,?,'queued',NULL,NULL,?,?)",
+                (plan_id, generation, digest, timestamp, timestamp),
+            )
+            return self._read(c, plan_id)
+
+    def begin_preview(self, plan_id: str) -> dict[str, Any]:
+        """Worker holds the existing executor lock; interrupted reads are safe to repeat."""
+        with self.store.transaction() as c:
+            row = self._get_row(c, plan_id)
+            preview = self._latest_preview(c, plan_id)
+            if not preview or preview["status"] not in {"queued", "checking"}:
+                raise PlanConflict("no pending prerequisite review")
+            reason = None
+            try:
+                self._validate(c, row)
+                if row["status"] not in {"draft", "blocked", "failed", "cancelled"}:
+                    raise PlanConflict("plan execution state changed")
+            except PlanConflict:
+                reason = PreflightCheck.SELECTION.value
+            if self._journal_blocked(c, plan_id):
+                reason = PreflightCheck.JOURNAL.value
+            c.execute(
+                "UPDATE plan_previews SET status=?,reason=?,scope=NULL,updated_at=? "
+                "WHERE plan_id=? AND generation=?",
+                (
+                    "blocked" if reason else "checking",
+                    reason,
+                    now(),
+                    plan_id,
+                    preview["generation"],
+                ),
+            )
+            return self._read(c, plan_id)
+
+    def finish_preview(
+        self,
+        plan_id: str,
+        generation: int,
+        *,
+        check: PreflightCheck | None = None,
+        scope: str | None = None,
+        failed: bool = False,
+    ) -> dict[str, Any]:
+        """Worker-only result; never expose a caller-supplied success override."""
+        with self.store.transaction() as c:
+            row = self._get_row(c, plan_id)
+            preview = self._latest_preview(c, plan_id)
+            if (
+                not preview
+                or preview["generation"] != generation
+                or preview["status"] != "checking"
+            ):
+                raise PlanConflict("prerequisite review changed")
+            try:
+                self._validate(c, row)
+                if row["status"] not in {"draft", "blocked", "failed", "cancelled"}:
+                    raise PlanConflict("plan execution state changed")
+            except PlanConflict:
+                check = PreflightCheck.SELECTION
+            if check is None and self._journal_blocked(c, plan_id):
+                check = PreflightCheck.JOURNAL
+            allowed_scopes = {
+                step["target_repository_scope"] for step in self._read(c, plan_id)["operations"]
+            }
+            scope = scope if scope in allowed_scopes else None
+            status = "failed" if failed else "blocked" if check else "passed"
+            reason = (
+                "local prerequisite check failed; inspect local service availability"
+                if failed
+                else check.value
+                if check
+                else None
+            )
+            c.execute(
+                "UPDATE plan_previews SET status=?,reason=?,scope=?,updated_at=? "
+                "WHERE plan_id=? AND generation=?",
+                (status, reason, scope, now(), plan_id, generation),
+            )
+            return self._read(c, plan_id)
+
+    def queue(
+        self,
+        plan_id: str,
+        digest: str,
+        *,
+        preview_generation: int | None = None,
+    ) -> dict[str, Any]:
         with self.store.transaction() as c:
             row = self._get_row(c, plan_id)
             if digest != row["digest"]:
                 raise PlanConflict("plan digest mismatch")
             if row["status"] == "confirmed":
                 return self._read(c, plan_id)
+            if preview_generation is not None:
+                preview = self._latest_preview(c, plan_id)
+                if (
+                    type(preview_generation) is not int
+                    or not preview
+                    or preview["generation"] != preview_generation
+                    or preview["status"] != "passed"
+                    or preview["plan_digest"] != digest
+                    or self._journal_blocked(c, plan_id)
+                ):
+                    raise PlanConflict("review the current target prerequisite result first")
             self._validate(c, row)
             result = self._transition_row(c, row, "queued")
             c.execute("UPDATE transfer_plans SET cancel_requested=0 WHERE plan_id=?", (plan_id,))
@@ -443,15 +583,7 @@ class PlanService:
                 self._validate(c, row)
             except PlanConflict as exc:
                 return self._transition_row(c, row, "blocked", str(exc))
-            bad = c.execute(
-                "SELECT 1 FROM plan_steps s JOIN operations selected USING(operation_id) "
-                "JOIN operations other ON other.origin_id=selected.origin_id "
-                "AND other.target_instance_key=selected.target_instance_key "
-                "WHERE s.plan_id=? AND other.status IN "
-                "('executing','outcome_unknown','conflict','failed') LIMIT 1",
-                (plan_id,),
-            ).fetchone()
-            if bad:
+            if self._journal_blocked(c, plan_id):
                 return self._transition_row(
                     c, row, "blocked", "operation journal requires reconciliation"
                 )
