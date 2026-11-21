@@ -1,0 +1,22 @@
+services:
+  ad:
+    build:
+      context: .
+      args:
+        SAMBA_VERSION: "2:4.22.11+dfsg-0+deb13u1"
+    hostname: synthdc
+    environment:
+      AD_ADMIN_PASSWORD: Synthetic-Admin-Only-42!
+      PYTHONPATH: /opt/gitferry-backend
+    volumes:
+      - ../../../backend/src:/opt/gitferry-backend:ro
+    healthcheck:
+      test: ["CMD-SHELL", "openssl s_client -connect 127.0.0.1:636 -CAfile /run/ad-ca/ca.pem -verify_return_error </dev/null 2>/dev/null | grep -q 'Verify return code: 0'"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    stop_grace_period: 5s
+
+networks:
+  default:
+    internal: true

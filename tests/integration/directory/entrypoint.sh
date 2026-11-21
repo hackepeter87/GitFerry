@@ -6,14 +6,23 @@ mkdir -p /run/directory-ca /run/slapd /var/lib/ldap
 if [ ! -f /run/directory-ca/ca.pem ]; then
   openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
     -subj '/CN=synthetic-directory-ca' \
+    -addext 'keyUsage=critical,keyCertSign,cRLSign' \
     -keyout /run/directory-ca/ca.key -out /run/directory-ca/ca.pem >/dev/null 2>&1
   openssl req -newkey rsa:2048 -nodes \
     -subj '/CN=openldap' \
     -addext 'subjectAltName=DNS:openldap,DNS:localhost,IP:127.0.0.1' \
     -keyout /run/directory-ca/server.key -out /run/directory-ca/server.csr >/dev/null 2>&1
+  cat > /run/directory-ca/server.extensions <<'EOF'
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid,issuer
+subjectAltName=DNS:openldap,DNS:localhost,IP:127.0.0.1
+EOF
   openssl x509 -req -days 1 -in /run/directory-ca/server.csr \
     -CA /run/directory-ca/ca.pem -CAkey /run/directory-ca/ca.key -CAcreateserial \
-    -copy_extensions copy \
+    -extfile /run/directory-ca/server.extensions \
     -out /run/directory-ca/server.pem >/dev/null 2>&1
   chmod 0644 /run/directory-ca/ca.pem /run/directory-ca/server.pem
   chmod 0600 /run/directory-ca/ca.key /run/directory-ca/server.key

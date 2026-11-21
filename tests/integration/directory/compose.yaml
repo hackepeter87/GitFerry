@@ -38,6 +38,22 @@ services:
       timeout: 2s
       retries: 60
 
+  directory-claims:
+    build:
+      context: ../../..
+      dockerfile: containers/gitferry.Dockerfile
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["sleep infinity"]
+    healthcheck:
+      disable: true
+    volumes:
+      - directory-ca:/run/directory-ca:ro
+      - ../directory_claim_worker.py:/probe/directory_claim_worker.py:ro
+    networks: [directory-net]
+    depends_on:
+      openldap:
+        condition: service_healthy
+
 volumes:
   target-data:
   directory-data:

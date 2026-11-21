@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from ad_probe import run_ad_probe
 from application_plan_probe import run_application_plan_probe
 from comment_transport_roundtrip_probe import run_comment_transport_roundtrip_probe
 from connection_profile_probe import run_connection_profile_probe
@@ -309,6 +310,7 @@ def main() -> None:
     report = {
         "gitea": {"source": source_version, "target": target_version},
         "directory": run_directory_probe(),
+        "directory_ad": run_ad_probe(),
         "connection_profiles": run_connection_profile_probe(),
         "application_plans": run_application_plan_probe(),
         "source_exports": run_source_export_probe(),

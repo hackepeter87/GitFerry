@@ -33,6 +33,32 @@ mail: ldap-reader@example.invalid
 userPassword: synthetic-directory-pass
 employeeNumber: SYNTHETIC-EXT-10001
 
+dn: uid=ldap-writer,ou=People,dc=example,dc=invalid
+objectClass: inetOrgPerson
+objectClass: posixAccount
+cn: LDAP Writer
+sn: Writer
+uid: ldap-writer
+uidNumber: 10005
+gidNumber: 10005
+homeDirectory: /nonexistent
+mail: ldap-writer@example.invalid
+userPassword: synthetic-directory-writer-pass
+employeeNumber: SYNTHETIC-EXT-10005
+
+dn: uid=ldap-outsider,ou=People,dc=example,dc=invalid
+objectClass: inetOrgPerson
+objectClass: posixAccount
+cn: LDAP Outsider
+sn: Outsider
+uid: ldap-outsider
+uidNumber: 10006
+gidNumber: 10006
+homeDirectory: /nonexistent
+mail: ldap-outsider@example.invalid
+userPassword: synthetic-directory-outsider-pass
+employeeNumber: SYNTHETIC-EXT-10006
+
 dn: uid=ldap-reader,ou=People-B,dc=example,dc=invalid
 objectClass: inetOrgPerson
 objectClass: posixAccount
@@ -75,3 +101,13 @@ dn: cn=gitea-users,ou=Groups,dc=example,dc=invalid
 objectClass: groupOfNames
 cn: gitea-users
 member: uid=ldap-reader,ou=People,dc=example,dc=invalid
+
+dn: cn=gitea-writers,ou=Groups,dc=example,dc=invalid
+objectClass: groupOfNames
+cn: gitea-writers
+member: uid=ldap-writer,ou=People,dc=example,dc=invalid
+
+dn: cn=gitea-outsiders,ou=Groups,dc=example,dc=invalid
+objectClass: groupOfNames
+cn: gitea-outsiders
+member: uid=ldap-outsider,ou=People,dc=example,dc=invalid

@@ -1,0 +1,9 @@
+# Samba AD qualification lab
+
+This is a disposable, synthetic Samba Active Directory Domain Controller probe for issue #15. It is deliberately separate from the OpenLDAP fixture and does not claim Microsoft Windows AD compatibility. The lab provisions `SYNTH.AD` with Samba's Python provision API, then reads users and direct groups over LDAPS using `ldap3==2.9.1` and a generated CA whose leaf has `CA:FALSE`, server EKU, SANs, and critical key usage.
+
+Run `tests/integration/ad/run.sh` from the repository root for focused diagnostics. It generates a unique `gitferry-it-ad-` project, uses an internal network and saves reports under `integration-results/ad-<run>/`. The common integration entry owns the same fixture in its existing scoped Compose project. The worker emits real `distinguishedName`, `objectSid`, disabled-account and missing-mail observations. Cleanup must target only that exact project (`docker compose -p "$PROJECT" down --volumes --remove-orphans`); never use global prune. Passwords are held in the container environment/API memory and are not command-line arguments or logs.
+
+The installed application claim reader is exercised separately from raw server queries. Functional-user UPN/domain binds, wrong password, wrong trusted CA and disabled-account filtering are checked. The nested matching-rule query qualifies Samba server behavior, not transitive-group expansion in the product. Gitea login and effective permission integration remain separate. It excludes replication, trusts, Kerberos client flows, Windows Server, schema extensions, and complete application access semantics. A failure must preserve the exact Docker/Samba error and be reported as blocked or not-implemented rather than converted into a capability claim.
+
+Official references: [Samba domain provision](https://www.samba.org/samba/docs/current/man-html/samba-tool.8.html) and [Samba LDAP/TLS settings](https://www.samba.org/samba/docs/current/man-html/smb.conf.5.html).
