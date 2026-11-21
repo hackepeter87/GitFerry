@@ -297,3 +297,17 @@ def test_asgi_request_logs_allowlist_route_metadata_without_secrets(
     assert password not in caplog.text
     assert "synthetic.admin" not in caplog.text
     assert token_like_path not in caplog.text
+
+
+@pytest.mark.parametrize("host", ["testserver/prefix", "testserver?query=", "testserver#fragment"])
+def test_api_cache_policy_uses_routed_path_not_host_header(tmp_path: Path, host: str) -> None:
+    client, _ = configured_app(tmp_path)
+    denied = client.get("/api/v1/plans", headers={"host": host})
+    assert denied.status_code == 401
+    assert denied.headers["cache-control"] == "no-store"
+
+    login(client)
+    accepted = client.get("/api/v1/plans", headers={"host": host})
+    assert accepted.status_code == 200
+    assert accepted.headers["cache-control"] == "no-store"
+    assert client.get("/api/v1/plans").status_code == 200

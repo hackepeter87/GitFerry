@@ -93,3 +93,10 @@ versions are independent. Candidate acceptance requires the same build-once evid
 above plus an upgrade from the accepted 0.2 image/state, retained bindings/baselines/unknown outcomes,
 and the real directory desktop workflows. Issue #16 owns exact image and run evidence. Merely
 changing the version does not accept or publish a release.
+
+Audit the distributions actually installed in the retained image, including the installer, rather
+than treating an empty repository-alert list as image evidence. The application explicitly pins
+Starlette alongside FastAPI so its security-compatible resolution is reviewable; the OCI build
+updates pip before installing GitFerry. Record the inventory, advisory database result and scan
+scope with the candidate. A Python dependency audit is not an OS-package or full-image security
+scan. A replacement image requires its own functional and upgrade evidence.
