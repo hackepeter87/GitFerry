@@ -25,10 +25,13 @@ from support import (
     api,
     docker_copy,
     docker_service_exec,
+    flush_fixture_queues,
     run,
 )
 
 REPOSITORY = "source-export-lab/selected"
+
+
 ASSERTIONS = frozenset(
     {
         "source_capture_confirmed",
@@ -327,6 +330,7 @@ def run_source_export_probe() -> dict[str, Any]:
             os.environ["GITFERRY_IT_RUNTIME_IMAGE"],
         ]
     ).stdout.strip()
+    flush_fixture_queues("target", "collision")
     collision_before = _target_worker("collision-snapshot")
     _target_worker("prepare-browser", "collision")
     _target_worker("start-browser", "collision")
@@ -585,6 +589,7 @@ def run_source_export_probe() -> dict[str, Any]:
         and identity_recovery["group_restored"]["after_status"] == "conflict"
         and identity_recovery["group_restored"]["binding_unchanged"]
     )
+    flush_fixture_queues("target", "identity-recovery")
     recovery_snapshot = _target_worker("collision-snapshot")
     recovery_events = docker_service_exec(
         "gitferry-b", ["wc", "-l", "/state/package-admission/remote-events.jsonl"]
