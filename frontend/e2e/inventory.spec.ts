@@ -8,8 +8,12 @@ function documentFor(id: string, requested: string[], blocked: boolean) {
   return { format: "gitferry.content-inventory", schema_version: 1, comparison_version: 1, snapshot_id: id, created_at: "2026-01-01T00:00:00Z", source_instance_key: source.instance_key, source_installation_marker: "install-source-a", gitea_version: "1.27.2", deletion_semantics: "absence-does-not-delete", repositories: [{ repository: "synthetic-org/first", native_id: "101", requested_classes: requested, git_size_estimate_bytes: 2048, size_assumptions: [], classes: classes.map((content_class) => ({ content_class, status: requested.includes(content_class) ? blocked && content_class === "lfs" ? "not-supported" : "observed" : "excluded", count: requested.includes(content_class) && !(blocked && content_class === "lfs") ? 0 : null, objects: [], reason: requested.includes(content_class) ? blocked && content_class === "lfs" ? "Transfer for this class is not implemented" : "" : "Not requested", limitations: [] })) }] };
 }
 
-async function open(page: Page): Promise<void> {
+async function open(page: Page, nativeReady = false): Promise<{
+  inventoryRequest: () => { requested_classes: string[] } | undefined;
+  exportRequest: () => Record<string, unknown> | undefined;
+}> {
   let lastRequest: { requested_classes: string[] } | undefined;
+  let lastExportRequest: Record<string, unknown> | undefined;
   const jobs = new Map<string, ReturnType<typeof makeJob>>();
   await page.route("**/api/v1/auth/status", (route) => route.fulfill({ json: { bootstrapRequired: false } }));
   await page.route("**/api/v1/auth/session", (route) => route.fulfill({ json: { authenticated: true, principal: { username: "synthetic.admin", role: "admin" } } }));
@@ -25,7 +29,7 @@ async function open(page: Page): Promise<void> {
     if (route.request().method() === "GET") return route.fulfill({ json: [] });
     const body = route.request().postDataJSON() as { inventory_id: string; request: { requested_classes: string[] } };
     lastRequest = body.request;
-    const blocked = body.request.requested_classes.includes("lfs");
+    const blocked = !nativeReady && body.request.requested_classes.includes("lfs");
     const value = makeJob(body.inventory_id, blocked ? "blocked" : "queued", body.request.requested_classes);
     jobs.set(body.inventory_id, value);
     return route.fulfill({ status: 202, json: value });
@@ -38,12 +42,24 @@ async function open(page: Page): Promise<void> {
     return route.fulfill({ json: value });
   });
   await page.route("**/api/v1/exports/recipients", (route) => route.fulfill({ json: [{ instance_key: "recipient-b", display_name: "Synthetic recipient B", installation_marker: "install-recipient-b" }] }));
-  await page.route("**/api/v1/exports", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/exports", async (route) => {
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON() as { export_id: string; request: Record<string, unknown> };
+      lastExportRequest = body.request;
+      return route.fulfill({ status: 202, json: { ...makeExport(body.export_id, body.request), status: "queued" } });
+    }
+    return route.fulfill({ json: [] });
+  });
   await page.goto("/");
   await page.getByLabel("Source connection").selectOption(source.instance_key);
   await page.getByLabel("Organization", { exact: true }).selectOption("synthetic-org");
   await page.getByRole("checkbox", { name: "synthetic-org/first" }).check();
   await expect(page.getByRole("heading", { name: "Content inventory" })).toBeVisible();
+  return { inventoryRequest: () => lastRequest, exportRequest: () => lastExportRequest };
+}
+
+function makeExport(exportId: string, request: Record<string, unknown>) {
+  return { export_id: exportId, request, capture_status: "prepared", status: "prepared", archive_sha256: null, archive_size: null, error_code: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
 }
 
 function makeJob(id: string, status: "queued" | "ready" | "blocked", requested: string[]) {
@@ -57,7 +73,7 @@ test("invalidates approval when the selected classes or options change", async (
   await page.getByRole("button", { name: "Inspect selected content" }).click();
   await expect(page.getByRole("button", { name: "Use this inventory" })).toBeEnabled();
   await page.getByRole("button", { name: "Use this inventory" }).click();
-  await page.getByLabel("LFS objects").check();
+  await page.locator('input[type="checkbox"][value="lfs"]').check();
   await expect(page.getByRole("button", { name: "Use this inventory" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Create and queue export" })).toBeDisabled();
   await page.getByLabel("Include issues and normal comments").uncheck();
@@ -66,9 +82,29 @@ test("invalidates approval when the selected classes or options change", async (
 
 test("inspects unsupported content but does not allow exporting a blocked inventory", async ({ page }) => {
   await open(page);
-  await page.getByLabel("LFS objects").check();
+  await page.locator('input[type="checkbox"][value="lfs"]').check();
   await page.getByRole("button", { name: "Inspect selected content" }).click();
   await expect(page.getByRole("status")).toContainText("not transfer-ready");
   await expect(page.getByRole("button", { name: "Use this inventory" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Create and queue export" })).toBeDisabled();
+});
+
+test("native options request v3 with exact selected classes", async ({ page }) => {
+  const requests = await open(page, true);
+  await page.getByLabel("Include Git LFS objects").check();
+  await page.getByLabel("Include native wiki history").check();
+  await page.getByRole("button", { name: "Inspect selected content" }).click();
+  await expect(page.getByRole("button", { name: "Use this inventory" })).toBeEnabled();
+  await expect.poll(() => requests.inventoryRequest()?.requested_classes).toEqual([
+    "comments", "git_refs", "identities", "issues", "lfs", "organizations",
+    "permissions", "teams", "wiki",
+  ]);
+  await page.getByRole("button", { name: "Use this inventory" }).click();
+  await page.getByLabel("Recipient registration").selectOption("recipient-b");
+  await page.getByRole("button", { name: "Create and queue export" }).click();
+  await expect.poll(() => requests.exportRequest()).toMatchObject({
+    version: 3,
+    include_lfs: true,
+    include_wiki: true,
+  });
 });

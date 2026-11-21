@@ -28,6 +28,8 @@ const recipientKey = ref("");
 const reviewedInventory = ref<{ inventory_id: string; digest: string } | null>(null);
 const includeMetadata = ref(true);
 const includeMembers = ref(false);
+const includeLfs = ref(false);
+const includeWiki = ref(false);
 const loading = ref(true);
 const saving = ref(false);
 const message = ref("");
@@ -68,8 +70,9 @@ function makeRequest(): SourceExportRequest | null {
     global_id: String(entry.id),
   })).sort((a, b) => a.repository.localeCompare(b.repository));
   if (repositories.some((entry) => !entry.repository || !entry.global_id)) return null;
+  const includeNative = includeLfs.value || includeWiki.value;
   return {
-    version: 2,
+    version: includeNative ? 3 : 2,
     inventory_id: reviewedInventory.value.inventory_id,
     inventory_digest: reviewedInventory.value.digest,
     source_instance_key: profile.instance_key,
@@ -78,6 +81,9 @@ function makeRequest(): SourceExportRequest | null {
     repositories,
     include_metadata: includeMetadata.value,
     include_members: includeMembers.value,
+    ...(includeNative
+      ? { include_lfs: includeLfs.value, include_wiki: includeWiki.value }
+      : {}),
   };
 }
 
@@ -179,9 +185,11 @@ function formatSize(size: number | null): string {
       <legend>Archive contents</legend>
       <label><input v-model="includeMetadata" type="checkbox" :disabled="saving"> Include issues and normal comments</label>
       <label><input v-model="includeMembers" type="checkbox" :disabled="saving"> Include membership records</label>
-      <p class="supporting">The archive includes ordinary Git content and supported organization/team structure. LFS, wikis, attachments, releases and reviews are not included. Membership records are proposals; target identities and permissions need local approval.</p>
+      <label><input v-model="includeLfs" type="checkbox" :disabled="saving"> Include Git LFS objects</label>
+      <label><input v-model="includeWiki" type="checkbox" :disabled="saving"> Include native wiki history</label>
+      <p class="supporting">LFS includes standard pointers and same-origin objects only. Native wiki export requires a populated native wiki; empty, disabled, or uninitialized wikis block the request. There is no automatic return or merge. Membership records are proposals; target identities and permissions need local approval.</p>
     </fieldset>
-    <InventoryPanel v-if="sourceProfile" :source-profile="sourceProfile" :selected-repositories="selectedRepositories" :include-metadata="includeMetadata" :include-members="includeMembers" @reviewed="reviewedInventory = $event" @session-expired="emit('session-expired')" />
+    <InventoryPanel v-if="sourceProfile" :source-profile="sourceProfile" :selected-repositories="selectedRepositories" :include-metadata="includeMetadata" :include-members="includeMembers" :include-lfs="includeLfs" :include-wiki="includeWiki" @reviewed="reviewedInventory = $event" @session-expired="emit('session-expired')" />
     <p v-if="!reviewedInventory" class="supporting">Inspect and review the current inventory before queueing an export.</p>
     <button class="primary" type="button" :disabled="!canCreate" @click="createAndQueue">{{ saving ? "Queueing export…" : "Create and queue export" }}</button>
 

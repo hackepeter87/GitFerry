@@ -225,7 +225,7 @@ export interface SourceExportRepository {
 }
 
 export interface SourceExportRequest {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   inventory_id?: string;
   inventory_digest?: string;
   source_instance_key: string;
@@ -234,6 +234,8 @@ export interface SourceExportRequest {
   repositories: SourceExportRepository[];
   include_metadata: boolean;
   include_members: boolean;
+  include_lfs?: boolean;
+  include_wiki?: boolean;
 }
 
 export interface SourceExportJob {
