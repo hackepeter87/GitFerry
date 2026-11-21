@@ -29,6 +29,34 @@ from support import (
 )
 
 REPOSITORY = "source-export-lab/selected"
+
+
+def _flush_target_fixture_queues(phase: str) -> None:
+    # The preceding functional writer push schedules native Gitea work. Finish
+    # that setup before freezing a no-write snapshot; do not discard updated_at
+    # or mask differences after the operation being checked.
+    result = run(
+        [
+            *COMPOSE,
+            "exec",
+            "-T",
+            "--user",
+            "git",
+            "target",
+            "gitea",
+            "manager",
+            "flush-queues",
+            "--timeout",
+            "30s",
+        ],
+        timeout=45,
+    )
+    (WORK / f"fixture-queues-{phase}.json").write_text(
+        json.dumps({"phase": phase, "exit_code": result.returncode, "status": "passed"}),
+        encoding="utf-8",
+    )
+
+
 ASSERTIONS = frozenset(
     {
         "source_capture_confirmed",
@@ -327,6 +355,7 @@ def run_source_export_probe() -> dict[str, Any]:
             os.environ["GITFERRY_IT_RUNTIME_IMAGE"],
         ]
     ).stdout.strip()
+    _flush_target_fixture_queues("collision")
     collision_before = _target_worker("collision-snapshot")
     _target_worker("prepare-browser", "collision")
     _target_worker("start-browser", "collision")
@@ -585,6 +614,7 @@ def run_source_export_probe() -> dict[str, Any]:
         and identity_recovery["group_restored"]["after_status"] == "conflict"
         and identity_recovery["group_restored"]["binding_unchanged"]
     )
+    _flush_target_fixture_queues("identity-recovery")
     recovery_snapshot = _target_worker("collision-snapshot")
     recovery_events = docker_service_exec(
         "gitferry-b", ["wc", "-l", "/state/package-admission/remote-events.jsonl"]
