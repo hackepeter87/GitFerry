@@ -10,6 +10,7 @@ async function openMockedWorkspace(page: Page, profiles: Profile[] = [
   await page.route("**/api/v1/auth/session", (route) => route.fulfill({ json: { authenticated: true, principal: { username: "synthetic.admin", role: "admin" } } }));
   await page.route("**/api/v1/connections", (route) => route.fulfill({ json: profiles }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/package-uploads**", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/exports/recipients", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/exports", (route) => route.fulfill({ json: [] }));
   await page.goto("/");
