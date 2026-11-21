@@ -37,12 +37,12 @@ test("selects repositories across mocked pages and preserves the summary", async
   await page.getByRole("checkbox", { name: "synthetic-org/first" }).check();
   await page.getByRole("button", { name: "Load more repositories" }).click();
   await page.getByRole("checkbox", { name: "synthetic-org/second Private" }).check();
-  await expect(page.getByText("2 repositories selected.")).toBeVisible();
+  await expect(page.getByText("2 repositories selected.", { exact: true })).toBeVisible();
   await page.getByLabel("Organization", { exact: true }).selectOption("other-org");
   await page.getByRole("checkbox", { name: "other-org/third" }).check();
-  await expect(page.getByText("3 repositories selected.")).toBeVisible();
+  await expect(page.getByText("3 repositories selected.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Remove synthetic-org/first from selection" }).click();
-  await expect(page.getByText("2 repositories selected.")).toBeVisible();
+  await expect(page.getByText("2 repositories selected.", { exact: true })).toBeVisible();
   expect(requests).toEqual(expect.arrayContaining([
     { page: 1, kind: "organizations", organization: null, expected_revision: 4 },
     { page: 1, kind: "repositories", organization: "synthetic-org", expected_revision: 4 },
