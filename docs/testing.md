@@ -863,3 +863,17 @@ limited to the current transfer adapters; observing wiki, LFS limitations, asset
 does not establish their transfer. See [inventory operation](content-inventory.md) and
 [ADR 0024](decisions/0024-selected-content-inventory.md). Exact run results remain in the issue,
 PR and Actions artifacts.
+
+Before the guided target-collision and identity-recovery no-write snapshots, the synthetic harness
+waits for Gitea's preceding fixture work with `gitea manager flush-queues --timeout 30s` (45-second
+outer bound). A nonzero result fails the probe. The scoped diagnostic records are
+`fixture-queues-collision.json` and `fixture-queues-identity-recovery.json`. This setup barrier keeps
+an earlier functional Git push's asynchronous `updated_at` change outside the measured operation;
+the full before/after snapshot, native timestamps, operation journal and no-write checks remain
+unchanged. No fixed sleep or ignored timestamp substitutes for this boundary.
+
+The inventory qualification also flushes source fixture queues before independent
+enumeration: Gitea creates PR refs asynchronously. It retains per-class expected,
+collected, and independently re-read counts in `inventory-counts.json`; any
+difference fails the run. Queue completion is bounded and recorded, including
+failure and timeout. This fixture boundary does not alter production drift rules.

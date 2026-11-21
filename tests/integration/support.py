@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from collections.abc import Mapping, Sequence
@@ -121,3 +122,36 @@ def docker_copy(source: str | Path, destination: str | Path) -> None:
     if isinstance(destination, Path):
         destination.parent.mkdir(parents=True, exist_ok=True)
     run([*COMPOSE, "cp", str(source), str(destination)])
+
+
+def flush_fixture_queues(service: str, phase: str) -> None:
+    # Finish fixture writes before comparison snapshots. Never settle/retry
+    # the system after the operation being checked to hide observed differences.
+    command = [
+        *COMPOSE,
+        "exec",
+        "-T",
+        "--user",
+        "git",
+        service,
+        "gitea",
+        "manager",
+        "flush-queues",
+        "--timeout",
+        "30s",
+    ]
+    record: dict[str, Any] = {
+        "service": service,
+        "phase": phase,
+        "exit_code": None,
+        "status": "failed",
+    }
+    try:
+        result = run(command, check=False, timeout=45)
+        record["exit_code"] = result.returncode
+        if result.returncode:
+            raise ProbeFailure("prior Gitea fixture queues did not finish")
+        record["status"] = "passed"
+    finally:
+        # Also retain failure/timeout evidence before the runner's cleanup.
+        (WORK / f"fixture-queues-{phase}.json").write_text(json.dumps(record), encoding="utf-8")

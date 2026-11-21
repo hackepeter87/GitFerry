@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 import plan_worker
-from browser_runtime import serve
+from browser_runtime import process_exited, serve
 from fastapi.testclient import TestClient
 from gitferry.api import create_app
 from gitferry.application_package import inspect_package
@@ -404,7 +404,7 @@ def stop_browser() -> dict[str, Any]:
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         status = Path(f"/proc/{pid}/stat")
-        if not status.exists() or status.read_text().split(") ", 1)[1].startswith("Z"):
+        if process_exited(status):
             pid_path.unlink()
             return {"status": "stopped"}
         time.sleep(0.1)

@@ -68,7 +68,8 @@ test("inspects unsupported content but does not allow exporting a blocked invent
   await open(page);
   await page.getByLabel("LFS objects").check();
   await page.getByRole("button", { name: "Inspect selected content" }).click();
-  await expect(page.getByRole("status")).toContainText("not transfer-ready");
+  await expect(page.getByRole("status").filter({ hasText: "This inventory is blocked" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "not transfer-ready" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Use this inventory" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Create and queue export" })).toBeDisabled();
 });
