@@ -139,39 +139,112 @@ test("phase0 selects an approved repository and downloads its export", async ({ 
     download_header_bytes: Number(response.headers()["content-length"]) });
 });
 
-async function prepareTargetPlan(page: Page): Promise<{ blocked: boolean; missing: string | null }> {
+type PlanPreparationOptions = { structureOnly?: boolean; identityAdmin?: boolean };
+
+async function bindThroughIdentityAdmin(page: Page, panel: Locator): Promise<void> {
+  const claims = await panel.locator(".identity-row").evaluateAll((rows) => rows.map((row) => ({
+    login: row.querySelector("strong")?.textContent?.trim() ?? "",
+    roles: row.querySelector("p")?.textContent?.match(/roles: ([^\n]+)/)?.[1]?.split(", ").map((item) => item.trim()) ?? [],
+    externalId: row.querySelector("p")?.textContent?.match(/external ID: ([^ ]+)/)?.[1] ?? "",
+    ouPath: row.querySelector("p")?.textContent?.match(/OU: ([^·]+)/)?.[1]?.trim() ?? "",
+    realm: row.querySelector("p")?.textContent?.match(/· ([^·]+) · external ID:/)?.[1]?.trim() ?? "",
+  })).filter((claim) => claim.login));
+  if (!claims.length) throw new Error("package did not expose identity claims for explicit binding");
+  const identity = page.locator(".identity-panel");
+  await activate(page, identity.getByRole("button", { name: "Manage identities" }));
+  await expect(identity.getByLabel("Approved target instance")).toBeVisible();
+  await choose(page, identity.getByLabel("Approved target instance"), "target");
+  for (const claim of claims) {
+    await enter(page, identity.getByLabel("Target login"), claim.login);
+    await enter(page, identity.getByLabel("Source login"), claim.login);
+    await enter(page, identity.getByLabel("External ID"), claim.externalId);
+    await enter(page, identity.getByLabel("OU path (optional)"), claim.ouPath);
+    const realm = identity.getByLabel("Registered realm");
+    await choose(page, realm, claim.realm);
+    const credential = identity.getByLabel("Credential reference (optional)");
+    await enter(page, credential, claim.roles.includes("author") ? claim.login : "");
+    for (const [label, enabled] of [["Issue author", claim.roles.includes("author")], ["Comment author", claim.roles.includes("author")], ["Team member", claim.roles.includes("member")]] as const) {
+      const checkbox = identity.getByLabel(label);
+      if (enabled !== await checkbox.isChecked()) { await tabTo(page, checkbox); await page.keyboard.press("Space"); }
+    }
+    await activate(page, identity.getByRole("button", { name: "Check target account" }));
+    await expect(identity.getByText(new RegExp(`Checked ${claim.login}`))).toBeVisible();
+    await activate(page, identity.getByRole("button", { name: "Submit for approval" }));
+    const candidate = identity.locator(".identity-card", { hasText: `${claim.login} → ${claim.login}` });
+    await expect(candidate).toBeVisible();
+    await activate(page, candidate.getByRole("button", { name: "Approve" }));
+    await expect(candidate.getByText("approved", { exact: true })).toBeVisible();
+  }
+}
+
+async function prepareTargetPlan(page: Page, options: PlanPreparationOptions = {}): Promise<{ blocked: boolean; missing: string | null }> {
   await login(page);
-  const panel = await intake(page);
+  let panel = await intake(page);
+  if (await panel.getByRole("button", { name: "Confirm sender locally" }).isVisible()) {
   await enter(page, panel.getByLabel(/Local sender display name/), "Captured source");
   await enter(page, panel.getByLabel(/Local sender base URL/), "https://source.invalid");
   await activate(page, panel.getByRole("button", { name: "Confirm sender locally" }));
   await expect(panel.getByRole("button", { name: "Confirm sender locally" })).toHaveCount(0);
+  }
   const realm = panel.locator(".mapping-row");
+  if (await realm.getByRole("button", { name: "Confirm realm locally" }).isVisible()) {
   await expect(realm).toHaveCount(1);
   await enter(page, realm.getByLabel("Display name", { exact: true }), "Observed native source accounts");
   await enter(page, realm.getByLabel("External marker"), "locally-reviewed-source-realm");
   await activate(page, realm.getByRole("button", { name: "Confirm realm locally" }));
   await expect(realm.getByRole("button", { name: "Confirm realm locally" })).toHaveCount(0);
 
-  await check(page, panel.getByLabel("Apply team/member changes"));
-  await activate(page, panel.getByRole("button", { name: "Admit package locally" }));
-  await activate(page, panel.getByRole("button", { name: "Review plan selection" }));
-  await expect(panel.getByRole("heading", { name: "Plan review", exact: true })).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Prepare draft for Transfer plans" })).toBeDisabled();
-  const blocked = await panel.getByRole("button", { name: "Prepare draft for Transfer plans" }).isDisabled();
-  const missing = await panel.locator("dt", { hasText: "Missing bindings" }).locator("..").textContent();
-  expect(missing).not.toBe("Missing bindingsNone");
+  }
 
-  // Explicit synthetic allowlist. The application never derives bindings from equal names.
-  for (const name of ["issue-author", "comment-author"]) {
-    const row = panel.locator(".identity-row").filter({ has: page.locator("strong", { hasText: new RegExp(`^${name}$`) }) });
-    await expect(row).toHaveCount(1);
-    await enter(page, row.getByLabel("Target login", { exact: true }), name);
-    await enter(page, row.getByLabel(/Author credential reference/), name);
-    await activate(page, row.getByRole("button", { name: "Check target account" }));
-    await expect(row.getByRole("button", { name: "Confirm binding", exact: true })).toBeEnabled();
-    await activate(page, row.getByRole("button", { name: "Confirm binding", exact: true }));
-    await expect(row).toContainText(`Already bound to ${name}`);
+  if (options.structureOnly) {
+    const metadata = panel.getByLabel("Include metadata");
+    if (await metadata.isChecked()) { await tabTo(page, metadata); await page.keyboard.press("Space"); }
+  } else {
+    await check(page, panel.getByLabel("Apply team/member changes"));
+    await activate(page, panel.getByRole("button", { name: "Admit package locally" }));
+    await activate(page, panel.getByRole("button", { name: "Review plan selection" }));
+    await expect(panel.getByRole("heading", { name: "Plan review", exact: true })).toBeVisible();
+  }
+  let blocked = false;
+  let missing: string | null = null;
+  if (!options.structureOnly) {
+    await expect(panel.getByRole("button", { name: "Prepare draft for Transfer plans" })).toBeDisabled();
+    blocked = await panel.getByRole("button", { name: "Prepare draft for Transfer plans" }).isDisabled();
+    missing = await panel.locator("dt", { hasText: "Missing bindings" }).locator("..").textContent();
+    expect(missing).not.toBe("Missing bindingsNone");
+  }
+
+  if (options.identityAdmin) {
+    await page.reload();
+    panel = await intake(page);
+    await bindThroughIdentityAdmin(page, panel);
+    await page.reload();
+    panel = await intake(page);
+    for (const name of ["issue-author", "comment-author"]) {
+      const row = panel.locator(".identity-row").filter({ has: page.locator("strong", { hasText: new RegExp(`^${name}$`) }) });
+      await expect(row).toContainText(`Already bound to ${name}`);
+      await enter(page, row.getByLabel(/Author credential reference/), name);
+    }
+  } else if (!options.structureOnly) {
+    // Immediate package-local binding remains covered for the collision preparation path.
+    for (const name of ["issue-author", "comment-author"]) {
+      const row = panel.locator(".identity-row").filter({ has: page.locator("strong", { hasText: new RegExp(`^${name}$`) }) });
+      await expect(row).toHaveCount(1);
+      await enter(page, row.getByLabel("Target login", { exact: true }), name);
+      await enter(page, row.getByLabel(/Author credential reference/), name);
+      await activate(page, row.getByRole("button", { name: "Check target account" }));
+      await expect(row.getByRole("button", { name: "Confirm binding", exact: true })).toBeEnabled();
+      await activate(page, row.getByRole("button", { name: "Confirm binding", exact: true }));
+      await expect(row).toContainText(`Already bound to ${name}`);
+    }
+  }
+  if (!options.structureOnly) {
+    await check(page, panel.getByLabel("Include metadata"));
+    await check(page, panel.getByLabel("Apply team/member changes"));
+  }
+  if (options.structureOnly) {
+    await expect(panel.getByLabel("Include metadata")).not.toBeChecked();
+    await expect(panel.getByLabel("Apply team/member changes")).not.toBeChecked();
   }
   await activate(page, panel.getByRole("button", { name: "Admit package locally" }));
   await activate(page, panel.getByRole("button", { name: "Review plan selection" }));
@@ -183,15 +256,17 @@ async function prepareTargetPlan(page: Page): Promise<{ blocked: boolean; missin
 
 test("phase2 confirms local decisions and previews the real first import", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
-  const { blocked, missing } = await prepareTargetPlan(page);
+  const { blocked, missing } = await prepareTargetPlan(page, { identityAdmin: true });
   const plans = page.locator(".plans-panel");
   await expect(plans.getByRole("button", { name: "Start reviewed plan" })).toBeDisabled();
   await activate(page, plans.getByRole("button", { name: "Request prerequisite preview" }));
   await expect(plans.locator(".preview-box dd").filter({ hasText: /^passed$/ })).toBeVisible({ timeout: 60_000 });
   await expect(plans.getByRole("button", { name: "Start reviewed plan" })).toBeEnabled();
   const savedPlans = await (await page.request.get("/api/v1/plans")).json();
-  expect(savedPlans).toHaveLength(1);
-  const requiredBytes = savedPlans[0].document.required_bytes;
+  expect(savedPlans).toHaveLength(2);
+  const fullPlan = savedPlans.find((plan: { document: { inventory?: { request?: { metadata?: unknown[] } } } }) => Array.isArray(plan.document.inventory?.request?.metadata) && plan.document.inventory.request.metadata.length > 0)!;
+  expect(fullPlan).toBeDefined();
+  const requiredBytes = fullPlan.document.required_bytes;
   expect(requiredBytes).toBeGreaterThan(64 * 1024 * 1024);
   await expect(plans.locator(".storage-estimate")).toHaveText(`${requiredBytes.toLocaleString()} bytes`);
   const layout = await page.evaluate(() => ({
@@ -207,9 +282,24 @@ test("phase2 confirms local decisions and previews the real first import", async
     blocked_without_bindings: blocked });
 });
 
+test("structure phase executes Git-only before identity administration bindings", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await prepareTargetPlan(page, { structureOnly: true });
+  const plans = page.locator(".plans-panel");
+  await activate(page, plans.getByRole("button", { name: "Request prerequisite preview" }));
+  await expect(plans.locator(".preview-box dd").filter({ hasText: /^passed$/ })).toBeVisible({ timeout: 60_000 });
+  await expect(plans.getByRole("button", { name: "Start reviewed plan" })).toBeEnabled();
+  await activate(page, plans.getByRole("button", { name: "Start reviewed plan" }));
+  await expect(plans.locator(".plan-detail-heading")).toContainText("Confirmed", { timeout: 60_000 });
+  record({ structure_only: true, structure_plan_confirmed: true });
+});
+
 test("phase5 executes the reviewed real first import", async ({ page }) => {
   await login(page);
   const plans = page.locator(".plans-panel");
+  const draft = plans.locator(".plan-row").filter({ has: page.locator('.plan-status[data-status="draft"]') });
+  await expect(draft).toHaveCount(1);
+  await activate(page, draft);
   await expect(plans.locator(".preview-box dd").filter({ hasText: /^passed$/ })).toBeVisible();
   await expect(plans.getByRole("button", { name: "Start reviewed plan" })).toBeEnabled();
   await activate(page, plans.getByRole("button", { name: "Start reviewed plan" }));
@@ -224,9 +314,14 @@ test("phase3 observes the confirmed plan after an application process restart", 
     if (request.method() !== "GET" && /\/api\/v1\/(packages|package-uploads|plans)(\/|$)/.test(new URL(request.url()).pathname)) mutations.push(request.url());
   });
   await login(page);
+  await expect(page.locator('.plan-row .plan-status[data-status="confirmed"]')).toHaveCount(2);
+  await activate(page, page.locator(".plan-row").last());
   await expect(page.locator(".plan-detail-heading")).toContainText("Confirmed");
+  await expect(page.locator(".operation-list")).toContainText("create comment");
   await expect(page.locator(".package-row")).toHaveCount(1);
   await page.reload();
+  await expect(page.locator('.plan-row .plan-status[data-status="confirmed"]')).toHaveCount(2);
+  await activate(page, page.locator(".plan-row").last());
   await expect(page.locator(".plan-detail-heading")).toContainText("Confirmed");
   expect(mutations).toEqual([]);
   record({ read_only: true });
