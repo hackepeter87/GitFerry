@@ -60,12 +60,16 @@ def parse_lfs_pointer(data: bytes) -> LFSPointer | None:
     size_name, size_separator, size_text = lines[2].partition(" ")
     if oid_name != "oid" or separator != " " or size_name != "size" or size_separator != " ":
         raise LFSPayloadError("LFS pointer fields are malformed")
-    if len(oid) != 71 or not oid.startswith("sha256:") or any(
-        char not in "0123456789abcdef" for char in oid[7:]
+    if (
+        len(oid) != 71
+        or not oid.startswith("sha256:")
+        or any(char not in "0123456789abcdef" for char in oid[7:])
     ):
         raise LFSPayloadError("LFS pointer oid is not a lowercase SHA-256")
-    if not size_text.isascii() or not size_text.isdigit() or (
-        len(size_text) > 1 and size_text[0] == "0"
+    if (
+        not size_text.isascii()
+        or not size_text.isdigit()
+        or (len(size_text) > 1 and size_text[0] == "0")
     ):
         raise LFSPayloadError("LFS pointer size is not canonical")
     return LFSPointer(oid=oid[7:], size=int(size_text))
@@ -183,4 +187,3 @@ def publish_lfs_object(
             temporary.unlink(missing_ok=True)
         raise LFSPayloadError("LFS object publication failed") from None
     return size, digest
-

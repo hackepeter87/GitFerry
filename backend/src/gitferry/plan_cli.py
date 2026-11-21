@@ -50,6 +50,11 @@ def configure(parser: argparse.ArgumentParser, database_default: str | None) -> 
     run = actions.add_parser("run")
     database(run)
     run.add_argument("--plan-id")
+    resolve = actions.add_parser("resolve-native")
+    database(resolve)
+    resolve.add_argument("--operation-id", required=True)
+    resolve.add_argument("--evidence", required=True)
+    resolve.add_argument("--wiki-commit")
 
 
 def _input(path: Path) -> dict[str, Any]:
@@ -71,7 +76,18 @@ def execute(args: argparse.Namespace) -> int:
         service = PlanService(state)
         action = args.plan_action
         result: dict[str, Any] | list[dict[str, Any]] | None
-        if action == "prepare":
+        if action == "resolve-native":
+            from gitferry.native_reconciliation import resolve_native_operation
+
+            operation = resolve_native_operation(
+                state,
+                _paths(args.database),
+                args.operation_id,
+                evidence=args.evidence,
+                wiki_commit=args.wiki_commit,
+            )
+            result = {"operation_id": operation.operation_id, "status": operation.status}
+        elif action == "prepare":
             result = prepare_transfer_plan(state, _input(args.input))
         elif action == "list":
             result = service.list()

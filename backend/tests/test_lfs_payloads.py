@@ -23,9 +23,7 @@ def _pointer(data: bytes) -> bytes:
 
 
 def test_parse_valid_zero_and_unicode_nonpointer() -> None:
-    assert parse_lfs_pointer(_pointer(b"")) == LFSPointer(
-        hashlib.sha256(b"").hexdigest(), 0
-    )
+    assert parse_lfs_pointer(_pointer(b"")) == LFSPointer(hashlib.sha256(b"").hexdigest(), 0)
     assert parse_lfs_pointer("unicode 🚢".encode()) is None
     assert parse_lfs_pointer(b"version 2.0\nordinary text\n") is None
 
@@ -144,4 +142,3 @@ def test_publish_detects_source_mutation_after_open(
     with pytest.raises(LFSPayloadError):
         publish_lfs_object(source, package, "objects/object", pointer)
     assert not (package / "objects" / "object").exists()
-

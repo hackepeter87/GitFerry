@@ -48,13 +48,18 @@ def record_source_capture(state: StateStore, artifact: PackageArtifact, export_i
             or (metadata is not None) != request["include_metadata"]
         ):
             raise PackageError("captured package disagrees with local export intent")
-        if request["version"] == 2 and (
-            document["schema_version"] != 2
+        if request["version"] >= 2 and (
+            document["schema_version"] != request["version"]
             or document["inventory"]["snapshot_id"] != request["inventory_id"]
             or document["inventory"]["content_digest"] != request["inventory_digest"]
             or document["inventory"]["include_members"] != request["include_members"]
         ):
             raise PackageError("captured inventory disagrees with local export intent")
+        if request["version"] == 3 and any(
+            document["inventory"].get(key) != request[key]
+            for key in ("include_lfs", "include_wiki")
+        ):
+            raise PackageError("captured native selection disagrees with local intent")
         # Structure origins use the same immutable origin comparison as metadata admission.
         for repository in document["repositories"]:
             organization = repository["organization"]

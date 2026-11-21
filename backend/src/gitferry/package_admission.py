@@ -143,7 +143,7 @@ def _facts(
                         "global_id": identity["global_id"],
                     },
                 )
-        if document["schema_version"] == 2:
+        if document["schema_version"] >= 2:
             # Source-copy observations are scoped to the sender, not reinterpreted origins.
             copies = [
                 ("organization", organization["name"], organization),
@@ -363,9 +363,19 @@ class PackageAdmissions:
             target_instance_key=target_instance_key,
             expected_digest=review["digest_sha256"],
         )
+        artifact = self.artifact(package_ref)
+        if artifact.digest_sha256 != review["digest_sha256"]:
+            raise PackageAdmissionConflict("package changed after plan review")
+        native_payloads = None
+        if artifact.document["schema_version"] == 3:
+            native_payloads = [
+                {key: item[key] for key in ("repository", "lfs", "wiki")}
+                for item in artifact.document["repositories"]
+            ]
         return prepare_transfer_plan(
             self.state,
             selection["request"],
             expected_profile_revision=profile_revision,
             content_inventory=review["content_inventory"],
+            native_payloads=native_payloads,
         )

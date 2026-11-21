@@ -225,6 +225,7 @@ def prepare_transfer_plan(
     *,
     expected_profile_revision: int | None = None,
     content_inventory: dict[str, Any] | None = None,
+    native_payloads: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     request = parse_plan_request(value)
     with state.read_connection() as connection:
@@ -249,6 +250,20 @@ def prepare_transfer_plan(
         )
         operations.update({operation.operation_id: operation for operation in prepared})
         dependencies.update(graph)
+    if native_payloads is not None:
+        from gitferry.native_operations import prepare_native_operations
+
+        by_scope = {entry["repository"]: entry for entry in native_payloads}
+        if len(by_scope) != len(native_payloads) or set(by_scope) != {
+            item.repository for item in request.repositories
+        }:
+            raise PlanConflict("native payload selection differs from the selected repositories")
+        for item in request.repositories:
+            native_prepared, graph = prepare_native_operations(
+                state, item.provisioning(request.target_instance_key), by_scope[item.repository]
+            )
+            operations.update({operation.operation_id: operation for operation in native_prepared})
+            dependencies.update(graph)
     for metadata in sorted(request.metadata, key=lambda selected: selected.origin_id):
         operation = _metadata_operation(state, request, metadata)
         operations[operation.operation_id] = operation
@@ -263,6 +278,21 @@ def prepare_transfer_plan(
         for operation in operations.values()
         if operation.operation_type == "create_repository"
     }
+    if native_payloads is not None:
+        from gitferry.native_operations import NATIVE_OPERATION_TYPES
+
+        for operation in operations.values():
+            if operation.operation_type in NATIVE_OPERATION_TYPES:
+                parent = repositories.get(operation.target_repository_scope)
+                if parent:
+                    dependencies.setdefault(operation.operation_id, []).append(parent)
+            if operation.operation_type == "push_git_bundle":
+                dependencies.setdefault(operation.operation_id, []).extend(
+                    other.operation_id
+                    for other in operations.values()
+                    if other.operation_type == "upload_lfs_object"
+                    and other.target_repository_scope == operation.target_repository_scope
+                )
     for operation in operations.values():
         parents = dependencies.setdefault(operation.operation_id, [])
         if operation.operation_type in (
@@ -314,8 +344,18 @@ def prepare_transfer_plan(
             *request.source_limitations,
         ],
     }
-    required_bytes = 64 * 1024 * 1024 + 3 * sum(
-        item.bundle.size for item in request.repositories if item.bundle
+    native_bytes = 0
+    if native_payloads is not None:
+        inventory["native_payloads"] = native_payloads
+        native_bytes = sum(
+            sum(p["size"] for p in item.get("lfs") or [])
+            + (item["wiki"]["bundle"]["size"] if item.get("wiki") and item["wiki"]["bundle"] else 0)
+            for item in native_payloads
+        )
+    required_bytes = (
+        3 * native_bytes
+        + 64 * 1024 * 1024
+        + 3 * sum(item.bundle.size for item in request.repositories if item.bundle)
     )
     return PlanService(state).create(
         target_instance_key=request.target_instance_key,

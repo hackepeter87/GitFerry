@@ -144,7 +144,10 @@ class GiteaLFSClient:
             seen.add(lower)
             if lower == "authorization":
                 headers["Authorization"] = value
-            elif lower == "accept" and value == _MEDIA:
+            elif lower == "accept" and value in (
+                _MEDIA,
+                "application/vnd.git-lfs+json;q=0.9, */*;q=0.8",
+            ):
                 headers["Accept"] = value
             elif lower == "transfer-encoding" and kind == "upload" and value == "chunked":
                 # Gitea advertises this for git-lfs; our verified size chooses

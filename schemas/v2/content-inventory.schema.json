@@ -1,0 +1,401 @@
+{
+  "$defs": {
+    "ClassObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "content_class": {
+          "title": "Content Class",
+          "type": "string",
+          "enum": [
+            "git_refs",
+            "lfs",
+            "wiki",
+            "organizations",
+            "teams",
+            "permissions",
+            "identities",
+            "issues",
+            "labels",
+            "comments",
+            "attachments",
+            "releases",
+            "release_assets",
+            "pull_requests",
+            "pull_comments",
+            "reviews",
+            "review_comments",
+            "timelines",
+            "reactions",
+            "milestones",
+            "other_content"
+          ]
+        },
+        "status": {
+          "enum": [
+            "observed",
+            "not-supported",
+            "not-checked",
+            "excluded",
+            "blocked",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Count"
+        },
+        "objects": {
+          "items": {
+            "$ref": "#/$defs/InventoryObject"
+          },
+          "maxItems": 10000,
+          "title": "Objects",
+          "type": "array"
+        },
+        "reason": {
+          "default": "",
+          "maxLength": 1024,
+          "title": "Reason",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Limitations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "content_class",
+        "status",
+        "count"
+      ],
+      "title": "ClassObservation",
+      "type": "object"
+    },
+    "InventoryObject": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "native_id": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native Id"
+        },
+        "issue_index": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Issue Index"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "content_class",
+                "key"
+              ],
+              "properties": {
+                "content_class": {
+                  "enum": [
+                    "git_refs",
+                    "lfs",
+                    "wiki",
+                    "organizations",
+                    "teams",
+                    "permissions",
+                    "identities",
+                    "issues",
+                    "labels",
+                    "comments",
+                    "attachments",
+                    "releases",
+                    "release_assets",
+                    "pull_requests",
+                    "pull_comments",
+                    "reviews",
+                    "review_comments",
+                    "timelines",
+                    "reactions",
+                    "milestones",
+                    "other_content"
+                  ]
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              }
+            }
+          ]
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "account_id",
+                "login"
+              ],
+              "properties": {
+                "account_id": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*$",
+                  "maxLength": 128
+                },
+                "login": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            }
+          ]
+        },
+        "facts": {
+          "additionalProperties": true,
+          "title": "Facts",
+          "type": "object"
+        },
+        "size_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size Bytes"
+        }
+      },
+      "required": [
+        "key",
+        "namespace"
+      ],
+      "title": "InventoryObject",
+      "type": "object"
+    },
+    "RepositoryInventory": {
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "maxLength": 256,
+          "minLength": 3,
+          "title": "Repository",
+          "type": "string"
+        },
+        "native_id": {
+          "maxLength": 128,
+          "pattern": "^[1-9][0-9]*$",
+          "title": "Native Id",
+          "type": "string"
+        },
+        "requested_classes": {
+          "items": {
+            "type": "string",
+            "enum": [
+              "git_refs",
+              "lfs",
+              "wiki",
+              "organizations",
+              "teams",
+              "permissions",
+              "identities",
+              "issues",
+              "labels",
+              "comments",
+              "attachments",
+              "releases",
+              "release_assets",
+              "pull_requests",
+              "pull_comments",
+              "reviews",
+              "review_comments",
+              "timelines",
+              "reactions",
+              "milestones",
+              "other_content"
+            ]
+          },
+          "maxItems": 21,
+          "minItems": 1,
+          "title": "Requested Classes",
+          "type": "array"
+        },
+        "classes": {
+          "items": {
+            "$ref": "#/$defs/ClassObservation"
+          },
+          "maxItems": 21,
+          "minItems": 21,
+          "title": "Classes",
+          "type": "array"
+        },
+        "git_size_estimate_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Git Size Estimate Bytes"
+        },
+        "size_assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Size Assumptions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "repository",
+        "native_id",
+        "requested_classes",
+        "classes"
+      ],
+      "title": "RepositoryInventory",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "gitferry.content-inventory",
+      "default": "gitferry.content-inventory",
+      "title": "Format",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 2,
+      "default": 2,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "comparison_version": {
+      "const": 2,
+      "default": 2,
+      "title": "Comparison Version",
+      "type": "integer"
+    },
+    "snapshot_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "created_at": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Created At",
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_instance_key": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Source Instance Key",
+      "type": "string"
+    },
+    "source_installation_marker": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Source Installation Marker",
+      "type": "string"
+    },
+    "gitea_version": {
+      "const": "1.27.2",
+      "title": "Gitea Version",
+      "type": "string"
+    },
+    "repositories": {
+      "items": {
+        "$ref": "#/$defs/RepositoryInventory"
+      },
+      "maxItems": 128,
+      "minItems": 1,
+      "title": "Repositories",
+      "type": "array"
+    },
+    "deletion_semantics": {
+      "const": "absence-does-not-delete",
+      "default": "absence-does-not-delete",
+      "title": "Deletion Semantics",
+      "type": "string"
+    }
+  },
+  "required": [
+    "format",
+    "schema_version",
+    "comparison_version",
+    "snapshot_id",
+    "created_at",
+    "source_instance_key",
+    "source_installation_marker",
+    "gitea_version",
+    "repositories",
+    "deletion_semantics"
+  ],
+  "title": "GitFerry selected-content inventory v2",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitferry.io/schemas/v2/content-inventory.schema.json",
+  "description": "Selected native observations; no local execution authority. UTF-8 JSON, maximum 16 MiB and depth 32. Counts are unknown unless explicitly observed. Absence never means deletion."
+}

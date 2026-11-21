@@ -307,14 +307,10 @@ def test_push_wiki_bundle_uses_leases_and_rejects_stale_expected_refs(
         )
         assert result.observed_state and result.observed_state["refs"]
         push_args = next(args for args in captured if args[:2] == ["push", "--atomic"])
-        assert any(
-            value.startswith("--force-with-lease=refs/heads/") for value in push_args
-        )
+        assert any(value.startswith("--force-with-lease=refs/heads/") for value in push_args)
         assert identities == ["org/repo", "org/repo"]
         with pytest.raises(GiteaBundleError, match="expected state"):
-            pusher.push_wiki_bundle(
-                "org/repo", bundle.member, bundle.sha256, bundle.size, "42", {}
-            )
+            pusher.push_wiki_bundle("org/repo", bundle.member, bundle.sha256, bundle.size, "42", {})
 
 
 def test_source_mirror_post_yield_drift_removes_exported_bundle_and_clone(

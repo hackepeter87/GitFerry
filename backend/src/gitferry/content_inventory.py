@@ -147,8 +147,8 @@ class RepositoryInventory(_Model):
 
 class InventoryDocument(_Model):
     format: Literal["gitferry.content-inventory"] = "gitferry.content-inventory"
-    schema_version: Literal[1] = 1
-    comparison_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 1
+    comparison_version: Literal[1, 2] = 1
     snapshot_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")]
     created_at: Annotated[str, Field(min_length=1, max_length=64)]
     source_instance_key: Annotated[str, Field(min_length=1, max_length=128)]
@@ -159,6 +159,8 @@ class InventoryDocument(_Model):
 
     @model_validator(mode="after")
     def unique_scope(self) -> InventoryDocument:
+        if self.schema_version != self.comparison_version:
+            raise ValueError("inventory schema and comparison rules do not match")
         observed_at = datetime.fromisoformat(self.created_at.replace("Z", "+00:00"))
         if observed_at.tzinfo is None:
             raise ValueError("inventory creation time requires a timezone")
@@ -171,11 +173,13 @@ class InventoryDocument(_Model):
         return self
 
 
-@lru_cache(maxsize=1)
-def _validator() -> Draft202012Validator:
-    schema = Path(__file__).resolve().parents[3] / "schemas/v1/content-inventory.schema.json"
+@lru_cache(maxsize=2)
+def _validator(version: int) -> Draft202012Validator:
+    schema = (
+        Path(__file__).resolve().parents[3] / f"schemas/v{version}/content-inventory.schema.json"
+    )
     if not schema.is_file():
-        schema = Path.cwd() / "schemas/v1/content-inventory.schema.json"
+        schema = Path.cwd() / f"schemas/v{version}/content-inventory.schema.json"
     return Draft202012Validator(json.loads(schema.read_text()), format_checker=FormatChecker())
 
 
@@ -199,7 +203,9 @@ def parse_inventory(value: dict[str, Any]) -> InventoryDocument:
             or type(value.get("comparison_version")) is not int
         ):
             raise ValueError("inventory versions must be integers")
-        if next(_validator().iter_errors(value), None) is not None:
+        if value["schema_version"] not in (1, 2):
+            raise ValueError("unsupported inventory version")
+        if next(_validator(value["schema_version"]).iter_errors(value), None) is not None:
             raise ValueError("inventory does not match its supported local schema")
         return InventoryDocument.model_validate(value)
     except (ValueError, TypeError, RecursionError, ValidationError, ProvisioningTargetConflict):
@@ -245,6 +251,8 @@ def inventory_summary(document: InventoryDocument) -> dict[str, Any]:
             reason = observation.reason
             if observation.status != "observed":
                 reason = reason or "Content was not completely observed"
+            elif observation.content_class in {"lfs", "wiki"} and document.schema_version == 2:
+                reason = _native_transfer_reason(observation)
             elif observation.content_class not in TRANSFER_CLASSES:
                 reason = "Transfer for this class is not implemented"
             else:
@@ -329,11 +337,61 @@ def inventory_summary(document: InventoryDocument) -> dict[str, Any]:
     }
 
 
-def export_classes(*, metadata: bool, members: bool) -> list[str]:
+def _native_transfer_reason(observation: ClassObservation) -> str:
+    from gitferry.lfs_payloads import LFSPayloadError, LFSPointer
+    from gitferry.package_native import valid_ref
+
+    if observation.content_class == "lfs":
+        try:
+            for item in observation.objects:
+                if (
+                    item.size_bytes is None
+                    or item.namespace != "lfs-sha256"
+                    or item.native_id != item.key
+                ):
+                    return "LFS inventory requires qualified native SHA-256 objects"
+                pointer = LFSPointer(item.key, item.size_bytes)
+                if item.facts != {"oid": pointer.oid, "size": pointer.size}:
+                    return "LFS inventory facts are inconsistent"
+        except LFSPayloadError:
+            return "LFS inventory object identity is invalid"
+        return ""
+    if len(observation.objects) != 1:
+        return "Wiki inventory requires one explicit repository/ref observation"
+    item = observation.objects[0]
+    refs = item.facts.get("refs")
+    if item.facts.get("state") != "populated":
+        return "Empty or disabled wiki initialization is not qualified for first import"
+    if (
+        item.namespace != "wiki-repository"
+        or item.key != "wiki"
+        or not isinstance(refs, dict)
+        or not refs
+    ):
+        return "Wiki inventory requires exact native refs"
+    if len(refs) > 10000 or any(
+        not isinstance(ref, str)
+        or not valid_ref(ref)
+        or not isinstance(sha, str)
+        or len(sha) not in (40, 64)
+        or any(c not in "0123456789abcdef" for c in sha)
+        for ref, sha in refs.items()
+    ):
+        return "Wiki inventory contains invalid ref identities"
+    return ""
+
+
+def export_classes(
+    *, metadata: bool, members: bool, lfs: bool = False, wiki: bool = False
+) -> list[str]:
     """The bounded first-import selection; additional classes need their own adapters."""
     classes = {"git_refs", "organizations", "teams", "permissions"}
     if metadata or members:
         classes.add("identities")
     if metadata:
         classes.update(("issues", "comments"))
+    if lfs:
+        classes.add("lfs")
+    if wiki:
+        classes.add("wiki")
     return sorted(classes)

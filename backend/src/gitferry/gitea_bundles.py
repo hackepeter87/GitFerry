@@ -283,9 +283,7 @@ class GiteaBundlePusher(AbstractContextManager["GiteaBundlePusher"]):
         if observed != desired:
             raise GiteaBundleError("target wiki refs differ after push")
         self._verify_repository_id(repository, expected_repository_id)
-        return TargetConfirmation(
-            expected_repository_id, None, observed_state={"refs": observed}
-        )
+        return TargetConfirmation(expected_repository_id, None, observed_state={"refs": observed})
 
     def _verify_repository_id(self, repository: str, expected: str) -> None:
         if not _REPOSITORY.fullmatch(repository):

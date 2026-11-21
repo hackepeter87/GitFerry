@@ -30,7 +30,7 @@ def response_actions(operation):
             "href": ROOT + "/verify",
             "header": {
                 "Authorization": "Bearer synthetic-action",
-                "Accept": "application/vnd.git-lfs+json",
+                "Accept": "application/vnd.git-lfs+json;q=0.9, */*;q=0.8",
             },
         },
     }
