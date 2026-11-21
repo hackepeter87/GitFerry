@@ -531,3 +531,13 @@ Exact-head review, hosted CI and integrated-main verification remain required be
 
 The controlled failure contract also passed: its deliberately failed run retained diagnostics and
 completed scoped cleanup. It is not counted as a successful migration.
+
+The first PR #54 hosted run (`44865912507`) failed at the immediate branch API read after
+target application. Preserved Gitea 1.27.2 logs show a nil-repository panic in `repo.GetBranch`;
+the transferred bundle contains the expected `main` ref. The probe now waits on concrete
+post-receive visibility: `repository.empty == false` and a successful branch GET, then compares
+the returned commit with the bundle. The wait has a 20-second polling deadline and 2-second
+request timeouts; only reads are retried. A persistent error or missing branch still fails.
+Observations are retained in the comparison artifact. Focused tests prove delayed visibility and
+timeout rejection. This addresses a suspected post-receive timing boundary without changing the
+image pin, accepting a missing branch or retrying a remote write; hosted re-verification is required.

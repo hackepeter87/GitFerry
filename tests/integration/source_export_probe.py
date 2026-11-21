@@ -161,6 +161,7 @@ def run_source_export_probe() -> dict[str, Any]:
         "issue_html_url",
         "bundle_refs",
         "target_refs",
+        "git_visibility",
         "objects",
         "post_count",
     )

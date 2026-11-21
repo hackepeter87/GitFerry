@@ -9,6 +9,7 @@ import os
 import shutil
 import socket
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +44,7 @@ def remote(method: str, path: str, *, username: str = "gitferry-admin", **kwargs
         method,
         URL + "/api/v1" + path,
         auth=(username, password),
-        timeout=20,
+        timeout=kwargs.pop("timeout", 20),
         trust_env=False,
         **kwargs,
     )
@@ -152,6 +153,26 @@ def _counts(service: PackageAdmissions) -> dict[str, int]:
         }
 
 
+def _git_visibility() -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    """Wait for Gitea's post-receive metadata, not merely a successful Git push."""
+    deadline = time.monotonic() + 20
+    observations: list[dict[str, Any]] = []
+    while time.monotonic() < deadline:
+        try:
+            repository = remote("GET", "/repos/source-export-lab/selected", timeout=2)
+            observations.append({"repository_empty": repository.get("empty")})
+            if repository.get("empty") is False:
+                branch = remote("GET", "/repos/source-export-lab/selected/branches/main", timeout=2)
+                return repository, branch, observations
+        except httpx.HTTPStatusError as error:
+            status = error.response.status_code
+            if status not in (404, 500, 502, 503):
+                raise
+            observations.append({"read_status": status})
+        time.sleep(0.1)
+    raise RuntimeError("Gitea did not expose the imported Git branch within 20 seconds")
+
+
 def initial() -> dict[str, Any]:
     service, package_ref, evidence = _initialize()
     admitted = service.admit(
@@ -200,10 +221,9 @@ def initial() -> dict[str, Any]:
             plans,
             lambda _: GiteaPlanAdapter(service.state, paths, _references()),
         ).run(plan["plan_id"])
-    repository = remote("GET", "/repos/source-export-lab/selected")
+    repository, refs_remote, git_visibility = _git_visibility()
     issue = remote("GET", "/repos/source-export-lab/selected/issues/1")
     comments = remote("GET", "/repos/source-export-lab/selected/issues/1/comments")
-    refs_remote = remote("GET", "/repos/source-export-lab/selected/branches/main")
     bundle = next((ROOT / "packages" / PACKAGE_REF / "bundles").glob("*.bundle"))
     bundle_refs = {
         line.split(maxsplit=1)[1]: line.split(maxsplit=1)[0]
@@ -243,6 +263,7 @@ def initial() -> dict[str, Any]:
         "git_ref": refs_remote["commit"]["id"],
         "bundle_refs": bundle_refs,
         "target_refs": {"refs/heads/main": refs_remote["commit"]["id"]},
+        "git_visibility": git_visibility,
         "post_count": len(events),
         "objects": _counts(service),
         "evidence_digest": evidence["evidence_digest"],
