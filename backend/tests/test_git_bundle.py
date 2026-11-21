@@ -159,3 +159,19 @@ def test_max_bytes_is_positive_and_bound_is_enforced(tmp_path: Path) -> None:
         create_git_bundle(source, package, "repo.bundle", max_bytes=0)
     with pytest.raises(GitBundleError, match="exceeds"):
         create_git_bundle(source, package, "repo.bundle", max_bytes=1)
+
+
+def test_bundle_creation_timeout_removes_partial_output(tmp_path: Path, monkeypatch) -> None:
+    source = _repository(tmp_path / "source")
+    package = tmp_path / "package"
+    package.mkdir()
+
+    def timeout(args, **kwargs):
+        assert kwargs["timeout"] == 60
+        Path(args[3]).write_bytes(b"partial synthetic bundle")
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    monkeypatch.setattr(git_bundle_module.subprocess, "run", timeout)
+    with pytest.raises(GitBundleError, match="operation failed"):
+        create_git_bundle(source, package, "repo.bundle")
+    assert not list(package.iterdir())

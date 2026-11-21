@@ -453,3 +453,36 @@ The matrix contract explicitly includes the new file-boundary row without removi
 capability requirement. The controlled-failure contract and scoped cleanup also passed.
 Hosted exact-head and integrated-main evidence belongs to
 [PR #52](https://github.com/hackepeter87/GitFerry/pull/52) and is required before accepting the slice.
+
+## Issue #10 selected source capture
+
+The source-export service, CLI and migration 8 are covered by
+`test_source_exports.py`, `test_source_snapshot.py`, `test_source_export_cli.py`, and the existing
+Git-bundle/transport/state regressions. The child-process test exits after file publication and
+before the SQLite completion transaction, then recovers without a source connection. This is a
+read-only capture interruption, distinct from a possibly executed remote POST and its persistent
+`outcome_unknown` state.
+
+The integration entry now requires `source_export_capture_and_offline_file_receipt`, backed by
+all eleven assertions in `source_exports.assertions`. Every omitted assertion has a report-contract
+negative test. The probe creates an actual source package in the source-only context, copies its
+archive to the target-only context, and checks replay, authors/parent data, Git payload, byte digests,
+network isolation and independent state. Target receipt is file validation, not metadata application.
+Existing remote-write interruption and v1/v2 compatibility requirements remain mandatory.
+
+Local development integration run `0474a5a1c0604986` passed all 22 mandatory checks,
+including all eleven source-export assertions, against the unchanged Gitea 1.27.2 pin. The host
+was Darwin/arm64 and the Docker runtime Linux/arm64; this is a local Linux-container proof,
+not a hosted GitHub Actions run. Scoped cleanup exited 0. The package was 7,077 bytes and had
+SHA-256 `766d8622f179d060c799b9ec3e16a6c5ddd629edc3cc29662c852f76b2bf7ac4`.
+This working-tree run proves the stated selected capture/file receipt, not complete target
+application, the UI wizard, or the later immutable PR/main commits. Exact-commit hosted CI and
+independent review remain required before integration.
+
+The first two development integration attempts rejected source capture because the mapper required
+the aggregate team `permission` to equal the unit permissions. A separate synthetic Gitea 1.27.2
+API contract probe established the actual response: `permission: none` alongside
+`units_map: {repo.code: read, repo.issues: read}` (and `owner` for the Owners team). The exporter
+now uses equal supported code/issue units and excludes ownership. The failed runs retained
+diagnostics and completed scoped cleanup. This correction preserves the existing effective-right
+requirements; it does not weaken the assertion that teams must actually be captured.

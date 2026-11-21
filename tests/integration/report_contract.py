@@ -300,6 +300,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
     mandatory_sections = (
         "connection_profiles",
         "application_plans",
+        "source_exports",
         "git_bundle",
         "metadata",
         "identity_and_permissions",
@@ -317,6 +318,30 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         and all(_value(report, f"{section}.status") == "passed" for section in mandatory_sections)
     )
     entries = [
+        (
+            "source_export_capture_and_offline_file_receipt",
+            _all_required_true(
+                report,
+                "source_exports.assertions",
+                frozenset(
+                    {
+                        "source_capture_confirmed",
+                        "actual_git_bundle_captured",
+                        "organization_and_team_captured",
+                        "issue_comment_distinct_author_claims",
+                        "manifest_v2_unchanged",
+                        "byte_archive_exact",
+                        "source_context_cannot_target_or_external",
+                        "capture_has_no_api_writes",
+                        "offline_replay_exact",
+                        "target_only_archive_verified",
+                        "source_and_target_databases_independent",
+                    }
+                ),
+            ),
+            "tests/integration/source_export_probe.py",
+            "source_exports.assertions",
+        ),
         (
             "durable_application_plan_and_remote_interruptions",
             _all_required_true(

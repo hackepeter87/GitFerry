@@ -38,6 +38,25 @@ def complete_probe_report() -> dict[str, object]:
         "control_repository_change_preserved": True,
     }
     report: dict[str, object] = {
+        "source_exports": {
+            "status": "passed",
+            "assertions": dict.fromkeys(
+                (
+                    "source_capture_confirmed",
+                    "actual_git_bundle_captured",
+                    "organization_and_team_captured",
+                    "issue_comment_distinct_author_claims",
+                    "manifest_v2_unchanged",
+                    "byte_archive_exact",
+                    "source_context_cannot_target_or_external",
+                    "capture_has_no_api_writes",
+                    "offline_replay_exact",
+                    "target_only_archive_verified",
+                    "source_and_target_databases_independent",
+                ),
+                True,
+            ),
+        },
         "application_plans": {
             "status": "passed",
             "assertions": dict.fromkeys(
@@ -479,3 +498,26 @@ def test_application_plan_assertion_is_required(tmp_path: Path, assertion: str) 
     del report["application_plans"]["assertions"][assertion]
     results = prepare_results(tmp_path, report)
     assert not module.probe_contract_is_complete(results)
+
+
+@pytest.mark.parametrize(
+    "assertion",
+    [
+        "source_capture_confirmed",
+        "actual_git_bundle_captured",
+        "organization_and_team_captured",
+        "issue_comment_distinct_author_claims",
+        "manifest_v2_unchanged",
+        "byte_archive_exact",
+        "source_context_cannot_target_or_external",
+        "capture_has_no_api_writes",
+        "offline_replay_exact",
+        "target_only_archive_verified",
+        "source_and_target_databases_independent",
+    ],
+)
+def test_source_capture_assertion_is_required(tmp_path: Path, assertion: str) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    del report["source_exports"]["assertions"][assertion]
+    assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))

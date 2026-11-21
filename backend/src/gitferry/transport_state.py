@@ -233,10 +233,11 @@ def _insert_replica(
     replica: dict[str, Any],
 ) -> None:
     issue_index_key = "issue_index" if object_type == "issue" else "parent_issue_index"
+    issue_index = int(replica[issue_index_key]) if object_type in ("issue", "comment") else None
     expected = (
         replica["repository"],
         replica["global_id"],
-        int(replica[issue_index_key]),
+        issue_index,
         replica.get("native_created_at"),
     )
     existing = connection.execute(
@@ -265,13 +266,133 @@ def _insert_replica(
                 replica["repository"],
                 object_type,
                 replica["global_id"],
-                int(replica[issue_index_key]),
+                issue_index,
                 replica.get("native_created_at"),
                 now(),
             ),
         )
     except sqlite3.IntegrityError as exc:
         raise ManifestConflict("replica reference conflicts with another local mapping") from exc
+
+
+def _record_in_connection(
+    connection: sqlite3.Connection,
+    artifact: TransportArtifact,
+    *,
+    local_instance_key: str,
+    direction: Literal["exported", "received"],
+) -> AdmissionReport:
+    document = artifact.document
+    local_role = "sender" if direction == "exported" else "recipient"
+    expected_forward_direction = "received" if direction == "exported" else "exported"
+    replay = _existing_manifest(connection, artifact, direction)
+    if replay is not None:
+        return replay
+    endpoint = document[local_role]
+    if endpoint["instance_key"] != local_instance_key:
+        raise ManifestConflict(f"manifest {local_role} does not match this local context")
+    _check_endpoint(connection, document["sender"], role="sender")
+    _check_endpoint(connection, document["recipient"], role="recipient")
+    forward = _forward_row(connection, document, expected_forward_direction)
+    _check_return_baselines(connection, document, forward)
+    _check_forward_export_baselines(connection, document, direction)
+
+    reference = document.get("forward_reference")
+    connection.execute(
+        "INSERT INTO transport_manifests VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            document["manifest_id"],
+            artifact.digest_sha256,
+            document["transfer_round_id"],
+            direction,
+            document["mode"],
+            document["sender"]["instance_key"],
+            document["recipient"]["instance_key"],
+            reference["manifest_id"] if reference else None,
+            reference["digest_sha256"] if reference else None,
+            canonical_json(document),
+            now(),
+        ),
+    )
+    origin_ids: list[str] = []
+    blocked: set[str] = set()
+    items_by_identifier = {_portable_origin(item)[0]: item for item in document["objects"]}
+    # Resolve the complete object graph before recording any portable facts. Comments may
+    # appear before parents in the file, but the relational insert is parent-first.
+    for item in document["objects"]:
+        _, portable_origin = _portable_origin(item)
+        parent_identifier = _parent_origin_id(portable_origin)
+        if parent_identifier is None:
+            continue
+        parent_item = items_by_identifier.get(parent_identifier)
+        parent_row = connection.execute(
+            "SELECT object_type FROM object_origins WHERE origin_id = ?",
+            (parent_identifier,),
+        ).fetchone()
+        if parent_item is None and parent_row is None:
+            raise ManifestConflict("comment parent issue origin cannot be resolved")
+        if parent_item is not None and parent_item["origin"]["object_type"] != "issue":
+            raise ManifestConflict("comment parent reference is not an issue origin")
+        if parent_row is not None and parent_row["object_type"] != "issue":
+            raise ManifestConflict("comment parent reference conflicts with local origin type")
+    ordered = sorted(
+        document["objects"],
+        key=lambda item: _internal_object_type(item["origin"]["object_type"]) == "comment",
+    )
+    for item in ordered:
+        _insert_origin(connection, item)
+    for item in document["objects"]:
+        identifier, portable_origin = _portable_origin(item)
+        origin_ids.append(identifier)
+        object_type = _internal_object_type(portable_origin["object_type"])
+        for replica in item["replicas"]:
+            _instance(connection, replica["instance_key"])
+            _insert_replica(connection, identifier, object_type, replica)
+        connection.execute(
+            "INSERT INTO transport_manifest_objects VALUES (?, ?, ?)",
+            (document["manifest_id"], identifier, canonical_json(item)),
+        )
+        blocked.update(
+            str(row[0])
+            for row in connection.execute(
+                "SELECT operation_id FROM operations WHERE origin_id = ? "
+                "AND target_instance_key = ? "
+                "AND status IN ('blocked_parent', 'outcome_unknown', 'conflict')",
+                (identifier, local_instance_key),
+            )
+        )
+    for index, claim in enumerate(document["identity_claims"]):
+        relationship = claim["relationship"]
+        _instance(connection, relationship["instance_key"])
+        connection.execute(
+            "INSERT INTO transport_identity_claims VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                document["manifest_id"],
+                index,
+                claim["realm_key"],
+                claim["login"],
+                claim["external_id"],
+                claim["ou_path"],
+                relationship["instance_key"],
+                relationship["account_id"],
+                relationship["login"],
+                relationship["status"],
+            ),
+        )
+    status: AdmissionStatus
+    if direction == "exported":
+        status = "recorded"
+    elif blocked:
+        status = "admitted-with-blocks"
+    else:
+        status = "admitted"
+    return AdmissionReport(
+        document["manifest_id"],
+        artifact.digest_sha256,
+        status,
+        tuple(origin_ids),
+        tuple(sorted(blocked)),
+    )
 
 
 def _record(
@@ -281,117 +402,9 @@ def _record(
     local_instance_key: str,
     direction: Literal["exported", "received"],
 ) -> AdmissionReport:
-    document = artifact.document
-    local_role = "sender" if direction == "exported" else "recipient"
-    expected_forward_direction = "received" if direction == "exported" else "exported"
     with state.transaction() as connection:
-        replay = _existing_manifest(connection, artifact, direction)
-        if replay is not None:
-            return replay
-        endpoint = document[local_role]
-        if endpoint["instance_key"] != local_instance_key:
-            raise ManifestConflict(f"manifest {local_role} does not match this local context")
-        _check_endpoint(connection, document["sender"], role="sender")
-        _check_endpoint(connection, document["recipient"], role="recipient")
-        forward = _forward_row(connection, document, expected_forward_direction)
-        _check_return_baselines(connection, document, forward)
-        _check_forward_export_baselines(connection, document, direction)
-
-        reference = document.get("forward_reference")
-        connection.execute(
-            "INSERT INTO transport_manifests VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                document["manifest_id"],
-                artifact.digest_sha256,
-                document["transfer_round_id"],
-                direction,
-                document["mode"],
-                document["sender"]["instance_key"],
-                document["recipient"]["instance_key"],
-                reference["manifest_id"] if reference else None,
-                reference["digest_sha256"] if reference else None,
-                canonical_json(document),
-                now(),
-            ),
-        )
-        origin_ids: list[str] = []
-        blocked: set[str] = set()
-        items_by_identifier = {_portable_origin(item)[0]: item for item in document["objects"]}
-        # Resolve the complete object graph before recording any portable facts. Comments may
-        # appear before parents in the file, but the relational insert is parent-first.
-        for item in document["objects"]:
-            _, portable_origin = _portable_origin(item)
-            parent_identifier = _parent_origin_id(portable_origin)
-            if parent_identifier is None:
-                continue
-            parent_item = items_by_identifier.get(parent_identifier)
-            parent_row = connection.execute(
-                "SELECT object_type FROM object_origins WHERE origin_id = ?",
-                (parent_identifier,),
-            ).fetchone()
-            if parent_item is None and parent_row is None:
-                raise ManifestConflict("comment parent issue origin cannot be resolved")
-            if parent_item is not None and parent_item["origin"]["object_type"] != "issue":
-                raise ManifestConflict("comment parent reference is not an issue origin")
-            if parent_row is not None and parent_row["object_type"] != "issue":
-                raise ManifestConflict("comment parent reference conflicts with local origin type")
-        ordered = sorted(
-            document["objects"],
-            key=lambda item: _internal_object_type(item["origin"]["object_type"]) == "comment",
-        )
-        for item in ordered:
-            _insert_origin(connection, item)
-        for item in document["objects"]:
-            identifier, portable_origin = _portable_origin(item)
-            origin_ids.append(identifier)
-            object_type = _internal_object_type(portable_origin["object_type"])
-            for replica in item["replicas"]:
-                _instance(connection, replica["instance_key"])
-                _insert_replica(connection, identifier, object_type, replica)
-            connection.execute(
-                "INSERT INTO transport_manifest_objects VALUES (?, ?, ?)",
-                (document["manifest_id"], identifier, canonical_json(item)),
-            )
-            blocked.update(
-                str(row[0])
-                for row in connection.execute(
-                    "SELECT operation_id FROM operations WHERE origin_id = ? "
-                    "AND target_instance_key = ? "
-                    "AND status IN ('blocked_parent', 'outcome_unknown', 'conflict')",
-                    (identifier, local_instance_key),
-                )
-            )
-        for index, claim in enumerate(document["identity_claims"]):
-            relationship = claim["relationship"]
-            _instance(connection, relationship["instance_key"])
-            connection.execute(
-                "INSERT INTO transport_identity_claims VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    document["manifest_id"],
-                    index,
-                    claim["realm_key"],
-                    claim["login"],
-                    claim["external_id"],
-                    claim["ou_path"],
-                    relationship["instance_key"],
-                    relationship["account_id"],
-                    relationship["login"],
-                    relationship["status"],
-                ),
-            )
-        status: AdmissionStatus
-        if direction == "exported":
-            status = "recorded"
-        elif blocked:
-            status = "admitted-with-blocks"
-        else:
-            status = "admitted"
-        return AdmissionReport(
-            document["manifest_id"],
-            artifact.digest_sha256,
-            status,
-            tuple(origin_ids),
-            tuple(sorted(blocked)),
+        return _record_in_connection(
+            connection, artifact, local_instance_key=local_instance_key, direction=direction
         )
 
 
