@@ -75,3 +75,14 @@ Issue #18 and its Actions artifacts must distinguish adapter probes, complete
 application flows, restart/fault evidence and browser checks. Passing primitive or
 mocked tests alone does not establish a supported product capability. Native Git
 commit metadata is separate from Gitea's historical API timestamp limitations.
+
+Native ref maps are typed data (`refs/*` to 40/64-character hexadecimal object IDs),
+not configuration field names. The persisted secret-field guard exempts only this
+exact validated map shape, so legitimate ref names containing words such as
+`secret` remain usable; malformed maps and actual credential fields still fail.
+Wiki push confirmation stores the observed ref count and canonical JSON SHA-256;
+full comparison facts remain in the immutable operation intent. This keeps the
+confirmation/reconciliation record below its evidence bound even for 10,000 refs.
+Repackaging may reuse operations only when the complete native intent is unchanged,
+including bundle path, size and digest. A different bundle encoding requires an
+explicit conflict decision even if its refs match; it cannot inherit an old success.

@@ -305,7 +305,11 @@ def test_push_wiki_bundle_uses_leases_and_rejects_stale_expected_refs(
         result = pusher.push_wiki_bundle(
             "org/repo", bundle.member, bundle.sha256, bundle.size, "42", {}
         )
-        assert result.observed_state and result.observed_state["refs"]
+        from gitferry.git_refs import ref_confirmation
+
+        assert result.observed_state == ref_confirmation(
+            pusher._git_remote("ls-remote", str(remote), None)
+        )
         push_args = next(args for args in captured if args[:2] == ["push", "--atomic"])
         assert any(value.startswith("--force-with-lease=refs/heads/") for value in push_args)
         assert identities == ["org/repo", "org/repo"]

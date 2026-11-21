@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .content_inventory import InventoryDocument
+from .git_refs import valid_ref
 from .lfs_payloads import LFSPayloadError, LFSPointer, verify_lfs_object
 
 _SHA = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
@@ -54,19 +55,6 @@ def validate_native_descriptors(document: dict[str, Any]) -> None:
             if not member.startswith("wikis/") or member in files:
                 raise PackageError("wiki payload needs a unique path below wikis")
             files[member] = bundle["size"], bundle["sha256"]
-
-
-def valid_ref(value: str) -> bool:
-    return (
-        value.startswith("refs/")
-        and not value.endswith(("/", "."))
-        and not any(mark in value for mark in ("..", "@{", "//"))
-        and not any(ord(c) <= 32 or ord(c) == 127 or c in "~^:?*[\\" for c in value)
-        and all(
-            part and not part.startswith(".") and not part.endswith(".lock")
-            for part in value.split("/")
-        )
-    )
 
 
 def native_contents(directory: Path, document: dict[str, Any]) -> dict[str, tuple[int, str]]:

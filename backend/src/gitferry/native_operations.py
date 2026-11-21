@@ -52,14 +52,12 @@ def prepare_native_operations(
         )
     wiki = selected.get("wiki")
     if wiki is not None and wiki["state"] == "populated":
-        bootstrap = prepare("bootstrap_wiki", _BOOTSTRAP)
         bundle = wiki["bundle"]
-        intent = {
+        base_intent = {
             "member": bundle["path"],
             "sha256": bundle["sha256"],
             "size": bundle["size"],
             "refs": wiki["refs"],
-            "bootstrap_operation_id": bootstrap.operation_id,
         }
         # Repackaging an identical native result does not invent a second effect.
         # A changed ref set needs a separate return/baseline contract, not first-import.
@@ -73,17 +71,28 @@ def prepare_native_operations(
             if len(previous) != 1:
                 raise OperationBlocked("wiki history contains conflicting first-import operations")
             operation = state.get_operation(previous[0][0])
-            if operation.intent.get("refs") != wiki["refs"]:
-                raise OperationBlocked("wiki ref changes require an explicit return baseline")
-            if operation.intent != intent and operation.status not in (
-                "confirmed",
-                "outcome_unknown",
+            bootstrap_id = operation.intent.get("bootstrap_operation_id")
+            if not isinstance(bootstrap_id, str) or not bootstrap_id:
+                raise OperationBlocked("wiki history has no durable bootstrap operation")
+            intent = {**base_intent, "bootstrap_operation_id": bootstrap_id}
+            if operation.intent != intent:
+                raise OperationBlocked("wiki transport changes require an explicit return baseline")
+            bootstrap = state.get_operation(bootstrap_id)
+            if (
+                bootstrap.operation_type != "bootstrap_wiki"
+                or bootstrap.origin_id != plan.repository_origin_id
+                or bootstrap.target_repository_scope != plan.repository
             ):
-                raise OperationBlocked("unconfirmed wiki intent differs from the original payload")
+                raise OperationBlocked("wiki history has an invalid bootstrap operation")
+            operations.append(bootstrap)
+            dependencies[bootstrap.operation_id] = []
             operations.append(operation)
+            dependencies[operation.operation_id] = [bootstrap.operation_id]
         else:
+            bootstrap = prepare("bootstrap_wiki", _BOOTSTRAP)
+            intent = {**base_intent, "bootstrap_operation_id": bootstrap.operation_id}
             operation = prepare("push_wiki_bundle", intent)
-        dependencies[operation.operation_id] = [bootstrap.operation_id]
+            dependencies[operation.operation_id] = [bootstrap.operation_id]
     elif wiki is not None and wiki["state"] != "empty":
         raise OperationBlocked("disabled wiki configuration transfer is not supported")
     return operations, dependencies

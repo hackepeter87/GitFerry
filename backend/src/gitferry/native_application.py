@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from .git_refs import ref_confirmation
 from .gitea_bundles import GiteaBundlePusher
 from .gitea_lfs import GiteaLFSClient
 from .gitea_wiki import GiteaWikiClient
@@ -156,7 +157,7 @@ class NativePayloadApplication:
             refs = self.git._git_remote("ls-remote", self.git._wiki_url(scope), None)
             if refs != intent["refs"]:
                 raise OperationBlocked("target wiki refs do not prove the intended result")
-            facts = {"refs": refs}
+            facts = ref_confirmation(refs)
         else:
             raise OperationBlocked("operation is outside native payload reconciliation")
         self.git._verify_repository_id(scope, parent)

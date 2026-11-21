@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from gitferry.git_refs import is_ref_map
 from gitferry.state_models import StateStoreError
 
 
@@ -48,6 +49,10 @@ def require_text(value: str, field: str) -> None:
 def find_secret_field(value: Any, path: str = "intent") -> str | None:
     if isinstance(value, Mapping):
         for key, child in value.items():
+            # Ref names are opaque Git identities, not configuration field names.
+            # Only this exact typed map (valid refs -> native SHAs) is exempt.
+            if key == "refs" and is_ref_map(child):
+                continue
             normalized = str(key).lower().replace("-", "_")
             if normalized.endswith("_ref"):
                 continue

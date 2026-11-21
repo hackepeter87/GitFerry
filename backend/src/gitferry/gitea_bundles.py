@@ -22,6 +22,7 @@ from .git_bundle import (
     create_git_bundle,
     import_git_bundle,
 )
+from .git_refs import ref_confirmation
 from .provisioning import BundleIntent
 from .source_snapshot import SourceSnapshotError, read_repository_identity
 from .state_store import TargetConfirmation
@@ -283,7 +284,9 @@ class GiteaBundlePusher(AbstractContextManager["GiteaBundlePusher"]):
         if observed != desired:
             raise GiteaBundleError("target wiki refs differ after push")
         self._verify_repository_id(repository, expected_repository_id)
-        return TargetConfirmation(expected_repository_id, None, observed_state={"refs": observed})
+        return TargetConfirmation(
+            expected_repository_id, None, observed_state=ref_confirmation(observed)
+        )
 
     def _verify_repository_id(self, repository: str, expected: str) -> None:
         if not _REPOSITORY.fullmatch(repository):
