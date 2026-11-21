@@ -66,6 +66,7 @@ ASSERTIONS = frozenset(
         "directory_outage_blocks_without_rebinding",
         "directory_group_drift_requires_review",
         "directory_conflict_desktop_recovery",
+        "directory_recovery_no_transfer_writes",
         "directory_ldap_reader_clone_allowed",
         "directory_ldap_reader_push_denied",
         "directory_ldap_writer_clone_allowed",
@@ -577,6 +578,10 @@ def run_source_export_probe() -> dict[str, Any]:
         and identity_recovery["group_restored"]["after_status"] == "conflict"
         and identity_recovery["group_restored"]["binding_unchanged"]
     )
+    recovery_snapshot = _target_worker("collision-snapshot")
+    recovery_events = docker_service_exec(
+        "gitferry-b", ["wc", "-l", "/state/package-admission/remote-events.jsonl"]
+    ).stdout
     _target_worker("start-browser")
     try:
         with browser_tunnel(COMPOSE) as base_url:
@@ -594,6 +599,13 @@ def run_source_export_probe() -> dict[str, Any]:
     reviewed_bindings = [
         identity_worker("verify", login) for login in ("ldap-reader", "ldap-writer")
     ]
+    assertions["directory_recovery_no_transfer_writes"] = (
+        recovery_snapshot == _target_worker("collision-snapshot")
+        and recovery_events
+        == docker_service_exec(
+            "gitferry-b", ["wc", "-l", "/state/package-admission/remote-events.jsonl"]
+        ).stdout
+    )
     identity_recovery["desktop_review"] = reviewed
     identity_recovery["reviewed_bindings"] = reviewed_bindings
     assertions["directory_conflict_desktop_recovery"] = (

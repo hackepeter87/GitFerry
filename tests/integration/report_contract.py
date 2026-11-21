@@ -512,6 +512,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                         "directory_outage_blocks_without_rebinding",
                         "directory_group_drift_requires_review",
                         "directory_conflict_desktop_recovery",
+                        "directory_recovery_no_transfer_writes",
                         "directory_functional_users_non_admin",
                         "directory_intended_team_members",
                         "directory_ldap_outsider_denied",
