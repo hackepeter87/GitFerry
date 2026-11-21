@@ -68,7 +68,7 @@ test("supports keyboard login, denied credentials, authenticated state, and logo
 
   await password.fill("correct synthetic passphrase");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Administration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Administration", exact: true, level: 1 })).toBeVisible();
   await expect(page.getByText("synthetic.admin")).toBeVisible();
   await expect(page.getByText("Administrator", { exact: true })).toBeVisible();
 
@@ -81,7 +81,7 @@ test("surfaces an expired server-side session without granting access", async ({
   await page.getByLabel("Username").fill("synthetic.admin");
   await page.getByLabel("Password").fill("correct synthetic passphrase");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Administration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Administration", exact: true, level: 1 })).toBeVisible();
 
   const expired = await page.request.post("http://127.0.0.1:8089/__test__/expire-sessions");
   expect(expired.ok()).toBeTruthy();
@@ -97,7 +97,7 @@ test("surfaces revoked sessions and accepts the operator recovery password", asy
   await page.getByLabel("Username").fill("synthetic.admin");
   await page.getByLabel("Password").fill("correct synthetic passphrase");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Administration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Administration", exact: true, level: 1 })).toBeVisible();
 
   const runtimeRoot = process.env.GITFERRY_E2E_ROOT;
   if (!runtimeRoot) throw new Error("GITFERRY_E2E_ROOT is unavailable");
@@ -130,5 +130,5 @@ test("surfaces revoked sessions and accepts the operator recovery password", asy
 
   await page.getByLabel("Password").fill("replacement synthetic passphrase");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Administration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Administration", exact: true, level: 1 })).toBeVisible();
 });
