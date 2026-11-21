@@ -165,6 +165,44 @@ def test_cli_export_import_uses_same_profiles(
     assert main(["connections", "--database", str(target), "import", str(document)]) == 0
     imported = json.loads(capsys.readouterr().out)[0]
     assert imported["instance_key"] == profile_id and not imported["locally_approved"]
+    prefix = ["connections", "--database", str(target)]
+    assert (
+        main(
+            prefix
+            + [
+                "update",
+                profile_id,
+                "--expected-revision",
+                "1",
+                "--display-name",
+                "Changed",
+                "--credential-ref",
+                "token-b",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["revision"] == 2
+    assert (
+        main(
+            prefix
+            + [
+                "replace-installation",
+                profile_id,
+                "--expected-revision",
+                "2",
+                "--installation-marker",
+                "install-b",
+            ]
+        )
+        == 0
+    )
+    replacement = json.loads(capsys.readouterr().out)
+    assert replacement["instance_key"] != profile_id and not replacement["locally_approved"]
+    assert main(prefix + ["retire", replacement["instance_key"], "--expected-revision", "1"]) == 0
+    assert not json.loads(capsys.readouterr().out)["enabled"]
+    assert main(prefix + ["list"]) == 0
+    assert all(not value["enabled"] for value in json.loads(capsys.readouterr().out))
 
 
 def test_concurrent_creates_cannot_claim_same_endpoint(tmp_path: Path) -> None:

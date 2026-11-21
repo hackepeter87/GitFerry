@@ -34,6 +34,16 @@ export interface ConnectionProbe {
   evidence_digest: string;
   requires_approval: boolean;
   checked_capabilities: string[];
+  observed_identity: ConnectionIdentity;
+  approved_identity: ConnectionIdentity | null;
+  changed_fields: string[];
+}
+
+export interface ConnectionIdentity {
+  account_id: string;
+  login: string;
+  ca_digest: string;
+  certificate_sha256: string | null;
 }
 
 export class ApiError extends Error {

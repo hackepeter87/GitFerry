@@ -332,6 +332,10 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                         "hostname_mismatch_rejected",
                         "expired_certificate_rejected",
                         "credentials_absent_from_state_and_exports",
+                        "api_probe_and_local_approval",
+                        "cli_restart_preserves_approved_evidence",
+                        "credentials_absent_from_boundaries_and_logs",
+                        "system_trust_store_without_ca_reference",
                     }
                 ),
             ),

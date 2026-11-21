@@ -25,6 +25,7 @@ const form = ref({ display_name: "", base_url: "https://", installation_marker: 
 const rebuildKey = ref<string | null>(null);
 const rebuildMarker = ref("");
 const importInput = ref<HTMLInputElement>();
+const probes = ref<Record<string, import("./api").ConnectionProbe>>({});
 
 onMounted(load);
 
@@ -83,15 +84,27 @@ async function verify(profile: ConnectionProfile): Promise<void> {
   error.value = ""; notice.value = ""; saving.value = true;
   try {
     const evidence = await testConnection(profile.instance_key, profile.revision);
+    probes.value[profile.instance_key] = evidence;
     const details = `Gitea ${evidence.version} · account ${evidence.login} (${evidence.account_id})`;
     if (!evidence.requires_approval) {
       notice.value = `Identity re-checked: ${details}. No approval change was needed.`;
+      await load();
       return;
     }
-    if (!window.confirm(`Connection evidence received: ${details}. Approve this identity for transport?`)) { notice.value = `Evidence received: ${details}. Approval remains pending.`; return; }
+    const current = evidence.observed_identity;
+    const previous = evidence.approved_identity;
+    const review = `${details}\nCurrent CA: ${current.ca_digest}\nCurrent certificate SHA-256: ${current.certificate_sha256 ?? "Unavailable"}\nPreviously approved account: ${previous ? `${previous.login} (${previous.account_id})` : "None"}\nPreviously approved CA: ${previous?.ca_digest ?? "None"}\nPreviously approved certificate SHA-256: ${previous?.certificate_sha256 ?? "None"}\nChanged fields: ${evidence.changed_fields.join(", ") || "None"}\nApprove this local evidence? This does not authorize writes to Gitea.`;
+    if (!window.confirm(review)) {
+      notice.value = `Evidence received: ${details}. Approval remains pending.`;
+      await load();
+      return;
+    }
     replaceProfile(await approveConnection(profile.instance_key, profile.revision, evidence.evidence_digest));
     notice.value = "Connection evidence approved.";
-  } catch (cause) { handleError(cause, "Connection test could not complete. Check the mounted credential and CA references, then try again."); }
+  } catch (cause) {
+    await load();
+    handleError(cause, "Connection test could not complete. Check the mounted credential and CA references, then try again.");
+  }
   finally { saving.value = false; }
 }
 
@@ -131,11 +144,11 @@ function handleError(cause: unknown, fallback: string): void { if (cause instanc
 
 <template>
   <section class="connections-panel" aria-labelledby="connections-title">
-    <div class="connections-heading"><div><p class="kicker">Transport endpoints</p><h2 id="connections-title">Connections</h2><p class="supporting">Store endpoint details and references to locally mounted credentials. Secret values never enter GitFerry.</p></div><div class="actions"><button type="button" @click="downloadExport">Export</button><button type="button" @click="chooseImport">Import</button><input ref="importInput" class="visually-hidden" type="file" accept="application/json,.json" @change="readImport"></div></div>
+    <div class="connections-heading"><div><p class="kicker">Transport endpoints</p><h2 id="connections-title">Connections</h2><p class="supporting">Store endpoint details and references to locally mounted credentials. Only non-secret reference aliases are stored in GitFerry.</p></div><div class="actions"><button type="button" @click="downloadExport">Export</button><button type="button" @click="chooseImport">Import</button><input ref="importInput" class="visually-hidden" type="file" accept="application/json,.json" @change="readImport"></div></div>
     <p v-if="error" class="alert" role="alert">{{ error }}</p><p v-if="notice" class="notice" role="status">{{ notice }}</p>
     <p v-if="loading" class="status-line" aria-live="polite">Loading connections…</p>
     <p v-else-if="!profiles.length" class="empty">No connections yet. Add one below.</p>
-    <ul v-else class="connection-list" aria-label="Configured connections"><li v-for="profile in profiles" :key="profile.instance_key" class="connection-card" :class="{ retired: !profile.enabled }"><div class="connection-summary"><div><h3>{{ profile.display_name }}</h3><p>{{ profile.base_url }}</p><small>Identity {{ profile.installation_marker }} · Revision {{ profile.revision }}</small></div><span class="state">{{ profile.enabled ? profile.locally_approved ? "Approved" : "Approval pending" : "Retired" }}</span></div><p class="refs">Credential reference: <code>{{ profile.credential_ref }}</code><span v-if="profile.ca_ref"> · CA reference: <code>{{ profile.ca_ref }}</code></span></p><div v-if="profile.enabled" class="actions"><button type="button" :disabled="saving" @click="verify(profile)">{{ profile.locally_approved ? "Re-check identity" : "Test connection" }}</button><button type="button" :disabled="saving" @click="edit(profile)">Edit</button><button type="button" :disabled="saving" @click="rebuildKey = profile.instance_key; rebuildMarker = ''">Replace installation identity</button><button type="button" :disabled="saving" @click="retire(profile)">Retire</button></div><div v-if="rebuildKey === profile.instance_key" class="rebuild-box"><p><strong>Rebuild confirmation</strong></p><p>This preserves the old instance key and mappings, but records a new installation identity. Existing transport data will not be silently reused.</p><label :for="`rebuild-${profile.instance_key}`">New installation marker</label><input :id="`rebuild-${profile.instance_key}`" v-model="rebuildMarker" autocomplete="off" required @keyup.enter="rebuild(profile)"><div class="actions"><button type="button" class="primary" :disabled="saving || !rebuildMarker.trim()" @click="rebuild(profile)">Confirm replacement</button><button type="button" :disabled="saving" @click="rebuildKey = null">Cancel</button></div></div></li></ul>
+    <ul v-else class="connection-list" aria-label="Configured connections"><li v-for="profile in profiles" :key="profile.instance_key" class="connection-card" :class="{ retired: !profile.enabled }"><div class="connection-summary"><div><h3>{{ profile.display_name }}</h3><p>{{ profile.base_url }}</p><small>Identity {{ profile.installation_marker }} · Revision {{ profile.revision }}</small></div><span class="state">{{ profile.enabled ? profile.locally_approved ? "Approved" : "Approval pending" : "Retired" }}</span></div><p class="refs">Credential reference: <code>{{ profile.credential_ref }}</code><span v-if="profile.ca_ref"> · CA reference: <code>{{ profile.ca_ref }}</code></span></p><div v-if="probes[profile.instance_key]" class="probe-evidence"><h4>Identity evidence</h4><p>Current account: <code>{{ probes[profile.instance_key].observed_identity.login }}</code> ({{ probes[profile.instance_key].observed_identity.account_id }})</p><p>Current CA fingerprint: <code>{{ probes[profile.instance_key].observed_identity.ca_digest }}</code></p><p>Current certificate SHA-256: <code>{{ probes[profile.instance_key].observed_identity.certificate_sha256 || "none" }}</code></p><template v-if="probes[profile.instance_key].approved_identity"><p>Previously approved CA fingerprint: <code>{{ probes[profile.instance_key].approved_identity?.ca_digest }}</code></p><p>Previously approved certificate SHA-256: <code>{{ probes[profile.instance_key].approved_identity?.certificate_sha256 || "none" }}</code></p></template><p v-if="probes[profile.instance_key].changed_fields.length" class="changed-fields">Changed fields: {{ probes[profile.instance_key].changed_fields.join(", ") }}</p></div><div v-if="profile.enabled" class="actions"><button type="button" :disabled="saving" @click="verify(profile)">{{ profile.locally_approved ? "Re-check identity" : "Test connection" }}</button><button type="button" :disabled="saving" @click="edit(profile)">Edit</button><button type="button" :disabled="saving" @click="rebuildKey = profile.instance_key; rebuildMarker = ''">Replace installation identity</button><button type="button" :disabled="saving" @click="retire(profile)">Retire</button></div><div v-if="rebuildKey === profile.instance_key" class="rebuild-box"><p><strong>Rebuild confirmation</strong></p><p>This preserves the old instance key and mappings, but records a new installation identity. Existing transport data will not be silently reused.</p><label :for="`rebuild-${profile.instance_key}`">New installation marker</label><input :id="`rebuild-${profile.instance_key}`" v-model="rebuildMarker" autocomplete="off" required @keyup.enter="rebuild(profile)"><div class="actions"><button type="button" class="primary" :disabled="saving || !rebuildMarker.trim()" @click="rebuild(profile)">Confirm replacement</button><button type="button" :disabled="saving" @click="rebuildKey = null">Cancel</button></div></div></li></ul>
     <form class="connection-form" aria-labelledby="connection-form-title" @submit.prevent="save">
       <h3 id="connection-form-title">{{ editingKey ? "Edit connection" : "Add connection" }}</h3>
       <div class="form-grid">
@@ -177,6 +190,11 @@ function handleError(cause: unknown, fallback: string): void { if (cause instanc
 .state { padding: .25rem .5rem; border: .0625rem solid #b2c5b5; border-radius: 1rem; color: #21462f; font-size: .78rem; font-weight: 700; white-space: nowrap; }
 .refs { margin-top: .75rem; font-size: .9rem; }
 .refs code { display: inline; color: #402d1d; }
+.probe-evidence { margin: .85rem 0; padding: .75rem; border-left: .25rem solid #c4691d; background: #f8f1e6; }
+.probe-evidence h4 { margin: 0 0 .4rem; }
+.probe-evidence p { margin: .3rem 0; overflow-wrap: anywhere; }
+.probe-evidence code { display: inline; color: #402d1d; }
+.changed-fields { font-weight: 700; }
 .connection-form, .rebuild-box { margin-top: 1.5rem; padding: 1rem; border: .0625rem solid #c6d2c8; background: #fbfcfa; }
 .connection-form h3 { margin-top: 0; }
 .form-grid { display: grid; gap: .45rem; }

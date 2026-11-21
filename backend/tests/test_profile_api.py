@@ -61,6 +61,31 @@ def test_profiles_require_admin_csrf_and_reject_authority_injection(tmp_path: Pa
             == 409
         )
         assert client.get("/api/v1/connections").headers["cache-control"] == "no-store"
+        exported["profiles"][0].update(
+            instance_key="imported",
+            base_url="https://imported.invalid",
+            installation_marker="imported-installation",
+        )
+        imported = client.post("/api/v1/connections/import", json=exported, headers=headers)
+        assert imported.status_code == 200 and not imported.json()[0]["locally_approved"]
+        replaced = client.post(
+            f"/api/v1/connections/{saved['instance_key']}/replace-installation",
+            json={"expected_revision": 2, "installation_marker": "replacement-installation"},
+            headers=headers,
+        )
+        assert replaced.status_code == 200
+        replacement = replaced.json()
+        assert replacement["instance_key"] != saved["instance_key"]
+        assert not replacement["locally_approved"]
+        retired = client.post(
+            f"/api/v1/connections/{replacement['instance_key']}/retire",
+            json={"expected_revision": 1},
+            headers=headers,
+        )
+        assert retired.status_code == 200 and not retired.json()["enabled"]
+        records = client.get("/api/v1/connections").json()
+        assert sum(record["enabled"] for record in records) == 1
+        assert len(records) == 3
 
 
 def test_profile_input_is_bounded_and_duplicate_keys_rejected(tmp_path: Path) -> None:

@@ -4,7 +4,9 @@ Sign in as the local GitFerry administrator and use **Connections** to register 
 Provide an HTTPS URL, a display name, an installation marker and credential/CA reference names.
 The marker describes this installation lifecycle; use a different marker after rebuilding Gitea.
 Display names do not establish identity. A successful connection test displays the Gitea version
-and authenticated account; review these before approving the connection.
+and authenticated account, current and previously approved CA/peer certificate fingerprints,
+and changed evidence fields. Review these before approving the local evidence. This approval
+does not authorize transfer writes.
 
 ## Local files
 
@@ -18,11 +20,19 @@ For an internal CA, mount the PEM bundle read-only under `GITFERRY_CA_DIR` and e
 as the CA reference. The default directory is `/run/gitferry/ca`; supplied Compose uses
 `/etc/gitferry/ca`. Omit the reference to use the system CA store. TLS verification always remains
 enabled. Redirects are rejected, so enter the final Gitea HTTPS base URL, including any subpath.
+Deployments may set the standard `SSL_CERT_FILE` environment variable to replace the default
+system trust bundle; GitFerry honors it explicitly across OpenSSL and LibreSSL. This is local
+operator configuration and cannot be supplied by an imported profile. An unreadable or invalid
+bundle fails closed.
 
 Missing files, incorrect permissions, invalid credentials and untrusted certificates produce a
 failed connection check. Repair the local prerequisite and test again. Replaced certificate or
 account evidence requires local review. Connection testing proves only version/account reads;
 later planning must check the permissions needed for the selected transfer.
+The two HTTPS reads share a 20-second deadline, including streamed response bodies, with a
+10-second inactivity timeout. Encoded responses are rejected before decompression and each
+JSON response is limited to 64 KiB. A failed check invalidates its previous current evidence;
+the last approved evidence remains available for comparison during the next successful check.
 
 ## Editing, rebuilding and portability
 

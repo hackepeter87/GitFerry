@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -14,6 +15,8 @@ from typing import Any
 import httpx
 
 from gitferry.connection_profiles import ProfileConflict, ProfileService, ProfileValidationError
+
+CHECK_DEADLINE_SECONDS = 20.0
 
 
 class ConnectionUnavailable(RuntimeError):
@@ -82,19 +85,24 @@ class LocalReferences:
     def tls(self, reference: str | None) -> tuple[ssl.SSLContext, str]:
         try:
             if reference is None:
-                return ssl.create_default_context(), "system-trust"
+                # Honor the deployment's standard trust-store override explicitly:
+                # some LibreSSL builds ignore it in load_default_certs(). This is
+                # local process configuration, never an imported profile field.
+                return ssl.create_default_context(
+                    cafile=os.environ.get("SSL_CERT_FILE")
+                ), "system-trust"
             value = self._read(self.cas, reference, secret=False)
             return ssl.create_default_context(cadata=value.decode("ascii")), hashlib.sha256(
                 value
             ).hexdigest()
-        except (UnicodeError, ssl.SSLError):
+        except (UnicodeError, OSError):
             raise ConnectionUnavailable(
                 "CA reference must contain a valid PEM certificate bundle"
             ) from None
 
 
-def _json(client: httpx.Client, path: str) -> tuple[dict[str, Any], str | None]:
-    with client.stream("GET", path) as response:
+async def _json(client: httpx.AsyncClient, path: str) -> tuple[dict[str, Any], str | None]:
+    async with client.stream("GET", path) as response:
         if response.status_code != 200:
             raise ConnectionUnavailable("Gitea connection rejected; check endpoint, token and TLS")
         stream = response.extensions.get("network_stream")
@@ -102,7 +110,9 @@ def _json(client: httpx.Client, path: str) -> tuple[dict[str, Any], str | None]:
         certificate = tls.getpeercert(True) if tls else None
         fingerprint = hashlib.sha256(certificate).hexdigest() if certificate else None
         body = bytearray()
-        for chunk in response.iter_bytes(chunk_size=16384):
+        if response.headers.get("content-encoding", "identity") != "identity":
+            raise ConnectionUnavailable("Gitea check requires an uncompressed response")
+        async for chunk in response.aiter_bytes():
             if len(body) + len(chunk) > 65536:
                 raise ConnectionUnavailable("Gitea check response exceeds 64 KiB")
             body.extend(chunk)
@@ -115,13 +125,35 @@ def _json(client: httpx.Client, path: str) -> tuple[dict[str, Any], str | None]:
     return value, fingerprint
 
 
+async def _remote_check(
+    base_url: str, token: str, context: ssl.SSLContext, transport: httpx.AsyncBaseTransport | None
+) -> tuple[dict[str, Any], str | None, dict[str, Any], str | None]:
+    async def read() -> tuple[dict[str, Any], str | None, dict[str, Any], str | None]:
+        async with httpx.AsyncClient(
+            base_url=base_url + "/api/v1/",
+            headers={"Authorization": "token " + token, "Accept-Encoding": "identity"},
+            verify=context,
+            follow_redirects=False,
+            trust_env=False,
+            timeout=10,
+            transport=transport,
+        ) as client:
+            version, fingerprint = await _json(client, "version")
+            account, account_fingerprint = await _json(client, "user")
+            return version, fingerprint, account, account_fingerprint
+
+    # Cancellation closes both the response and client. Unlike per-read timeouts,
+    # this deadline also bounds a peer which continuously drips response bytes.
+    return await asyncio.wait_for(read(), timeout=CHECK_DEADLINE_SECONDS)
+
+
 def probe_connection(
     service: ProfileService,
     key: str,
     *,
     expected_revision: int,
     references: LocalReferences | None = None,
-    transport: httpx.BaseTransport | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, Any]:
     profile = service.get(key)
     service._check_revision(profile, expected_revision)
@@ -129,22 +161,12 @@ def probe_connection(
     try:
         token = refs.token(profile.credential_ref)
         context, ca_digest = refs.tls(profile.ca_ref)
-        with httpx.Client(
-            base_url=profile.base_url + "/api/v1/",
-            headers={"Authorization": "token " + token},
-            verify=context,
-            follow_redirects=False,
-            trust_env=False,
-            timeout=10,
-            transport=transport,
-        ) as client:
-            version_data, fingerprint = _json(client, "version")
-            account, account_fingerprint = _json(client, "user")
-            version = version_data.get("version")
-            if fingerprint != account_fingerprint or (fingerprint is None and transport is None):
-                raise ConnectionUnavailable(
-                    "TLS peer identity could not be established consistently"
-                )
+        version_data, fingerprint, account, account_fingerprint = asyncio.run(
+            _remote_check(profile.base_url, token, context, transport)
+        )
+        version = version_data.get("version")
+        if fingerprint != account_fingerprint or (fingerprint is None and transport is None):
+            raise ConnectionUnavailable("TLS peer identity could not be established consistently")
         if (
             not isinstance(version, str)
             or not 1 <= len(version) <= 64
@@ -158,7 +180,7 @@ def probe_connection(
             raise ConnectionUnavailable(
                 "Gitea check response has invalid version or account identity"
             )
-    except (httpx.HTTPError, ConnectionUnavailable):
+    except (httpx.HTTPError, asyncio.TimeoutError, ConnectionUnavailable):
         with service.store.transaction() as connection:
             connection.execute(
                 "UPDATE connection_profiles SET locally_approved=0 "
@@ -187,11 +209,7 @@ def probe_connection(
         old = connection.execute(
             "SELECT * FROM connection_checks WHERE instance_key=?", (key,)
         ).fetchone()
-        approved = (
-            old["approved_identity"]
-            if old and old["profile_revision"] == expected_revision
-            else None
-        )
+        approved = old["approved_identity"] if old else None
         if approved != observed:
             connection.execute(
                 "UPDATE connection_profiles SET locally_approved=0 WHERE instance_key=?", (key,)
@@ -203,11 +221,19 @@ def probe_connection(
             "checked_at=excluded.checked_at",
             (key, expected_revision, observed, approved, datetime.now(timezone.utc).isoformat()),
         )
+    approved_identity = json.loads(approved) if approved else None
     return {
         "version": version,
         "account_id": str(account["id"]),
         "login": account["login"],
         "evidence_digest": digest,
+        "observed_identity": identity,
+        "approved_identity": approved_identity,
+        "changed_fields": [
+            field
+            for field, value in identity.items()
+            if approved_identity is None or approved_identity.get(field) != value
+        ],
         "requires_approval": not current.locally_approved or approved != observed,
         "checked_capabilities": ["version-read", "authenticated-account-read"],
         "installation_identity": "operator-registered; not remotely attested",

@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import json
+import logging
+import os
 import ssl
+import subprocess
+import sys
 import tempfile
 import threading
 from collections.abc import Iterator
@@ -11,8 +16,12 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import httpx
+from fastapi.testclient import TestClient
+from gitferry.api import create_app
+from gitferry.auth import AuthService
 from gitferry.connection_probe import (
     ConnectionUnavailable,
     LocalReferences,
@@ -184,6 +193,100 @@ def run_connection_profile_probe() -> dict[str, Any]:
                 )
                 assertions["explicit_local_approval"] = service.get("target").locally_approved
                 assertions["read_only_connection_check"] = calls == {"get": 2, "write": 0}
+                captured = io.StringIO()
+                handler = logging.StreamHandler(captured)
+                logging.getLogger().addHandler(handler)
+                try:
+                    with patch.dict(
+                        os.environ,
+                        {"GITFERRY_SECRET_DIR": str(directory), "GITFERRY_CA_DIR": str(directory)},
+                    ):
+                        auth = AuthService(service.store)
+                        auth.bootstrap_admin("synthetic.admin", "synthetic integration passphrase")
+                        with TestClient(
+                            create_app(auth_service=auth), base_url="https://testserver"
+                        ) as client:
+                            login = client.post(
+                                "/api/v1/auth/login",
+                                json={
+                                    "username": "synthetic.admin",
+                                    "password": "synthetic integration passphrase",
+                                },
+                            )
+                            if login.status_code != 200:
+                                raise ProbeFailure("Connection API login failed")
+                            headers = {"x-gitferry-csrf": client.cookies["gitferry_csrf"]}
+                            response = client.post(
+                                "/api/v1/connections/target/test",
+                                json={"expected_revision": 1},
+                                headers=headers,
+                            )
+                            if response.status_code != 200:
+                                raise ProbeFailure("Real Gitea API-boundary check failed")
+                            observed = response.json()
+                            approval = client.post(
+                                "/api/v1/connections/target/approve",
+                                json={
+                                    "expected_revision": 1,
+                                    "evidence_digest": observed["evidence_digest"],
+                                },
+                                headers=headers,
+                            )
+                            assertions["api_probe_and_local_approval"] = (
+                                approval.status_code == 200
+                                and approval.json()["locally_approved"]
+                                and observed["observed_identity"] == result["observed_identity"]
+                            )
+                            api_output = (
+                                response.text
+                                + approval.text
+                                + client.get("/api/v1/connections").text
+                            )
+                        command = [
+                            sys.executable,
+                            "-c",
+                            "from gitferry.cli import main; raise SystemExit(main())",
+                            "connections",
+                            "--database",
+                            str(directory / "state.sqlite3"),
+                            "test",
+                            "target",
+                            "--expected-revision",
+                            "1",
+                        ]
+                        checked = subprocess.run(
+                            command, capture_output=True, text=True, timeout=30, check=True
+                        )
+                        cli_evidence = json.loads(checked.stdout)
+                        assertions["cli_restart_preserves_approved_evidence"] = (
+                            cli_evidence["observed_identity"] == observed["observed_identity"]
+                            and not cli_evidence["requires_approval"]
+                        )
+                        assertions["credentials_absent_from_boundaries_and_logs"] = all(
+                            token["sha1"] not in value
+                            for value in (
+                                api_output,
+                                checked.stdout,
+                                checked.stderr,
+                                json.dumps(command),
+                                captured.getvalue(),
+                                json.dumps(assertions),
+                            )
+                        )
+                finally:
+                    logging.getLogger().removeHandler(handler)
+                # Exercise the default trust-store path offline, without an explicit
+                # per-profile CA. The synthetic CA is installed only for this subprocess scope.
+                system = ProfileService(StateStore(directory / "system-trust.sqlite3"))
+                system.create(ConnectionProfile("system", "System trust", url, "system", "token"))
+                with patch.dict(os.environ, {"SSL_CERT_FILE": str(cert)}):
+                    system_result = probe_connection(
+                        system, "system", expected_revision=1, references=references
+                    )
+                assertions["system_trust_store_without_ca_reference"] = (
+                    system_result["version"] == "1.27.2"
+                    and system_result["observed_identity"]["ca_digest"] == "system-trust"
+                )
                 for label, ca, endpoint in (
                     ("untrusted_ca_rejected", None, url),
                     ("wrong_ca_rejected", wrong_cert.name, url),
@@ -231,6 +334,8 @@ def run_connection_profile_probe() -> dict[str, Any]:
                 "limits": [
                     "Operator registration is not remote installation attestation",
                     "Probe checks version and authenticated account only",
+                    "Default system trust uses a synthetic CA fixture; "
+                    "no external public-CA service is contacted",
                 ],
             }
     finally:
