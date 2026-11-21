@@ -54,6 +54,60 @@ REFERENCE_COMPOSE_ASSERTION_NAMES = frozenset(
 )
 
 
+INVENTORY_ASSERTIONS = frozenset(
+    {
+        "explicit_empty_repository",
+        "all_classes_explicit",
+        "direct_counts_match",
+        "native_identity_and_parents",
+        "payload_sizes_positive",
+        "read_only_collection",
+        "control_unread_unchanged",
+        "qualified_empty_reactions",
+        "unsupported_counts_unknown",
+    }
+)
+INVENTORY_OBSERVED = frozenset(
+    {
+        "attachments",
+        "comments",
+        "git_refs",
+        "identities",
+        "issues",
+        "labels",
+        "milestones",
+        "organizations",
+        "permissions",
+        "pull_comments",
+        "pull_requests",
+        "reactions",
+        "release_assets",
+        "releases",
+        "review_comments",
+        "reviews",
+        "teams",
+        "timelines",
+        "wiki",
+    }
+)
+
+
+def _inventory_evidence(report: dict[str, Any]) -> bool:
+    counts = _value(report, "content_inventory.counts")
+    return (
+        _value(report, "content_inventory.status") == "passed"
+        and _value(report, "content_inventory.gitea_version") == "1.27.2"
+        and _all_required_true(report, "content_inventory.assertions", INVENTORY_ASSERTIONS)
+        and isinstance(counts, dict)
+        and set(counts) == INVENTORY_OBSERVED | {"lfs", "other_content"}
+        and counts == _value(report, "content_inventory.direct_counts")
+        and all(type(counts.get(key)) is int and counts[key] > 0 for key in INVENTORY_OBSERVED)
+        and counts.get("lfs") is None
+        and counts.get("other_content") is None
+        and _value(report, "content_inventory.source_writes_during_collection") == 0
+    )
+
+
 def _run(args: list[str]) -> str:
     return subprocess.run(args, cwd=ROOT, check=True, text=True, capture_output=True).stdout.strip()
 
@@ -327,6 +381,14 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         and all(_value(report, f"{section}.status") == "passed" for section in mandatory_sections)
     )
     entries = [
+        (
+            "selected_content_inventory_and_portable_plan",
+            _inventory_evidence(report)
+            and _value(report, "source_exports.assertions.guided_browser_inventory_bound_export")
+            is True,
+            "tests/integration/content_inventory_probe.py",
+            "content_inventory",
+        ),
         (
             "separate_samba_ad_claim_qualification",
             _value(report, "directory_ad.status") == "passed"

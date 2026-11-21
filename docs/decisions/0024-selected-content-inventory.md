@@ -12,9 +12,11 @@ numeric identifiers, and no general REST enumeration of LFS objects.
 
 ## Decision
 
-Add a versioned inventory document for the selected repositories. Every agreed class has an
+Add a versioned inventory document for the selected repositories. All 21 agreed classes have an
 explicit observation status, count or unknown count, object namespaces/relationships, available
-size facts, transfer capability and prerequisites. Observation completeness and transfer
+size facts, transfer capability and prerequisites. The current qualified surface can observe 19
+classes with live objects; LFS and other content remain explicit unknown/not-supported classes.
+Observation completeness and transfer
 completeness are different values. Explicit exclusions do not mean zero objects or deletion.
 
 Use the existing bounded source reader, approved connection profiles, local SQLite transactions
@@ -27,11 +29,14 @@ algorithm, signature or manifest-byte digest. Enclosing package bytes retain the
 for diagnosis and cannot authorize a linked export or import plan.
 
 Bind a reviewed snapshot to the registered installation marker, source profile evidence, selected
-native repository identities, comparison-rule version and exact facts. Revalidate selected facts
-before using it for source export. Changes to unrelated repositories do not invalidate it. Never
+native repository identities, comparison-rule version and exact facts. Request v2 export requires
+a ready inventory with exact scope and digest; revalidate selected facts before and after export.
+Changes to unrelated repositories do not invalidate it. Never
 use an instance-wide timestamp or current observation to replace the reviewed baseline.
 
-Keep manifest v1/v2 schemas, bytes, origins and digests unchanged. A versioned application-package
+Keep manifest v1/v2 schemas, bytes, origins and digests unchanged. Application-package v2 carries
+`inventory/document.json` with byte SHA-256, semantic/content digest and `include_members`; current
+native source-copy IDs remain distinct from portable origins. A versioned application-package
 extension carries portable inventory facts separately from manifests and local execution state.
 Dispatch existing package versions explicitly; legacy packages remain clearly identified as
 bounded selections without complete-inventory evidence. Imported inventory is untrusted data,
@@ -47,6 +52,9 @@ are not enforced disk quotas or a 30 GB qualification.
 The desktop, REST API and CLI present the same stored facts and decisions. A complete transfer
 cannot be claimed for excluded, unknown or unsupported requested content. Real synthetic fixtures
 and direct test-harness enumeration must qualify available classes before this ADR is accepted.
+Current local evidence includes 53 broad tests, 17 focused inventory/package tests and 7 browser
+tests passing; a complete real-instance integration run is still in progress and is not acceptance
+evidence yet.
 Old manifest fixtures and supported bounded first-import behavior remain regression gates.
 No additional content transfer capability is claimed by inventory support alone; Issues #18–#20
 own their existing feasibility and implementation contracts.

@@ -3,11 +3,25 @@ import { expect, test, type Page } from "@playwright/test";
 type Profile = { instance_key: string; display_name: string; revision: number; enabled: boolean; locally_approved: boolean };
 const source: Profile = { instance_key: "source-a", display_name: "Synthetic source A", revision: 7, enabled: true, locally_approved: true };
 const recipient = { instance_key: "recipient-b", display_name: "Synthetic recipient B", installation_marker: "install-recipient-b" };
+const inventoryClasses = ["git_refs", "lfs", "wiki", "organizations", "teams", "permissions", "identities", "issues", "labels", "comments", "attachments", "releases", "release_assets", "pull_requests", "pull_comments", "reviews", "review_comments", "timelines", "reactions", "milestones", "other_content"];
+
+function inventoryDocument(inventoryId: string, requestedClasses = ["git_refs", "organizations", "teams", "permissions", "identities", "issues", "comments"]) {
+  return {
+    format: "gitferry.content-inventory", schema_version: 1, comparison_version: 1, snapshot_id: inventoryId,
+    created_at: "2026-01-01T00:00:00Z", source_instance_key: source.instance_key, source_installation_marker: "install-source-a", gitea_version: "1.27.2", deletion_semantics: "absence-does-not-delete",
+    repositories: [{ repository: "synthetic-org/first", native_id: "101", requested_classes: requestedClasses, git_size_estimate_bytes: 2048, size_assumptions: [], classes: inventoryClasses.map((content_class) => ({ content_class, status: requestedClasses.includes(content_class) ? "observed" : "excluded", count: requestedClasses.includes(content_class) ? 0 : null, objects: [], reason: requestedClasses.includes(content_class) ? "" : "Not requested", limitations: [] })) }],
+  };
+}
+function inventoryJob(inventoryId: string, status: "queued" | "running" | "ready" | "blocked" | "failed" = "ready") {
+  const requestedClasses = ["git_refs", "organizations", "teams", "permissions", "identities", "issues", "comments"];
+  const document = status === "ready" ? inventoryDocument(inventoryId, requestedClasses) : null;
+  return { inventory_id: inventoryId, request: { source_instance_key: source.instance_key, source_profile_revision: source.revision, repositories: [{ repository: "synthetic-org/first", global_id: "101" }], requested_classes: requestedClasses }, status, document, document_digest: document ? "d".repeat(64) : null, summary: document ? { inventory_complete: true, transfer_ready: true, full_transfer: false, blockers: [], excluded_classes: [], known_payload_bytes: 0, objects_without_size: 0, temporary_space_assumption: "Synthetic test estimate" } : null, error_code: status === "failed" ? "inventory_failed" : null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
+}
 
 function job(export_id: string, status: "prepared" | "queued" | "running" | "ready" | "failed" = "prepared") {
   return {
     export_id,
-    request: { version: 1, source_instance_key: source.instance_key, source_profile_revision: source.revision, recipient_instance_key: recipient.instance_key,
+    request: { version: 2, inventory_id: "inventory-saved", inventory_digest: "d".repeat(64), source_instance_key: source.instance_key, source_profile_revision: source.revision, recipient_instance_key: recipient.instance_key,
       repositories: [{ repository: "synthetic-org/first", global_id: "101" }], include_metadata: true, include_members: false },
     capture_status: status === "ready" ? "captured" : status === "running" ? "capturing" : status,
     status, archive_sha256: status === "ready" ? "a".repeat(64) : null, archive_size: status === "ready" ? 1234 : null,
@@ -16,6 +30,7 @@ function job(export_id: string, status: "prepared" | "queued" | "running" | "rea
 }
 
 async function openWorkspace(page: Page, exports: unknown[] = [], exportHandler?: (route: import("@playwright/test").Route) => Promise<unknown> | unknown, recipientHandler?: (route: import("@playwright/test").Route) => Promise<unknown> | unknown): Promise<void> {
+  const inventoryJobs = new Map<string, ReturnType<typeof inventoryJob>>();
   await page.route("**/api/v1/auth/status", (route) => route.fulfill({ json: { bootstrapRequired: false } }));
   await page.route("**/api/v1/auth/session", (route) => route.fulfill({ json: { authenticated: true, principal: { username: "synthetic.admin", role: "admin" } } }));
   await page.route("**/api/v1/connections", (route) => route.fulfill({ json: [source] }));
@@ -28,6 +43,18 @@ async function openWorkspace(page: Page, exports: unknown[] = [], exportHandler?
       entries: body.kind === "organizations" ? [{ id: "42", name: "synthetic-org" }] : [{ id: "101", repository: "synthetic-org/first", private: false }],
       next_page: null, inventory_complete: false } });
   });
+  await page.route("**/api/v1/inventories/capabilities", (route) => route.fulfill({ json: { classes: inventoryClasses, supported: ["git_refs", "organizations", "teams", "permissions", "identities", "issues", "comments"], schema_version: 1 } }));
+  await page.route("**/api/v1/inventories", async (route) => {
+    if (route.request().method() === "GET") return route.fulfill({ json: [...inventoryJobs.values()].map(({ document, request, summary, ...summaryJob }) => summaryJob) });
+    const body = route.request().postDataJSON() as { inventory_id: string };
+    const created = inventoryJob(body.inventory_id, "queued"); inventoryJobs.set(body.inventory_id, created);
+    return route.fulfill({ status: 202, json: created });
+  });
+  await page.route("**/api/v1/inventories/inventory-*", (route) => {
+    const id = route.request().url().split("/").at(-1) ?? "inventory-saved";
+    const value = inventoryJobs.get(id) ?? inventoryJob(id, "ready");
+    return route.fulfill({ json: { ...value, ...(value.status === "queued" ? inventoryJob(id, "ready") : {}) } });
+  });
   await page.route("**/api/v1/exports/recipients", recipientHandler ?? ((route) => route.fulfill({ json: [recipient, { ...source, installation_marker: "install-source" }] })));
   await page.route("**/api/v1/exports", async (route) => {
     if (exportHandler) return exportHandler(route);
@@ -36,8 +63,13 @@ async function openWorkspace(page: Page, exports: unknown[] = [], exportHandler?
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Choose a source" })).toBeVisible();
   await page.getByLabel("Source connection").selectOption(source.instance_key);
-  await page.getByLabel("Organization").selectOption("synthetic-org");
+  await page.getByLabel("Organization", { exact: true }).selectOption("synthetic-org");
   await page.getByRole("checkbox", { name: "synthetic-org/first" }).check();
+  await expect(page.getByRole("heading", { name: "Content inventory" })).toBeVisible();
+  const inspect = page.getByRole("button", { name: "Inspect selected content" });
+  if (await inspect.isVisible()) await inspect.click();
+  await expect(page.getByRole("button", { name: "Use this inventory" })).toBeEnabled({ timeout: 6_000 });
+  await page.getByRole("button", { name: "Use this inventory" }).click();
   await expect(page.getByRole("heading", { name: "Create a source export" })).toBeVisible();
 }
 
@@ -51,12 +83,15 @@ test("submits the exact immutable source selection and recipient", async ({ page
   await openWorkspace(page, [], exportHandler);
   await page.getByLabel("Recipient registration").selectOption(recipient.instance_key);
   await page.getByLabel("Include membership records").check();
+  await expect(page.getByRole("button", { name: "Create and queue export" })).toBeDisabled();
+  await page.getByRole("button", { name: "Use this inventory" }).click();
   const create = page.getByRole("button", { name: "Create and queue export" });
   await create.focus(); await page.keyboard.press("Enter");
-  await expect(page.getByRole("status")).toContainText("was queued");
+  await expect(page.getByRole("status").filter({ hasText: "was queued" })).toBeVisible();
   expect(submitted?.export_id).toMatch(/^export-[0-9a-f-]{36}$/);
-  expect(submitted?.request).toEqual({ version: 1, source_instance_key: "source-a", source_profile_revision: 7,
+  expect(submitted?.request).toMatchObject({ version: 2, inventory_digest: "d".repeat(64), source_instance_key: "source-a", source_profile_revision: 7,
     recipient_instance_key: "recipient-b", repositories: [{ repository: "synthetic-org/first", global_id: "101" }], include_metadata: true, include_members: true });
+  expect(submitted?.request).toHaveProperty("inventory_id", expect.stringMatching(/^inventory-[0-9a-f-]{36}$/));
 });
 
 test("reloads saved jobs without POST and polls to a streamed download link", async ({ page }) => {
@@ -99,12 +134,15 @@ test("retries a lost create response after reload with the same immutable ID", a
   await expect(page.getByRole("alert")).toContainText("could not be queued");
   await page.reload();
   await page.getByLabel("Source connection").selectOption(source.instance_key);
-  await page.getByLabel("Organization").selectOption("synthetic-org");
+  await page.getByLabel("Organization", { exact: true }).selectOption("synthetic-org");
   await page.getByRole("checkbox", { name: "synthetic-org/first" }).check();
+  await expect(page.getByRole("heading", { name: "Content inventory" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Use this inventory" })).toBeEnabled({ timeout: 6_000 });
+  await page.getByRole("button", { name: "Use this inventory" }).click();
   await page.getByLabel("Recipient registration").selectOption(recipient.instance_key);
   expect(submitted).toHaveLength(1); // Reload only reads durable state.
   await page.getByRole("button", { name: "Create and queue export" }).click();
-  await expect(page.getByRole("status")).toContainText("was queued");
+  await expect(page.getByRole("status").filter({ hasText: "was queued" })).toBeVisible();
   expect(submitted).toHaveLength(2);
   expect(submitted[1]).toEqual(submitted[0]);
   expect(remoteJobs.size).toBe(1);

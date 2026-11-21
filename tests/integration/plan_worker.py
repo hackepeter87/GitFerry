@@ -102,8 +102,9 @@ def proxy(*, lose_comment_response: bool = False):
                 "Content-Type", response.headers.get("content-type", "application/octet-stream")
             )
             self.send_header("Content-Length", str(len(response.content)))
-            if "www-authenticate" in response.headers:
-                self.send_header("WWW-Authenticate", response.headers["www-authenticate"])
+            for header in ("WWW-Authenticate", "X-Total-Count", "Link"):
+                if header in response.headers:
+                    self.send_header(header, response.headers[header])
             self.end_headers()
             self.wfile.write(response.content)
 

@@ -13,6 +13,8 @@ async function openMockedWorkspace(page: Page, profiles: Profile[] = [
   await page.route("**/api/v1/package-uploads**", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/exports/recipients", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/exports", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/inventories", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/inventories/capabilities", (route) => route.fulfill({ json: { classes: ["git_refs", "organizations", "teams", "permissions"], supported: ["git_refs", "organizations", "teams", "permissions"], schema_version: 1 } }));
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Choose a source" })).toBeVisible();
   const selected = profiles.find((profile) => profile.enabled && profile.locally_approved);
@@ -31,12 +33,12 @@ test("selects repositories across mocked pages and preserves the summary", async
     await route.fulfill({ json: { instance_key: "source-a", profile_revision: 4, evidence_digest: "synthetic-digest", kind: body.kind, organization: body.organization, page: body.page, entries, next_page: body.kind === "repositories" && body.page === 1 ? 2 : null, inventory_complete: false } });
   });
   await openMockedWorkspace(page);
-  await page.getByLabel("Organization").selectOption("synthetic-org");
+  await page.getByLabel("Organization", { exact: true }).selectOption("synthetic-org");
   await page.getByRole("checkbox", { name: "synthetic-org/first" }).check();
   await page.getByRole("button", { name: "Load more repositories" }).click();
   await page.getByRole("checkbox", { name: "synthetic-org/second Private" }).check();
   await expect(page.getByText("2 repositories selected.")).toBeVisible();
-  await page.getByLabel("Organization").selectOption("other-org");
+  await page.getByLabel("Organization", { exact: true }).selectOption("other-org");
   await page.getByRole("checkbox", { name: "other-org/third" }).check();
   await expect(page.getByText("3 repositories selected.")).toBeVisible();
   await page.getByRole("button", { name: "Remove synthetic-org/first from selection" }).click();
@@ -60,7 +62,7 @@ test("reports browse errors and resets selection when the source changes", async
   ]);
   await expect(page.getByRole("alert")).toHaveText("Synthetic browse failure");
   await page.getByLabel("Source connection").selectOption("source-b");
-  await expect(page.getByLabel("Organization").locator("option", { hasText: "other-org" })).toBeAttached();
+  await expect(page.getByLabel("Organization", { exact: true }).locator("option", { hasText: "other-org" })).toBeAttached();
 });
 
 test("returns to sign-in on a mocked expired browse session", async ({ page }) => {
@@ -89,14 +91,14 @@ test("source reads require selection and refresh cannot strand an in-flight page
   await expect(page.getByLabel("Source connection").locator("option[value='source-a']")).toBeAttached();
   expect(reads).toBe(0);
   await page.getByLabel("Source connection").selectOption("source-a");
-  await page.getByLabel("Organization").selectOption("synthetic-org");
+  await page.getByLabel("Organization", { exact: true }).selectOption("synthetic-org");
   await expect(page.getByText("Loading repositories…")).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh sources" })).toBeDisabled();
   release();
   await page.getByRole("checkbox", { name: "synthetic-org/first" }).check();
   await page.getByRole("button", { name: "Refresh sources" }).click();
-  await expect(page.getByLabel("Organization")).toHaveValue("");
-  await page.getByLabel("Organization").selectOption("synthetic-org");
+  await expect(page.getByLabel("Organization", { exact: true })).toHaveValue("");
+  await page.getByLabel("Organization", { exact: true }).selectOption("synthetic-org");
   await expect(page.getByRole("checkbox", { name: "synthetic-org/first" })).not.toBeChecked();
   await expect(page.getByRole("button", { name: "Refresh sources" })).toBeEnabled();
 });
