@@ -52,7 +52,7 @@ def approve_realm(decisions, ref, initial, intent):
 
 
 def remote(monkeypatch, account=None, hook=None):
-    import gitferry.package_decisions as module
+    import gitferry.target_accounts as module
 
     value = account or {"id": 9007199254740993, "login": "target.author", "is_admin": False}
     calls = []

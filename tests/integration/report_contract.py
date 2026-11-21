@@ -305,6 +305,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
     """Map every requested regression to an executed assertion or focused unit test."""
 
     mandatory_sections = (
+        "directory",
         "connection_profiles",
         "application_plans",
         "source_exports",
@@ -325,6 +326,58 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         and all(_value(report, f"{section}.status") == "passed" for section in mandatory_sections)
     )
     entries = [
+        (
+            "local_directory_bootstrap_restart_and_uncertainty",
+            all(
+                _value(report, "directory.local_application_bootstrap." + mode + ".status")
+                == "passed"
+                and _value(
+                    report, "directory.local_application_bootstrap." + mode + ".create_call_count"
+                )
+                == 1
+                for mode in ("first", "replay", "recovered_crash", "recovered_lost_response")
+            )
+            and _value(report, "directory.local_application_bootstrap.crash.exit_code") == 73
+            and all(
+                _value(report, "directory.local_application_bootstrap." + mode + ".record.status")
+                == "outcome_unknown"
+                and "native_source_id"
+                in _value(report, "directory.local_application_bootstrap." + mode + ".record")
+                and _value(
+                    report,
+                    "directory.local_application_bootstrap." + mode + ".record.native_source_id",
+                )
+                is None
+                for mode in ("recovered_crash", "recovered_lost_response")
+            )
+            and _value(report, "directory.local_application_bootstrap.changed.status") == "passed",
+            "tests/integration/directory_bootstrap_worker.py",
+            "directory.local_application_bootstrap",
+        ),
+        (
+            "real_ldap_simple_authentication",
+            _value(report, "directory.status") == "passed"
+            and _value(report, "directory.gitea_version") == "1.27.2"
+            and all(
+                _value(report, "directory." + key) is True
+                for key in (
+                    "valid_password_login",
+                    "wrong_password_rejected",
+                    "wrong_ca_rejected_and_restored",
+                    "disabled_filter_excluded_and_restored",
+                    "external_employee_number_changed_and_restored",
+                    "group_membership_changed_and_restored",
+                    "ldap_outage_failed_closed_and_restored",
+                    "ldap_user_not_administrator",
+                    "same_login_collision_ldap_rejected",
+                    "authenticated_account_readback",
+                )
+            )
+            and _value(report, "directory.directory_facts.duplicate_uid_scopes") is True
+            and bool(_value(report, "directory.missing_mail_native_email")),
+            "tests/integration/directory_probe.py",
+            "directory",
+        ),
         (
             "source_export_capture_and_offline_file_receipt",
             _all_required_true(
@@ -360,6 +413,8 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                         "guided_browser_production_runtime",
                         "guided_selected_set_and_control",
                         "guided_browser_restart_read_only",
+                        "structure_phase_confirmed_without_bindings_or_memberships",
+                        "late_full_plan_reused_structure_operations",
                     }
                 ),
             )

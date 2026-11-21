@@ -254,7 +254,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const csrf = readCookie("gitferry_csrf");
   const headers = new Headers({ Accept: "application/json", ...init.headers });
   if (csrf && init.method && init.method !== "GET") headers.set("x-gitferry-csrf", csrf);

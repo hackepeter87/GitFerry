@@ -735,3 +735,43 @@ Those corrections add exact observed upload-ID equality, clear checked account/c
 state on target changes, and preserve connection-profile refresh on package changes. The expanded
 eight-case intake suite and frontend build passed locally after these changes; the earlier hosted
 result must not be reused as approval for the corrected commit.
+
+## Identity administration and directory qualification (0.3 development)
+
+`test_identity_decisions.py` and `test_identity_application.py` exercise the existing binding
+constraints through durable candidate decisions, actual subprocess restart and concurrent
+approval, conflict savepoint rollback, native authentication-source changes, CSRF/local actor
+validation and CLI reuse. `frontend/e2e/identity.spec.ts` covers explicit candidate submission,
+reopening, retired connections, native decimal IDs and readable actor/reason history. These
+route-mocked browser checks alone do not prove directory or real target access.
+
+The common integration entry adds an isolated OpenLDAP fixture to the target network, using
+the existing digest-pinned Python base and explicitly pinned OpenLDAP packages. The real
+Gitea 1.27.2 probe checks LDAPS simple authentication, wrong password, wrong CA/recovery,
+non-administrator access, same-name local collision, missing-mail native behavior and directory
+DN/external-ID/group observations. LDAP results never qualify Active Directory SID or nested
+group behavior. The standalone `tests/integration/directory/run.sh` is a focused diagnostic
+entry; the common report and required evidence catalog remain the delivery gate.
+
+The desktop first-import probe also executes structure/Git-only provisioning before any
+functional binding, then explicitly approves identities and prepares the complete plan from
+the same received package. It checks reuse of confirmed structure operations, native metadata
+relationships, unchanged control selection and restart/replay. Technical organization
+ownership remains explicit; “no user transfer” never means ownerless Gitea organizations.
+
+The separate target-local bootstrap fixture uses the original static binary from the pinned
+Gitea image with that server's configuration/volume; the image's `/usr/local/bin/gitea` wrapper
+is not portable on its own. The fixture never grants those mounts to either importer. Actual
+successful CLI creation is followed by a process exit or discarded return value; separate
+worker processes must retain `outcome_unknown`, an unset confirmed native ID and one recorded
+creation call per source. Native source presence is read through Gitea CLI, never supplied to
+GitFerry as a recovery identity by the harness. Confirmed replay also preserves journal events.
+
+Directory settings tests cover schema-discriminated simple/BindDN input, local profile revision
+refresh, authenticated API/CSRF, configuration export/import, and inspection of uncertain
+bootstrap state without server access. The desktop separates historical execution evidence
+from a later settings revision. The report gate requires the LDAP negative cases and each
+interruption create counter; missing facts fail closed.
+
+Run evidence belongs to the associated issue/PR and Actions artifacts. These additional tests
+are development work until the exact delivery commit passes the complete gates and review.

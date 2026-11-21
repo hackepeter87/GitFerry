@@ -13,6 +13,7 @@ from typing import Any
 from application_plan_probe import run_application_plan_probe
 from comment_transport_roundtrip_probe import run_comment_transport_roundtrip_probe
 from connection_profile_probe import run_connection_profile_probe
+from directory_probe import run_directory_probe
 from metadata_roundtrip_probe import run_metadata_roundtrip_probe
 from oci_runtime_probe import run_oci_runtime_probe
 from openapi_migration_probe import run_openapi_migration_probe
@@ -307,6 +308,7 @@ def main() -> None:
 
     report = {
         "gitea": {"source": source_version, "target": target_version},
+        "directory": run_directory_probe(),
         "connection_profiles": run_connection_profile_probe(),
         "application_plans": run_application_plan_probe(),
         "source_exports": run_source_export_probe(),

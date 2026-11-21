@@ -43,6 +43,8 @@ ASSERTIONS = frozenset(
         "target_only_archive_verified",
         "source_and_target_databases_independent",
         "package_admission_apply_confirmed",
+        "structure_phase_confirmed_without_bindings_or_memberships",
+        "late_full_plan_reused_structure_operations",
         "native_authors_parent_and_git_refs",
         "target_only_archive_and_external_unreachable",
         "package_admission_database_independent",
@@ -253,6 +255,9 @@ def run_source_export_probe() -> dict[str, Any]:
         with browser_tunnel(COMPOSE) as base_url:
             uploaded = _run_browser(archive_host, "phase1", base_url)
             _target_worker("browser-upload")
+            _run_browser(archive_host, "structure", base_url)
+            structure = _target_worker("browser-structure-result")
+            _target_worker("browser-preview-snapshot")
             review_browser = _run_browser(archive_host, "phase2", base_url)
             preview = _target_worker("browser-preview")
             browser = _run_browser(archive_host, "phase5", base_url)
@@ -333,6 +338,8 @@ def run_source_export_probe() -> dict[str, Any]:
         "git_visibility",
         "objects",
         "post_count",
+        "structure_plan_id",
+        "structure_operation_ids_reused",
     )
     (WORK / "package-admission-evidence.json").write_text(
         json.dumps(
@@ -395,6 +402,17 @@ def run_source_export_probe() -> dict[str, Any]:
             and target_details["source_state_absent"]
         ),
         "package_admission_apply_confirmed": target_package["status"] == "confirmed",
+        "structure_phase_confirmed_without_bindings_or_memberships": (
+            structure["status"] == "confirmed"
+            and structure["no_metadata_or_memberships"]
+            and structure["no_account_operations"]
+            and structure["no_identity_bindings"]
+            and structure["no_target_memberships"]
+        ),
+        "late_full_plan_reused_structure_operations": (
+            target_package["structure_plan_id"] == structure["plan_id"]
+            and target_package["structure_operation_ids_reused"] > 0
+        ),
         "native_authors_parent_and_git_refs": (
             target_package["issue_author"] == "issue-author"
             and target_package["issue_author_id"]

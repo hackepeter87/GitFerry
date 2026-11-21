@@ -38,6 +38,38 @@ def complete_probe_report() -> dict[str, object]:
         "control_repository_change_preserved": True,
     }
     report: dict[str, object] = {
+        "directory": {
+            "status": "passed",
+            "local_application_bootstrap": {
+                "first": {"status": "passed", "create_call_count": 1},
+                "replay": {"status": "passed", "create_call_count": 1},
+                "crash": {"exit_code": 73},
+                "changed": {"status": "passed"},
+                "recovered_crash": {
+                    "status": "passed",
+                    "create_call_count": 1,
+                    "record": {"status": "outcome_unknown", "native_source_id": None},
+                },
+                "recovered_lost_response": {
+                    "status": "passed",
+                    "create_call_count": 1,
+                    "record": {"status": "outcome_unknown", "native_source_id": None},
+                },
+            },
+            "gitea_version": "1.27.2",
+            "valid_password_login": True,
+            "wrong_password_rejected": True,
+            "wrong_ca_rejected_and_restored": True,
+            "disabled_filter_excluded_and_restored": True,
+            "external_employee_number_changed_and_restored": True,
+            "group_membership_changed_and_restored": True,
+            "ldap_outage_failed_closed_and_restored": True,
+            "ldap_user_not_administrator": True,
+            "same_login_collision_ldap_rejected": True,
+            "authenticated_account_readback": True,
+            "directory_facts": {"duplicate_uid_scopes": True},
+            "missing_mail_native_email": "synthetic@localhost.local",
+        },
         "source_exports": {
             "status": "passed",
             "image_id": "sha256:" + "a" * 64,
@@ -71,6 +103,8 @@ def complete_probe_report() -> dict[str, object]:
                     "guided_browser_production_runtime",
                     "guided_selected_set_and_control",
                     "guided_browser_restart_read_only",
+                    "structure_phase_confirmed_without_bindings_or_memberships",
+                    "late_full_plan_reused_structure_operations",
                 ),
                 True,
             ),
@@ -603,4 +637,38 @@ def test_documented_compose_installation_must_use_runtime_image(
     module = report_contract()
     report = complete_probe_report()
     report["oci_runtime"]["reference_compose"]["image_id"] = image_id
+    assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize("mode", ["first", "replay", "recovered_crash", "recovered_lost_response"])
+def test_directory_bootstrap_requires_single_create(tmp_path, mode):
+    module = report_contract()
+    report = complete_probe_report()
+    report["directory"]["local_application_bootstrap"][mode]["create_call_count"] = 2
+    assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "disabled_filter_excluded_and_restored",
+        "external_employee_number_changed_and_restored",
+        "group_membership_changed_and_restored",
+        "ldap_outage_failed_closed_and_restored",
+        "wrong_ca_rejected_and_restored",
+    ],
+)
+def test_directory_failure_qualification_is_mandatory(tmp_path, key):
+    module = report_contract()
+    report = complete_probe_report()
+    del report["directory"][key]
+    assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+def test_directory_unknown_result_requires_explicit_missing_confirmation(tmp_path):
+    module = report_contract()
+    report = complete_probe_report()
+    del report["directory"]["local_application_bootstrap"]["recovered_crash"]["record"][
+        "native_source_id"
+    ]
     assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))

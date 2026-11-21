@@ -30,7 +30,7 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "type", "directoryRealm", "host", "bindSecretRef"],
+            "required": ["name", "type", "directoryRealm", "host"],
             "properties": {
               "name": {"type": "string", "minLength": 1},
               "type": {"enum": ["ldap", "ldaps"]},
@@ -39,9 +39,34 @@
               "port": {"type": "integer", "minimum": 1, "maximum": 65535},
               "userSearchBase": {"type": "string"},
               "groupSearchBase": {"type": "string"},
+              "mode": {"const": "simple"},
+              "securityProtocol": {"enum": ["ldaps", "starttls"]},
+              "userDn": {"type": "string", "minLength": 1},
+              "userFilter": {"type": "string", "minLength": 1},
+              "emailAttribute": {"type": "string", "minLength": 1},
+              "usernameAttribute": {"type": "string", "minLength": 1},
               "bindSecretRef": {"$ref": "#/$defs/secretRef"},
               "caSecretRef": {"$ref": "#/$defs/secretRef"}
-            }
+            },
+            "oneOf": [
+              {"required": ["bindSecretRef"], "not": {"required": ["mode"]}},
+              {"required": ["mode", "userDn", "userFilter", "emailAttribute", "caSecretRef"], "not": {"required": ["bindSecretRef"]}}
+            ],
+            "allOf": [
+              {
+                "if": {"required": ["mode"], "properties": {"mode": {"const": "simple"}}},
+                "then": {
+                  "if": {"properties": {"type": {"const": "ldap"}}},
+                  "then": {
+                    "required": ["securityProtocol"],
+                    "properties": {"securityProtocol": {"const": "starttls"}}
+                  },
+                  "else": {
+                    "properties": {"securityProtocol": {"const": "ldaps"}}
+                  }
+                }
+              }
+            ]
           }
         }
       }

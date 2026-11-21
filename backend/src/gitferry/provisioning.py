@@ -15,6 +15,7 @@ from gitferry.gitea_provisioning import (
     verify_team,
     verify_technical_administrator,
 )
+from gitferry.identity_observations import require_current_account
 from gitferry.operations import OperationExecutor
 from gitferry.state_codec import canonical_json
 from gitferry.state_store import (
@@ -248,6 +249,7 @@ def _local_bindings(state: StateStore, plan: ProvisioningPlan) -> dict[str, Iden
 
 
 def _verify_remote_bindings(
+    state: StateStore,
     client: ProvisioningClient,
     bindings: Mapping[str, IdentityBindingRecord],
     administrator_id: int,
@@ -259,6 +261,7 @@ def _verify_remote_bindings(
             )
         account = client.get_user(binding.target_login)
         verify_account(account, binding.target_login, binding.target_account_id)
+        require_current_account(state, binding, account)
 
 
 def _prepare_plan(
@@ -512,7 +515,7 @@ def preflight_provisioning_operations(
     administrator_id = verify_technical_administrator(
         client.get_authenticated_user(), client.authenticated_login
     )
-    _verify_remote_bindings(client, bindings, administrator_id)
+    _verify_remote_bindings(state, client, bindings, administrator_id)
     organization = client.find_organization(plan.organization)
     try:
         _verify_or_reject_target(
@@ -588,7 +591,7 @@ def provision_selected_repository(
     administrator_id = verify_technical_administrator(
         client.get_authenticated_user(), client.authenticated_login
     )
-    _verify_remote_bindings(client, bindings, administrator_id)
+    _verify_remote_bindings(state, client, bindings, administrator_id)
     completed: list[OperationRecord] = []
 
     try:

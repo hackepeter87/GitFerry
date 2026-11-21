@@ -1,0 +1,49 @@
+services:
+  target:
+    image: docker.gitea.com/gitea:1.27.2@sha256:d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd
+    environment:
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__database__PATH: /data/gitea/gitea.db
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      GITEA__server__DISABLE_SSH: "true"
+      GITEA__server__HTTP_PORT: "3000"
+      GITEA__server__ROOT_URL: http://target:3000/
+      GITEA__log__MODE: console
+      GITEA__log__LEVEL: warn
+      SSL_CERT_FILE: /run/directory-ca/ca.pem
+    ports:
+      - "127.0.0.1:${GITFERRY_DIRECTORY_PORT:-33102}:3000"
+    volumes:
+      - target-data:/data
+      - directory-ca:/run/directory-ca:ro
+    networks: [directory-net, control-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/v1/version"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+
+  openldap:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - directory-ca:/run/directory-ca
+      - directory-data:/var/lib/ldap
+    networks: [directory-net]
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://127.0.0.1:389", "-b", "", "-s", "base", "namingContexts"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+
+volumes:
+  target-data:
+  directory-data:
+  directory-ca:
+
+networks:
+  directory-net:
+    internal: true
+  control-net:

@@ -68,7 +68,7 @@ test("supports keyboard login, denied credentials, authenticated state, and logo
 
   await password.fill("correct synthetic passphrase");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Administration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Administration", exact: true, level: 1 })).toBeVisible();
   await expect(page.getByText("synthetic.admin")).toBeVisible();
   await expect(page.getByText("Administrator", { exact: true })).toBeVisible();
 
@@ -81,10 +81,17 @@ test("surfaces an expired server-side session without granting access", async ({
   await page.getByLabel("Username").fill("synthetic.admin");
   await page.getByLabel("Password").fill("correct synthetic passphrase");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Administration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Administration", exact: true, level: 1 })).toBeVisible();
 
-  const expired = await page.request.post("http://127.0.0.1:8089/__test__/expire-sessions");
-  expect(expired.ok()).toBeTruthy();
+  // Expire at the explicit request boundary: startup panel reads may otherwise
+  // correctly sign out before the test can click the session-check button.
+  await page.route("**/api/v1/auth/session", async (route) => {
+    const expired = await page.request.post("http://127.0.0.1:8089/__test__/expire-sessions");
+    expect(expired.ok()).toBeTruthy();
+    const response = await route.fetch();
+    expect(response.status()).toBe(401);
+    await route.fulfill({ response });
+  }, { times: 1 });
   await page.getByRole("button", { name: "Check session" }).click();
   await expect(page.getByRole("alert")).toHaveText(
     "Your session expired or was revoked. Sign in again.",
@@ -97,26 +104,31 @@ test("surfaces revoked sessions and accepts the operator recovery password", asy
   await page.getByLabel("Username").fill("synthetic.admin");
   await page.getByLabel("Password").fill("correct synthetic passphrase");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Administration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Administration", exact: true, level: 1 })).toBeVisible();
 
   const runtimeRoot = process.env.GITFERRY_E2E_ROOT;
   if (!runtimeRoot) throw new Error("GITFERRY_E2E_ROOT is unavailable");
   const python = process.env.GITFERRY_TEST_PYTHON;
   const adminCli = process.env.GITFERRY_TEST_ADMIN_CLI;
   if (!python || !adminCli) throw new Error("browser test CLI paths are unavailable");
-  const recovery = spawnSync(python, [
-    adminCli,
-    "admin",
-    "recover",
-    "--database",
-    join(runtimeRoot, "bootstrapped", "state.sqlite3"),
-    "--password-file",
-    join(runtimeRoot, "bootstrapped", "replacement-password"),
-  ], { env: process.env, encoding: "utf8" });
-  expect(
-    recovery.status,
-    `recovery failed: stdout=${recovery.stdout} stderr=${recovery.stderr}`,
-  ).toBe(0);
+  await page.route("**/api/v1/auth/session", async (route) => {
+    const recovery = spawnSync(python, [
+      adminCli,
+      "admin",
+      "recover",
+      "--database",
+      join(runtimeRoot, "bootstrapped", "state.sqlite3"),
+      "--password-file",
+      join(runtimeRoot, "bootstrapped", "replacement-password"),
+    ], { env: process.env, encoding: "utf8" });
+    expect(
+      recovery.status,
+      `recovery failed: stdout=${recovery.stdout} stderr=${recovery.stderr}`,
+    ).toBe(0);
+    const response = await route.fetch();
+    expect(response.status()).toBe(401);
+    await route.fulfill({ response });
+  }, { times: 1 });
 
   await page.getByRole("button", { name: "Check session" }).click();
   await expect(page.getByRole("alert")).toHaveText(
@@ -130,5 +142,5 @@ test("surfaces revoked sessions and accepts the operator recovery password", asy
 
   await page.getByLabel("Password").fill("replacement synthetic passphrase");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Administration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Administration", exact: true, level: 1 })).toBeVisible();
 });

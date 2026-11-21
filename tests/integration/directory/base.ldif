@@ -1,0 +1,77 @@
+dn: dc=example,dc=invalid
+objectClass: top
+objectClass: dcObject
+objectClass: organization
+o: Synthetic Directory
+dc: example
+
+dn: ou=People,dc=example,dc=invalid
+objectClass: top
+objectClass: organizationalUnit
+ou: People
+
+dn: ou=Groups,dc=example,dc=invalid
+objectClass: top
+objectClass: organizationalUnit
+ou: Groups
+
+dn: ou=People-B,dc=example,dc=invalid
+objectClass: top
+objectClass: organizationalUnit
+ou: People-B
+
+dn: uid=ldap-reader,ou=People,dc=example,dc=invalid
+objectClass: inetOrgPerson
+objectClass: posixAccount
+cn: LDAP Reader
+sn: Reader
+uid: ldap-reader
+uidNumber: 10001
+gidNumber: 10001
+homeDirectory: /nonexistent
+mail: ldap-reader@example.invalid
+userPassword: synthetic-directory-pass
+employeeNumber: SYNTHETIC-EXT-10001
+
+dn: uid=ldap-reader,ou=People-B,dc=example,dc=invalid
+objectClass: inetOrgPerson
+objectClass: posixAccount
+cn: LDAP Reader Other Scope
+sn: Reader
+uid: ldap-reader
+uidNumber: 10002
+gidNumber: 10002
+homeDirectory: /nonexistent
+mail: ldap-reader-other@example.invalid
+employeeNumber: SYNTHETIC-EXT-20001
+userPassword: synthetic-directory-pass
+
+dn: uid=missing-mail,ou=People,dc=example,dc=invalid
+objectClass: inetOrgPerson
+objectClass: posixAccount
+cn: Missing Mail
+sn: Mail
+uid: missing-mail
+uidNumber: 10003
+gidNumber: 10003
+homeDirectory: /nonexistent
+employeeNumber: SYNTHETIC-EXT-30001
+userPassword: synthetic-directory-pass
+
+dn: uid=collision-user,ou=People,dc=example,dc=invalid
+objectClass: inetOrgPerson
+objectClass: posixAccount
+cn: Collision User
+sn: User
+uid: collision-user
+uidNumber: 10004
+gidNumber: 10004
+homeDirectory: /nonexistent
+mail: collision-user@example.invalid
+employeeNumber: SYNTHETIC-EXT-40001
+userPassword: synthetic-directory-pass
+
+dn: cn=gitea-users,ou=Groups,dc=example,dc=invalid
+objectClass: groupOfNames
+cn: gitea-users
+member: uid=ldap-reader,ou=People,dc=example,dc=invalid

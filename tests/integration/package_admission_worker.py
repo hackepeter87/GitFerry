@@ -496,7 +496,77 @@ def browser_upload_evidence() -> dict[str, Any]:
     }
     # Boolean derives from the complete asserted snapshot above, not a placeholder.
     (ROOT / "browser-upload.json").write_text(json.dumps(result))
+    accounts = remote("GET", "/admin/users?limit=50")
+    (ROOT / "browser-accounts-before.json").write_text(
+        json.dumps(sorted((user["id"], user["login"], user["is_admin"]) for user in accounts))
+    )
     return result
+
+
+def browser_structure_result() -> dict[str, Any]:
+    """Verify the first plan wrote only structure/Git facts, before bindings."""
+    state = StateStore(DATABASE)
+    service = PackageAdmissions(state, RuntimePaths(DATABASE, ROOT / "packages", ROOT / "work"))
+    plans = PlanService(state).list()
+    if len(plans) != 1 or plans[0]["status"] != "confirmed":
+        raise RuntimeError("structure-only browser plan was not confirmed")
+    plan = plans[0]
+    operation_types = [step["operation_type"] for step in plan["operations"]]
+    forbidden = {
+        "create_issue",
+        "update_issue",
+        "create_comment",
+        "update_comment",
+        "add_team_member",
+    }
+    account_operations = [
+        operation for operation in operation_types if "user" in operation or "account" in operation
+    ]
+    if account_operations:
+        raise RuntimeError("structure-only plan contained account operations")
+    if forbidden.intersection(operation_types):
+        raise RuntimeError("structure-only plan contained metadata or membership operations")
+    counts = _counts(service)
+    with state.read_connection() as connection:
+        metadata_mappings = connection.execute(
+            "SELECT count(*) FROM object_mappings WHERE target_instance_key=? "
+            "AND target_object_type IN ('issue', 'comment')",
+            (TARGET,),
+        ).fetchone()[0]
+    if counts["identity_bindings"] or metadata_mappings:
+        raise RuntimeError("structure-only phase created identity bindings or metadata mappings")
+    teams = remote("GET", "/orgs/source-export-lab/teams")
+    owners = [team for team in teams if team["name"] == "Owners"]
+    if len(owners) != 1:
+        raise RuntimeError("technical organization ownership is not explicit")
+    owner_members = remote("GET", f"/teams/{owners[0]['id']}/members")
+    if [user["login"] for user in owner_members] != ["gitferry-admin"]:
+        raise RuntimeError("unexpected functional organization owner")
+    memberships = sum(
+        len(remote("GET", f"/teams/{team['id']}/members"))
+        for team in teams
+        if team["name"] != "Owners"
+    )
+    if memberships:
+        raise RuntimeError("structure-only phase created functional team memberships")
+    accounts = remote("GET", "/admin/users?limit=50")
+    actual_accounts = sorted([user["id"], user["login"], user["is_admin"]] for user in accounts)
+    if actual_accounts != json.loads((ROOT / "browser-accounts-before.json").read_text()):
+        raise RuntimeError("structure-only import changed native accounts")
+    for repository in ("source-export-lab/selected", "source-export-lab/selected-extra"):
+        if remote("GET", f"/repos/{repository}/issues?state=all&type=issues"):
+            raise RuntimeError("structure-only import created native issues")
+    return {
+        "plan_id": plan["plan_id"],
+        "status": plan["status"],
+        "operation_types": operation_types,
+        "no_metadata_or_memberships": True,
+        "no_account_operations": not account_operations,
+        "no_identity_bindings": counts["identity_bindings"] == 0,
+        "no_target_memberships": memberships == 0,
+        "metadata_mappings": metadata_mappings,
+        "object_counts": counts,
+    }
 
 
 def browser_result() -> dict[str, Any]:
@@ -509,9 +579,36 @@ def browser_result() -> dict[str, Any]:
     admitted = service.list()[0]
     plans = PlanService(state)
     summaries = plans.list()
-    if len(summaries) != 1:
-        raise RuntimeError("browser did not create exactly one plan")
-    plan = plans.get(summaries[0]["plan_id"])
+    if len(summaries) != 2:
+        raise RuntimeError("browser did not create structure and full plans")
+    plans_by_id = {summary["plan_id"]: plans.get(summary["plan_id"]) for summary in summaries}
+    structure = next(
+        (
+            plan
+            for plan in plans_by_id.values()
+            if not any(
+                step["operation_type"]
+                in {
+                    "create_issue",
+                    "create_comment",
+                    "update_issue",
+                    "update_comment",
+                    "add_team_member",
+                }
+                for step in plan["operations"]
+            )
+        ),
+        None,
+    )
+    plan = next(
+        (candidate for candidate in plans_by_id.values() if candidate is not structure), None
+    )
+    if structure is None or plan is None or structure["status"] != "confirmed":
+        raise RuntimeError("structure and full plans were not both confirmed")
+    structure_ids = {step["operation_id"] for step in structure["operations"]}
+    full_ids = {step["operation_id"] for step in plan["operations"]}
+    if not structure_ids.issubset(full_ids):
+        raise RuntimeError("full plan did not reuse the confirmed structure operations")
     if plan["status"] != "confirmed":
         raise RuntimeError("browser plan is not confirmed")
     result = plan
@@ -557,6 +654,8 @@ def browser_result() -> dict[str, Any]:
         "review_missing_bindings": browser["review_missing_bindings"],
         "blocked_without_bindings": browser["blocked_without_bindings"],
         "plan_id": plan["plan_id"],
+        "structure_plan_id": structure["plan_id"],
+        "structure_operation_ids_reused": len(structure_ids),
         "repository": repository,
         "issue_author": issue["user"]["login"],
         "issue_author_id": issue["user"]["id"],
@@ -605,7 +704,23 @@ def replay() -> dict[str, Any]:
     )
     if browser_upload.exists():
         saved = PlanService(state)
-        confirmed = saved.get(saved.list()[0]["plan_id"])
+        summaries = saved.list()
+        full_summary = next(
+            summary
+            for summary in summaries
+            if any(
+                step["operation_type"]
+                in {
+                    "create_issue",
+                    "create_comment",
+                    "update_issue",
+                    "update_comment",
+                    "add_team_member",
+                }
+                for step in summary["operations"]
+            )
+        )
+        confirmed = saved.get(full_summary["plan_id"])
         refs = confirmed["document"]["inventory"]["request"]["author_credential_refs"]
     else:
         refs = {"issue-author": "issue-author", "comment-author": "comment-author"}
@@ -673,30 +788,57 @@ def collision_snapshot() -> dict[str, Any]:
 def browser_preview() -> dict[str, Any]:
     state = StateStore(DATABASE)
     plans = PlanService(state).list()
-    if (
-        len(plans) != 1
-        or plans[0]["status"] != "draft"
-        or plans[0]["preview"]["status"] != "passed"
-    ):
+    drafts = [plan for plan in plans if plan["status"] == "draft"]
+    if len(drafts) != 1 or drafts[0]["preview"]["status"] != "passed":
         raise RuntimeError("browser did not finish a separate draft preview")
-    if any(step["status"] not in {"prepared", "blocked_parent"} for step in plans[0]["operations"]):
+    confirmed_ids = {
+        step["operation_id"]
+        for plan in plans
+        if plan["status"] == "confirmed"
+        for step in plan["operations"]
+        if step["status"] == "confirmed"
+    }
+    if any(
+        step["status"] not in {"prepared", "blocked_parent"}
+        and not (step["status"] == "confirmed" and step["operation_id"] in confirmed_ids)
+        for step in drafts[0]["operations"]
+    ):
         raise RuntimeError("preview changed an operation to an execution state")
     events = ROOT / "remote-events.jsonl"
     observed = (
         [json.loads(line) for line in events.read_text().splitlines()] if events.exists() else []
     )
-    writes = [event for event in observed if not event["path"].endswith("/git-upload-pack")]
+    before_count_path = ROOT / "browser-preview-before-count"
+    before_count = int(before_count_path.read_text()) if before_count_path.exists() else 0
+    writes = [
+        event for event in observed[before_count:] if not event["path"].endswith("/git-upload-pack")
+    ]
+    fresh_ids = {
+        step["operation_id"]
+        for step in drafts[0]["operations"]
+        if step["operation_id"] not in confirmed_ids
+    }
     with state.read_connection() as connection:
-        sent = connection.execute(
-            "SELECT count(*) FROM operation_events WHERE to_status='executing'"
-        ).fetchone()[0]
+        sent = any(
+            row[0] in fresh_ids
+            for row in connection.execute(
+                "SELECT operation_id FROM operation_events WHERE to_status='executing'"
+            )
+        )
     if writes or sent:
         raise RuntimeError("preview sent a target write before operator confirmation")
     return {
         "passed": True,
         "no_remote_writes": True,
-        "generation": plans[0]["preview"]["generation"],
+        "generation": drafts[0]["preview"]["generation"],
     }
+
+
+def browser_preview_snapshot() -> dict[str, Any]:
+    events = ROOT / "remote-events.jsonl"
+    count = len(events.read_text().splitlines()) if events.exists() else 0
+    (ROOT / "browser-preview-before-count").write_text(str(count), encoding="ascii")
+    return {"remote_event_count": count}
 
 
 def collision_result() -> dict[str, Any]:
@@ -735,7 +877,9 @@ def main() -> None:
         "stop-browser": stop_browser,
         "browser-upload": browser_upload_evidence,
         "browser-result": browser_result,
+        "browser-structure-result": browser_structure_result,
         "browser-preview": browser_preview,
+        "browser-preview-snapshot": browser_preview_snapshot,
         "collision-snapshot": collision_snapshot,
         "collision-result": collision_result,
     }
