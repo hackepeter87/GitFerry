@@ -2,11 +2,11 @@
 
 The local application planner composes the existing organization, repository, team, Git-bundle,
 issue and normal-comment operations. It does not introduce another mapping store or journal.
-The plan panel can review, start, refresh and cancel local plans, and prepare another draft
-from a saved selection without editing JSON. This preserves the original comparison facts and
-operation IDs. The full source-selection/import wizard is not yet available. This interface currently accepts an explicit
-selection of locally registered origins and confirmed identity bindings; it is not a complete
-inventory of a source instance or a replacement for transport-manifest validation.
+`PlansPanel` reviews, previews, starts, refreshes and cancels local plans, and can prepare another
+draft from a saved selection without editing JSON. The first-import UI reaches it through source
+selection, source export/download, package intake, and explicit local sender/realm/identity
+decisions. This is still not a complete inventory of a source instance or a replacement for
+transport-manifest validation.
 
 ## Local authority and execution
 
@@ -16,9 +16,25 @@ Queueing requires the exact reviewed digest. The managed server owns the backgro
 closing an HTTP connection does not cancel queued work. The CLI shares the same executor lock.
 Only one local writer can perform remote operations at a time.
 
-Blocked preflight reports identify selection, storage, connection/CA, administrator, structure,
-author credential, author identity, metadata or bundle checks. These are closed diagnostic
-categories, shared by API/CLI/UI; remote response bodies and exception strings are not persisted.
+Blocked preflight reports identify selection, storage, connection/CA, administrator, structure
+(including target collisions), author credential, author identity, metadata, bundle, or journal
+checks. These are closed diagnostic categories, shared by API/CLI/UI; remote response bodies and
+exception strings are not persisted.
+
+## Read-only prerequisite preview
+
+`POST /api/v1/plans/{id}/preview` with body `{"digest":"<reviewed digest>"}` queues a read-only
+target prerequisite check. Results live in the
+separate SQLite `plan_previews` table and never authorize execution by themselves. A preview moves
+through `queued`, `checking`, `passed`, `blocked`, or `failed`; blocked results include a closed
+reason and safe scope. The UI requires a passed preview for the exact current plan digest and
+generation. A new request creates a new generation, so stale evidence cannot unlock a changed
+plan. The executor performs the same prerequisite checks again before writes.
+
+Preview reads may prepare or block based on local journal state and remote observations; they do
+not perform target writes. Local authority/profile changes, collisions, missing accounts or
+permissions, unavailable storage, and unknown journal outcomes remain blockers. Preview and
+execution share the executor lock so a preview cannot overlap the write executor.
 
 Before any target mutation, the fixed Gitea adapter checks the approved HTTPS connection,
 separate technical administrator, every selected structure collision, actual author accounts,
@@ -45,17 +61,21 @@ CSRF header. Requests are bounded UTF-8 JSON, reject duplicate keys, and accept 
 callback, URL override, embedded credential or success flag.
 
 - `POST /api/v1/plans/prepare`: validate the explicit local selection and persist a draft.
+- `POST /api/v1/plans/{id}/preview`: queue the read-only prerequisite preview for the reviewed
+  digest.
 - `GET /api/v1/plans` and `GET /api/v1/plans/{id}`: shared plan, operation and event state.
-- `POST /api/v1/plans/{id}/queue`: body `{"digest":"<reviewed digest>"}`; requires a live worker.
+- `POST /api/v1/plans/{id}/queue`: body `{"digest":"<reviewed digest>"}` or, for the UI gate,
+  `{"digest":"<reviewed digest>","preview_generation":N}`; requires a live worker. The
+  generation is optional for legacy callers, but omitting it does not bypass execution preflight.
 - `POST /api/v1/plans/{id}/cancel`: request cancellation at the next safe operation boundary.
 
 Equivalent local operator commands are `gitferry plans prepare --input selection.json`,
-`list`, `show --plan-id ID`, `queue --plan-id ID --digest DIGEST`, `cancel --plan-id ID`,
-and `run --plan-id ID`. Each command accepts `--database PATH`; `GITFERRY_STATE_DB` supplies
-the default. `run` without an ID selects the next queued or interrupted plan. Package and work
-roots use `GITFERRY_PACKAGE_DIR` and `GITFERRY_WORK_DIR`; credentials and CAs use the existing
-local reference directories. Execution requires these directories to exist. The plan UI uses these same endpoints. The ordinary guided first-import selection flow is
-still being completed under Issue #10.
+`list`, `show --plan-id ID`, `preview --plan-id ID --digest DIGEST`,
+`queue --plan-id ID --digest DIGEST --preview-generation N`, `cancel --plan-id ID`, and
+`run --plan-id ID`. Each command accepts `--database PATH`; `GITFERRY_STATE_DB` supplies the
+default. `run` without an ID selects the next queued or interrupted plan. Package and work roots
+use `GITFERRY_PACKAGE_DIR` and `GITFERRY_WORK_DIR`; credentials and CAs use the existing local
+reference directories. Execution requires these directories to exist.
 
 ## Recovery
 
@@ -68,6 +88,8 @@ repository, parent, native author ID/login and body. Requeueing does not resolve
 Cancellation does not roll back confirmed writes. No API or CLI plan command can mark unexecuted
 operations successful.
 
-The preflight and subsequent Gitea writes do not form a distributed transaction. Other writers
-can still change remote data between checks, including the documented comment-read/PATCH gap.
-There is no general exactly-once guarantee.
+The preview, execution preflight, and subsequent Gitea writes do not form a distributed
+transaction. Other writers can still change remote data between checks, including the documented
+comment-read/PATCH gap. There is no general exactly-once guarantee, timestamp restoration, or
+atomic PATCH contract. Replay is safe for confirmed reads and writes; an unknown write remains
+blocked until explicit reconciliation.
