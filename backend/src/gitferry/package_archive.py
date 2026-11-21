@@ -15,6 +15,7 @@ import stat
 import tempfile
 import uuid
 import zipfile
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 from gitferry.application_package import (
@@ -178,7 +179,12 @@ def _extract_member(
 
 
 def receive_package_archive(
-    source: Path, destination: Path, *, max_bytes: int = 64 * 1024**3, max_files: int = 10000
+    source: Path,
+    destination: Path,
+    *,
+    max_bytes: int = 64 * 1024**3,
+    max_files: int = 10000,
+    before_publish: Callable[[PackageArtifact], None] | None = None,
 ) -> PackageArtifact:
     """Safely receive a stored ZIP archive into a new package directory."""
     if max_bytes < 0 or max_files < 1:
@@ -240,6 +246,8 @@ def receive_package_archive(
         ):
             _sync_directory(directory)
         _sync_directory(staging)
+        if before_publish is not None:
+            before_publish(artifact)
         _rename_noreplace(staging, destination)
         _sync_directory(destination.parent)
         return PackageArtifact(
