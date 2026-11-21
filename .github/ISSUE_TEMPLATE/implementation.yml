@@ -1,8 +1,20 @@
 name: Implementation package
-description: Define one coherent GitFerry capability or user flow.
+description: "Define one coherent GitFerry capability or user flow."
 title: ""
 labels: []
 body:
+  - type: dropdown
+    id: work_kind
+    attributes:
+      label: Work kind
+      options:
+        - Feature
+        - Bug
+        - Maintenance
+        - Release
+        - Evidence
+    validations:
+      required: true
   - type: textarea
     id: problem
     attributes:
@@ -13,7 +25,7 @@ body:
     id: scope
     attributes:
       label: Scope
-      description: State the included behavior and affected users or operators.
+      description: "State the included behavior and affected users or operators."
     validations:
       required: true
   - type: textarea
@@ -26,25 +38,60 @@ body:
     id: acceptance
     attributes:
       label: Acceptance criteria
-      description: Use observable outcomes rather than implementation steps.
+      description: "Use observable outcomes rather than implementation steps."
     validations:
       required: true
   - type: textarea
     id: evidence
     attributes:
       label: Required tests and evidence
+      description: "Include `Evidence required: browser, recovery, directory, capacity, immutable-artifact` or `Evidence required: none`, plus exact commands and expected results."
     validations:
       required: true
   - type: textarea
     id: compatibility
     attributes:
       label: Documentation and compatibility impact
-      description: Include manifests, SQLite, API, configuration, UI, and capability claims as applicable.
+      description: "Include manifests, SQLite, API, configuration, UI, and capability claims as applicable."
     validations:
       required: true
   - type: textarea
     id: dependencies
     attributes:
       label: Dependencies and blockers
+      description: "Use explicit `Depends on:` and `Blocks:` lines. Write `None` when there are none."
+    validations:
+      required: true
+  - type: textarea
+    id: failure_recovery
+    attributes:
+      label: Failure and recovery
+      description: "State failure behavior, recovery action, and the operator-visible result."
+    validations:
+      required: true
+  - type: textarea
+    id: execution_boundary
+    attributes:
+      label: Coherent execution boundary
+      description: "State the bounded delivery timebox and the safe checkpoint if it is exceeded."
+    validations:
+      required: true
+  - type: input
+    id: target_release
+    attributes:
+      label: Target release
+      description: "Name the single SemVer milestone that owns this outcome."
+      placeholder: 0.4.0
+    validations:
+      required: true
+  - type: dropdown
+    id: evidence_level
+    attributes:
+      label: Evidence level
+      options:
+        - Unit or contract tests
+        - Integration evidence
+        - Browser evidence
+        - Documentation only
     validations:
       required: true
