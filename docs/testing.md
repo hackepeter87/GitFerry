@@ -444,10 +444,11 @@ remains mandatory.
 Development run `7aeba64a2bb940ba` passed all 21 local required checks and 18 application-plan
 assertions, with cleanup exit 0, pinned Gitea 1.27.2, Darwin/arm64 host and Linux/arm64 Docker,
 without observed emulation. This was a dirty-worktree development run based on `6014da9`, not an
-immutable-head acceptance. Final local `make doctor` and `make test` passed (341 backend tests, Ruff,
+immutable-head acceptance. Final local `make doctor` and `make test` passed (343 backend tests, Ruff,
 format, MyPy and frontend build). The focused package/report tests also passed. The independent review reproduced and fixed an embedded
 metadata object whose origin repository was outside the declared selection; a regression now
-rejects it. Additional file-read checks reject a source replaced by a FIFO without blocking.
+rejects it. Additional file-read checks reject a source replaced by a FIFO without blocking, on both
+archive writing and receipt. Receiver-side symlink replacement is also rejected.
 The matrix contract explicitly includes the new file-boundary row without removing any prior
 capability requirement. The controlled-failure contract and scoped cleanup also passed.
 Hosted exact-head and integrated-main evidence belongs to

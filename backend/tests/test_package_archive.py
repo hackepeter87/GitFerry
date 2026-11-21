@@ -207,3 +207,33 @@ def test_writer_rejects_replaced_fifo_without_waiting_for_a_writer(
         package_archive.write_package_archive(source, tmp_path / "archive.zip")
     assert not (tmp_path / "archive.zip").exists()
     assert not list(tmp_path.glob(".archive.zip.*.part"))
+
+
+@pytest.mark.parametrize("replacement", ["fifo", "symlink"])
+def test_receiver_rejects_source_replacement_without_blocking(
+    replacement: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import os
+
+    archive = tmp_path / "source.zip"
+    with zipfile.ZipFile(archive, "w") as handle:
+        handle.writestr("payload", b"data")
+    other = tmp_path / "other.zip"
+    other.write_bytes(archive.read_bytes())
+    real_mkdtemp = package_archive.tempfile.mkdtemp
+
+    def replace_before_open(*args: object, **kwargs: object) -> str:
+        staging = real_mkdtemp(*args, **kwargs)
+        archive.unlink()
+        if replacement == "fifo":
+            os.mkfifo(archive)
+        else:
+            archive.symlink_to(other)
+        return staging
+
+    monkeypatch.setattr(package_archive.tempfile, "mkdtemp", replace_before_open)
+    monkeypatch.setattr(package_archive, "inspect_package", _artifact)
+    with pytest.raises(package_archive.PackageError):
+        package_archive.receive_package_archive(archive, tmp_path / "received")
+    assert not (tmp_path / "received").exists()
+    assert not list(tmp_path.glob(".received.*"))

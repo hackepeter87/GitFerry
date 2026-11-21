@@ -183,20 +183,21 @@ def receive_package_archive(
     """Safely receive a stored ZIP archive into a new package directory."""
     if max_bytes < 0 or max_files < 1:
         raise PackageError("archive limits must be positive")
-    if source.is_symlink() or not source.is_file():
-        raise PackageError("archive source is not a regular file")
-    try:
-        if source.stat().st_size > max_bytes:
-            raise PackageError("archive exceeds byte limit")
-    except OSError as exc:
-        raise PackageError("archive source is unreadable") from exc
     if destination.exists() or destination.is_symlink():
         raise PackageError("package destination already exists")
     destination = destination.absolute()
     destination.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent))
     try:
-        with source.open("rb") as input_stream:
+        source_fd = os.open(
+            source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        )
+        with os.fdopen(source_fd, "rb") as input_stream:
+            details = os.fstat(input_stream.fileno())
+            if not stat.S_ISREG(details.st_mode):
+                raise PackageError("archive source is not a regular file")
+            if details.st_size > max_bytes:
+                raise PackageError("archive exceeds byte limit")
             # CPython's bounded EOCD reader handles ZIP64 without materializing entries.
             # Limit the central directory before ZipFile builds its in-memory index.
             read_end = getattr(zipfile, "_EndRecData", None)
