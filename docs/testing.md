@@ -27,8 +27,9 @@ their isolated Gitea networks. `frontend/integration/first-import.spec.ts` selec
 repositories while excluding a control, creates a durable export, downloads its archive, uploads those exact bytes to the
 target, makes explicit local identity decisions and requests a prerequisite preview before
 execution. The core controls use bounded Tab navigation and visible-focus checks; file inputs
-receive synthetic files through the browser test driver. The narrow viewport also checks the
-actual plan storage estimate, overflow and accessibility. The target is then inspected for Git refs, native authors and the comment parent.
+receive synthetic files through the browser test driver. The desktop viewports (1024×768 and 1440×900) also check the actual plan storage estimate,
+overflow and accessibility. Mobile qualification is not required by the owner; desktop keyboard
+operation, visible focus and readable errors remain mandatory. The target is then inspected for Git refs, native authors and the comment parent.
 The browser and application process are restarted before observing the same confirmed plan and
 checking replay for additional writes or objects. Source/target state remains separate.
 

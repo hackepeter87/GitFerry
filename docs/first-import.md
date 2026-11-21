@@ -5,6 +5,10 @@ reviewed, executable local plan. It remains bounded by the inventory and fidelit
 this guide does not claim general migration completeness. See [transfer plans](transfer-plans.md)
 for durable execution and prerequisite preview behavior.
 
+The supported administration workflow targets desktop browsers (viewport width at least
+1024 CSS pixels). Mobile and touch-device qualification are outside this delivery. Keyboard
+operation and readable error, prerequisite and result states remain required.
+
 ## Source selection
 
 The source browser uses an enabled, locally approved connection profile. It rechecks source

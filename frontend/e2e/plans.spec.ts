@@ -40,8 +40,8 @@ test.describe("transfer plan review (mocked API)", () => {
     await expect(page.getByRole("region", { name: "Selected repository scope" }).getByText("synthetic-org/synthetic-repo", { exact: true })).toBeVisible();
     await expect(page.getByText("This is an explicit selection, not a complete source inventory.")).toBeVisible();
     await expect(page.locator(".storage-estimate")).toHaveText("67,121,152 bytes");
-    await page.setViewportSize({ width: 390, height: 844 });
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.setViewportSize({ width: 1024, height: 768 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1024);
     await page.getByText("Connection and plan verification details", { exact: true }).click();
     await expect(page.getByText("Approved identity evidence")).toBeVisible();
     const start = page.getByRole("button", { name: "Start reviewed plan" });

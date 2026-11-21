@@ -182,7 +182,7 @@ async function prepareTargetPlan(page: Page): Promise<{ blocked: boolean; missin
 }
 
 test("phase2 confirms local decisions and previews the real first import", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 1024, height: 768 });
   const { blocked, missing } = await prepareTargetPlan(page);
   const plans = page.locator(".plans-panel");
   await expect(plans.getByRole("button", { name: "Start reviewed plan" })).toBeDisabled();
@@ -245,7 +245,7 @@ test("phase4 rejects an occupied target before execution", async ({ page }) => {
   await expect(conflict).toHaveCount(1);
   await activate(page, conflict.getByText("Operation details", { exact: true }));
   await expect(conflict).toContainText("already exists but is not bound to this origin");
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 1440, height: 900 });
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   record({ collision_blocked: true });
 });

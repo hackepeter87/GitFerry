@@ -56,3 +56,11 @@ and productive installation are not authorized by this roadmap. Stable public re
 separate owner decision. Package signatures, multi-operation resume, guided UI, directory
 integration, and the 30 GB qualification are no longer silently deferred: they have explicit
 milestones and issues, while their current status remains unsupported or untested until executed.
+
+## Desktop administration scope
+
+The owner clarified that GitFerry is operated on desktop computers. The first-import UI is
+qualified at 1024×768 and 1440×900 CSS-pixel viewports. Keyboard access, visible focus, readable
+errors, and the complete real-backend workflow remain acceptance requirements. Mobile/touch
+qualification is not a release requirement; this clarification does not reduce transfer,
+identity, security, durability or data-fidelity requirements.
