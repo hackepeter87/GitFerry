@@ -38,6 +38,28 @@ def complete_probe_report() -> dict[str, object]:
         "control_repository_change_preserved": True,
     }
     report: dict[str, object] = {
+        "application_plans": {
+            "status": "passed",
+            "assertions": dict.fromkeys(
+                (
+                    "confirmed_restart_no_duplicates",
+                    "control_repository_unchanged",
+                    "crash_no_second_post",
+                    "crash_remote_post_accepted",
+                    "crash_restart_outcome_unknown",
+                    "credentials_absent_from_state_and_report",
+                    "distinct_native_authors",
+                    "lost_no_second_post",
+                    "lost_remote_post_accepted",
+                    "lost_restart_outcome_unknown",
+                    "new_packaging_cannot_bypass_unknown",
+                    "parent_mapping_confirmed",
+                    "structure_bundle_and_metadata_confirmed",
+                    "target_only_context",
+                ),
+                True,
+            ),
+        },
         "connection_profiles": {
             "status": "passed",
             "assertions": dict.fromkeys(
@@ -433,3 +455,19 @@ def test_workflow_cleanup_failure_keeps_report_failed(tmp_path: Path) -> None:
     assert execution["status"] == "failed"
     assert execution["workflow_cleanup"]["exit_code"] == 7
     assert "workflow_scoped_cleanup" in execution["failed_or_not_executed_checks"]
+
+
+@pytest.mark.parametrize(
+    "assertion",
+    [
+        "crash_no_second_post",
+        "lost_restart_outcome_unknown",
+        "structure_bundle_and_metadata_confirmed",
+    ],
+)
+def test_application_plan_assertion_is_required(tmp_path: Path, assertion: str) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    del report["application_plans"]["assertions"][assertion]
+    results = prepare_results(tmp_path, report)
+    assert not module.probe_contract_is_complete(results)

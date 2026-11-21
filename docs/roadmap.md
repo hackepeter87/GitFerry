@@ -43,6 +43,11 @@ editing and preserve confirmed progress across browser and process restart.
 
 Owning issues: [#6](https://github.com/hackepeter87/GitFerry/issues/6)–[#11](https://github.com/hackepeter87/GitFerry/issues/11).
 
+Issue #9 remains in progress in draft PR #50. The bounded persisted-plan Gitea execution and
+API/CLI paths are locally verified; the plan UI, browser flow and final review/merge remain.
+The [plan guide](transfer-plans.md) describes the current boundary without claiming a complete
+first-import wizard.
+
 ## 0.3.0 — Identities, directories, and effective permissions
 
 Deliver explicit realm-qualified mapping and conflict administration, a supported Gitea

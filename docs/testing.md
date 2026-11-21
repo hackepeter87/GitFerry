@@ -47,20 +47,36 @@ Hosted CI run `44840084900` passed for initial commit `0f7c92a`; current correct
 are tracked on [PR #49](https://github.com/hackepeter87/GitFerry/pull/49). Evidence for the initial
 commit does not approve a later correction or merge commit.
 
-## Issue #9: plan-core work in progress
+## Issue #9: application-plan work in progress
 
-The branch for Issue #9 introduces local plan-state and runner tests. The current local quality
-gate passed 244 backend tests, lint/format/type checks and the frontend build. New tests cover
-plan publication rollback, concurrent publication, actual child-process reload, unchanged
-original baselines after observation, stale profile rejection and safe cancellation. A child
-process exits after a simulated remote acceptance but before journal confirmation; a fresh
-process recovers `outcome_unknown` and does not increment the remote counter again, including
-under a new plan round. These simulated remote tests do not establish the complete Gitea plan
-workflow. API/CLI/UI integration and real-Gitea plan-specific interruption probes remain open.
+The plan core now connects to the fixed Gitea adapter and protected API/local CLI. Local tests
+cover immutable plans, atomic publication, original baseline preservation, writer exclusion,
+real child-process recovery with a simulated remote, exact author bindings and parent ordering.
+A managed-worker test closes the HTTP client while a simulated write is in progress and confirms
+completion without keeping that client alive. This is not a browser acceptance claim.
 
-Existing Gitea regression run `f61b3ad56bea4134` passed on the unchanged image pin and reported
-successful run-scoped cleanup after the schema/adapter/structure-preflight changes. This is
-regression evidence, not acceptance of Issue #9. See [ADR 0012](decisions/0012-durable-transfer-plans.md).
+Local integration run `e5b4cbd772c74829` passed all 21 required report checks. Its new
+`application_plans` section passed 14 assertions in the target-only Linux/arm64 container:
+organization/team/repository plus Git-bundle/issue/comment execution; distinct native authors and
+parent mapping; confirmed replay after process restart; real accepted comment POST followed by
+hard exit before local confirmation; real accepted POST with its HTTP response discarded;
+restart and new-packaging refusal without another POST; unchanged control repository; and
+absence of token values in state and diagnostic evidence. Interrupted operations remain
+`outcome_unknown`, and those plans remain blocked—not successfully imported.
+
+The host was Darwin/arm64, Docker Server Linux/arm64 29.9.3, with no observed emulation. Both
+Gitea instances retained pinned version 1.27.2 and the existing image digest. Run-scoped cleanup
+passed. The first attempt correctly failed because the new test TLS proxy omitted the HTTP
+authentication challenge for Git; diagnostic artifacts and cleanup worked. The proxy now
+forwards that challenge. Existing manifest-v1/v2 and separate-state roundtrip regressions passed.
+
+The final local quality gate passed 270 backend tests plus lint, formatting, MyPy and frontend
+build. The controlled failure contract and `make test-clean` also passed. The current
+application-plan changes have not yet completed hosted CI or exact-head review.
+Earlier hosted run `44845305520` passed only the preceding core commit `20087ff`.
+Issue #9 remains open for plan UI/browser acceptance and final review/integration. The bounded
+selection probe is not proof of a complete inventory or guided source-to-target import wizard.
+See [the operator boundary](transfer-plans.md) and [ADR 0012](decisions/0012-durable-transfer-plans.md).
 
 ## Environment
 

@@ -32,8 +32,10 @@ exactly-once execution.
 On process restart the existing executor recovers interrupted writes as `outcome_unknown`.
 An abandoned plan re-enters preflight; confirmed operations are reused and uncertainty blocks
 further writes. Cancellation is a durable request honored before the next external operation.
-It does not interrupt a POST or undo completed work. Graceful worker shutdown yields at the same
-safe boundary and leaves the plan resumable. A hard exit retains the existing journal semantics.
+It does not interrupt a POST or undo completed work. Shutdown signals the worker to yield at
+the next safe boundary and waits up to two seconds. If the process exits while a remote call
+is still in flight, recovery conservatively treats the executing operation as outcome unknown.
+Confirmed progress remains resumable; shutdown does not promise remote cancellation.
 
 The internal adapter boundary composes only GitFerry's supported operations. It is not a public
 plugin protocol, arbitrary task runner, cross-machine queue or imported execution status. No
@@ -47,24 +49,28 @@ counter. It also adds reusable issue create/update operations and moves structur
 checks before the first structure write. These tests are not real-Gitea evidence for the complete
 background plan workflow.
 
-Issue #9 remains open until the application planner, fixed Gitea/bundle composition, API/CLI/UI
-boundaries, and real-Gitea restart/disconnect probes are wired and verified. The existing
+The application planner, fixed Gitea/bundle composition, API/CLI boundaries and real-Gitea
+restart/crash/lost-response probes are now implemented and locally exercised. The protected
+server starts its worker using the same runtime store and paths. Issue #9 remains open for
+plan UI/browser acceptance and final review/integration. The existing
 integration suite remains the regression baseline. Manifest v1/v2 versions and bytes do not
 change; local schema migration 7 is independent of their transport versions.
 
-## Next application boundary
+## Application boundary
 
-The fixed application planner must derive journal IDs and dependency edges from selected
+The fixed application planner derives journal IDs and dependency edges from selected
 provisioning and metadata inputs; the HTTP interface must not accept arbitrary executable
 callbacks or let a transport document select local credentials. The existing provisioning DTOs
 and metadata origin/baseline records are the source of those intents. Account credentials for
 metadata remain locally resolved reference aliases keyed by confirmed binding ID. Administrative
 impersonation is not assumed: the existing evidence uses the actual mapped author's credentials.
-The adapter must read the authenticated account and compare its native ID and login before any
-write, and must recheck the target connection evidence against the reviewed plan.
+The adapter reads the authenticated account and compare its native ID and login before any
+write, and rechecks the target connection evidence against the reviewed plan.
 
 All selected structure collisions, author prerequisites, supported metadata fields, bundle
 integrity, expected target refs and available workspace must be checked before the first target
 write. Label-content mutations are not hidden inside an issue PATCH; the current bounded issue
 adapter rejects them. This preserves the separate label capability requirement in the roadmap.
-The new runner's unit adapter is internal test scaffolding, not a production migration claim.
+The simulated unit adapters remain test scaffolding. The real target-only Linux probe now
+executes the fixed application adapter and records remote acceptance before both interruption
+points. It does not replace the independent manifest roundtrip evidence or complete UI acceptance.
