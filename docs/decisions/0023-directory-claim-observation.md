@@ -50,10 +50,18 @@ separate target claim. This is an explicit local association, not proof that all
 source settings equal that configuration. A claim observation never compares a source realm's
 SID to a target realm's SID.
 
-Candidate evidence stores the selected configuration revision/digest and target facts in the
+Candidate evidence stores the selected configuration revision/digest, the SHA-256 of the exact
+resolved CA bytes, and target facts in the
 existing versioned local evidence JSON; no SQLite or transport version change is required.
 Approval re-reads both systems and checks the configuration again inside the local transaction.
 Execution checks current target facts outside long SQLite write transactions. Changed ID, DN/OU
 or observed groups creates a durable conflict; an outage blocks writes without changing bindings.
+CA-bundle replacement also requires review; a reference name alone is not the trust anchor.
 Email remains descriptive. Re-reading restored facts cannot clear an existing conflict.
 Neither observation nor approval creates a directory account or grants repository membership.
+
+Explicit reopening can refresh configuration revision/digest and CA bytes only when the native
+account and directory subject (realm, login, external ID/kind, DN/OU and groups) remain unchanged.
+The local transaction records old/new evidence digests and moves to pending; a separate fresh
+approval is required. Binding records are never redirected. This permits reviewed trust rotation
+without treating a replaced person or changed membership as a new trust configuration.

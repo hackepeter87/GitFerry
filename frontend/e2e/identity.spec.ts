@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 const target = { instance_key: "target.synthetic", display_name: "Synthetic target", base_url: "https://target.synthetic", installation_marker: "install-target", credential_ref: "target-ref", ca_ref: null, revision: 3, enabled: true, locally_approved: true };
 const realm = { realm_key: "directory.synthetic", display_name: "Synthetic directory", external_marker: "directory-1" };
 const directory = { instance_key: target.instance_key, source_name: "synthetic-ldap", realm_key: realm.realm_key, source: { name: "synthetic-ldap", type: "ldaps", directoryRealm: realm.realm_key, host: "ldap.synthetic.example", port: 636, mode: "simple", securityProtocol: "ldaps", userDn: "uid=%s,ou=People,dc=example,dc=invalid", userFilter: "(&(objectClass=posixAccount)(uid=%s))", emailAttribute: "mail", caSecretRef: "trust/directory-ca", claimLookup: { searchBase: "ou=People,dc=example,dc=invalid", loginAttribute: "uid", externalIdAttribute: "employeeNumber", emailAttribute: "mail" } }, revision: 5, source_digest: "d".repeat(64), profile_revision: 3, status: "prepared", prerequisites: [], updated_at: "2026-01-01T00:00:00Z" };
-const candidate = { candidate_id: "candidate-1", selector: { realm_key: realm.realm_key, login: "source.alice", external_id: "source-42", ou_path: "engineering" }, email: "alice@synthetic.example", target: { instance_key: target.instance_key, account_id: "9001", login: "target.alice", external_id: null, ou_path: null, native_id: null }, prerequisites: { issue_author: true, comment_author: false, team_member: true }, status: "pending", revision: 1, authority_digest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", profile_revision: 3, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
+const candidate = { candidate_id: "candidate-1", selector: { realm_key: realm.realm_key, login: "source.alice", external_id: "source-42", ou_path: "engineering" }, email: "alice@synthetic.example", target: { instance_key: target.instance_key, account_id: "9001", login: "target.alice", external_id: null, ou_path: null, native_id: null }, account_evidence: { source_id: "42", login_name: "target.alice", directory: { selection: { source_name: "synthetic-ldap", source_revision: 5, native_source_id: "42", login: "target.directory" }, source_digest: "b".repeat(64), ca_sha256: "c".repeat(64), claim: { realm_key: realm.realm_key, login: "target.directory", external_id: "target-directory-99", external_id_kind: "text", dn: "uid=target.directory,ou=People,dc=example,dc=invalid", ou_path: "ou=People", email: null, groups: ["engineering"] } } }, prerequisites: { issue_author: true, comment_author: false, team_member: true }, status: "pending", revision: 1, authority_digest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", profile_revision: 3, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
 
 async function open(page: import("@playwright/test").Page, initialCandidates: unknown[] = [], initialDirectories: unknown[] = []): Promise<void> {
   await page.route("**/api/v1/auth/status", (route) => route.fulfill({ json: { bootstrapRequired: false } }));
@@ -31,7 +31,7 @@ test("checks an account before submitting a qualified candidate and keeps implic
   await page.getByLabel("Configured directory claim source (optional)").selectOption(directory.source_name);
   await page.getByLabel("Directory login").fill("target.directory");
   await page.getByLabel("Credential reference (optional)").fill("cred.synthetic");
-  await page.route("**/api/v1/identities/check-account", async (route) => { checkBody = route.request().postDataJSON(); await route.fulfill({ json: { target_account_id: "9001", target_login: "target.alice", authority_digest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", credential_checked: true, directory_evidence: { selection: { source_name: directory.source_name, source_revision: directory.revision, native_source_id: "42", login: "target.directory" }, source_digest: "b".repeat(64), claim: { realm_key: realm.realm_key, login: "target.directory", external_id: "target-directory-99", dn: "uid=target.directory,ou=People,dc=example,dc=invalid", ou_path: "ou=People", email: null, groups: ["engineering"] } }, directory_digest: "c".repeat(64) } }); });
+  await page.route("**/api/v1/identities/check-account", async (route) => { checkBody = route.request().postDataJSON(); await route.fulfill({ json: { target_account_id: "9001", target_login: "target.alice", authority_digest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", credential_checked: true, directory_evidence: { selection: { source_name: directory.source_name, source_revision: directory.revision, native_source_id: "42", login: "target.directory" }, source_digest: "b".repeat(64), claim: { realm_key: realm.realm_key, login: "target.directory", external_id: "target-directory-99", external_id_kind: "text", dn: "uid=target.directory,ou=People,dc=example,dc=invalid", ou_path: "ou=People", email: null, groups: ["engineering"] } }, directory_digest: "c".repeat(64) } }); });
   await page.getByRole("button", { name: "Check target account" }).click();
   await expect(page.getByText(/Target account checked/)).toBeVisible();
   await expect(page.getByText(/Target directory claim/)).toBeVisible();
@@ -66,6 +66,11 @@ test("binds decisions to the current revision and exposes event history", async 
   await page.reload();
   await page.getByRole("button", { name: "Manage identities" }).click();
   await expect(page.getByLabel("Credential reference for source.alice")).toHaveValue("");
+  await expect(page.getByText("Target directory evidence", { exact: true })).toBeVisible();
+  await expect(page.getByText(/CA SHA-256 c{64}/)).toBeVisible();
+  await expect(page.locator(".target-directory-evidence")).toContainText("configuration synthetic-ldap revision 5");
+  await expect(page.locator(".target-directory-evidence")).toContainText("target-directory-99 (text)");
+  await expect(page.getByRole("button", { name: "Approve" })).toBeDisabled();
 });
 
 test("reopens a conflict before approval and keeps the optional email empty", async ({ page }) => {
@@ -105,6 +110,7 @@ test("keeps rejection available for a retired target and shows immutable account
   }]}));
   await open(page,[retired]);
   await expect(page.getByText(/native account 9007199254740993/)).toBeVisible();
+  await page.getByLabel("Credential reference for source.alice").fill("cred.retired");
   await page.getByRole("button",{name:"Approve",exact:true}).click();
   await expect(page.getByRole("alert")).toContainText("connection is disabled");
   expect(decisionBody).toBeUndefined();
@@ -132,4 +138,20 @@ test("a selected directory cannot be approved using a response without directory
   await expect(page.getByRole("alert")).toContainText("directory evidence");
   await expect(page.getByRole("button", { name: "Submit for approval" })).toBeDisabled();
   expect(proposals).toBe(0);
+});
+
+
+test("a non-directory candidate retains optional functional credentials", async ({ page }) => {
+  const localCandidate = { ...candidate, account_evidence: { source_id: "0", login_name: "" } };
+  let body: Record<string, unknown> | undefined;
+  await page.route("**/api/v1/identities/*/decision", route => {
+    body = route.request().postDataJSON();
+    return route.fulfill({ json: { ...localCandidate, status: "approved", revision: 2 } });
+  });
+  await open(page, [localCandidate]);
+  await expect(page.getByLabel("Credential reference for source.alice")).toHaveValue("");
+  await expect(page.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  expect(body).not.toHaveProperty("credential_ref");
+  await expect(page.getByText("approved", { exact: true })).toBeVisible();
 });

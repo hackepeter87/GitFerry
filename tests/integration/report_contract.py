@@ -334,6 +334,13 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
             and bool(_value(report, "directory_ad.image_id"))
             and bool(_value(report, "directory_ad.platform"))
             and str(_value(report, "directory_ad.server_version")).startswith("Version 4.22.11")
+            and _value(report, "directory_ad.claims.dn") == "CN=ldap-same,OU=People,DC=synth,DC=ad"
+            and _value(report, "directory_ad.claims.ou_path") == "OU=People,DC=synth,DC=ad"
+            and _value(report, "directory_ad.nested_matching_rule_results")
+            in (
+                ["CN=Direct,OU=Groups,DC=synth,DC=ad", "CN=Nested,OU=Groups,DC=synth,DC=ad"],
+                ["CN=Nested,OU=Groups,DC=synth,DC=ad", "CN=Direct,OU=Groups,DC=synth,DC=ad"],
+            )
             and _value(report, "directory_ad.claims.external_id_kind") == "sid"
             and str(_value(report, "directory_ad.claims.external_id")).startswith("S-1-5-21-")
             and _value(report, "directory_ad.claims.groups")
@@ -363,6 +370,13 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                     "filter_escaping",
                     "real_bind_and_wrong_password",
                 )
+            )
+            and all(
+                isinstance(
+                    _value(report, "directory.application_claim_reader." + side + ".dn"), str
+                )
+                and bool(_value(report, "directory.application_claim_reader." + side + ".dn"))
+                for side in ("first", "second", "missing_mail")
             )
             and _value(report, "directory.application_claim_reader.first.login") == "ldap-reader"
             and _value(report, "directory.application_claim_reader.second.login") == "ldap-reader"

@@ -124,7 +124,10 @@ class GiteaPlanAdapter:
         for repository in request.repositories:
             self.scope = repository.repository
             preflight_provisioning_operations(
-                self.state, self.admin, repository.provisioning(request.target_instance_key)
+                self.state,
+                self.admin,
+                repository.provisioning(request.target_instance_key),
+                references=self.references,
             )
         self.scope = None
         metadata = self._metadata(plan)
@@ -307,6 +310,7 @@ class GiteaPlanAdapter:
                 self.admin,
                 repository.provisioning(self.request.target_instance_key),
                 bundle_pusher=self.bundles,
+                references=self.references,
             )
         # PlanService stored the dependency order, independent of input ordering.
         for operation in self._metadata(plan):

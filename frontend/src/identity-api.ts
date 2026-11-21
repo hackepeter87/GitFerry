@@ -31,6 +31,7 @@ export interface IdentityDirectorySelection {
 export type IdentityDirectorySelectionInput = Omit<IdentityDirectorySelection, "native_source_id"> & { native_source_id?: string };
 
 export interface IdentityDirectoryClaim {
+  external_id_kind?: "text" | "sid";
   realm_key: string;
   login: string;
   external_id: string;
@@ -43,6 +44,7 @@ export interface IdentityDirectoryClaim {
 export interface IdentityDirectoryEvidence {
   selection: IdentityDirectorySelection;
   source_digest: string;
+  ca_sha256?: string;
   claim: IdentityDirectoryClaim;
 }
 

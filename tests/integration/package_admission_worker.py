@@ -254,7 +254,7 @@ def _bind_authors(service: PackageAdmissions, package_ref: str) -> dict[str, str
         service.state.confirm_identity_binding(
             binding_id=login,
             source_realm_key=claim["realm_key"],
-            source_login=login,
+            source_login=claim["login"],
             source_external_id=claim["external_id"],
             source_ou_path=claim["ou_path"],
             target_instance_key=TARGET,

@@ -16,8 +16,9 @@ from gitferry.directory_identity import (
     observe_target_directory,
     require_directory_revision,
     same_directory_identity,
+    same_directory_subject,
 )
-from gitferry.directory_settings import DirectorySettingsConflict
+from gitferry.directory_settings import DirectorySettingsConflict, DirectorySettingsService
 from gitferry.gitea_provisioning import ProvisioningTargetConflict
 from gitferry.identity_decisions import IdentityDecisionService
 from gitferry.package_admission import PackageAdmissionConflict, _authority
@@ -115,20 +116,30 @@ class IdentityApplication:
         candidate = self.decisions.get_candidate(identifier)
         observed: dict[str, Any] | None = None
         if request.decision in ("approved", "pending"):
+            if candidate["account_evidence"].get("directory") and not request.credential_ref:
+                raise ValueError(
+                    "a functional credential reference is required for directory review"
+                )
             try:
+                directory = None
+                if candidate["account_evidence"].get("directory"):
+                    directory = DirectorySelection.model_validate(
+                        candidate["account_evidence"]["directory"]["selection"]
+                    )
+                    if request.decision == "pending":
+                        current = DirectorySettingsService(self.state).get(
+                            candidate["target"]["instance_key"], directory.source_name
+                        )
+                        directory = directory.model_copy(
+                            update={"source_revision": current["revision"]}
+                        )
                 observed = self.check_account(
                     CheckAccountRequest(
                         target_instance_key=candidate["target"]["instance_key"],
                         profile_revision=request.profile_revision,
                         target_login=candidate["target"]["login"],
                         credential_ref=request.credential_ref,
-                        directory=(
-                            DirectorySelection.model_validate(
-                                candidate["account_evidence"]["directory"]["selection"]
-                            )
-                            if candidate["account_evidence"].get("directory")
-                            else None
-                        ),
+                        directory=directory,
                     )
                 )
             except (
@@ -154,7 +165,9 @@ class IdentityApplication:
             if (
                 observed is None
                 or str(candidate["target"]["account_id"]) != observed["target_account_id"]
-                or not _same_account(candidate["account_evidence"], observed["account_evidence"])
+                or not _same_account(
+                    candidate["account_evidence"], observed["account_evidence"], trust_refresh=True
+                )
             ):
                 raise BindingConflict("target account changed; cannot reopen this candidate")
             return self.decisions.refresh_review(
@@ -164,6 +177,7 @@ class IdentityApplication:
                 authority_digest=observed["authority_digest"],
                 profile_revision=request.profile_revision,
                 credential_checked=observed["credential_checked"],
+                directory_evidence=observed["account_evidence"].get("directory"),
             )
 
         def bind(record: dict[str, Any], connection: sqlite3.Connection) -> None:
@@ -238,10 +252,12 @@ class IdentityApplication:
         )
 
 
-def _same_account(expected: dict[str, Any], observed: dict[str, Any]) -> bool:
+def _same_account(
+    expected: dict[str, Any], observed: dict[str, Any], *, trust_refresh: bool = False
+) -> bool:
     if any(expected.get(key) != observed.get(key) for key in ("source_id", "login_name")):
         return False
     previous, current = expected.get("directory"), observed.get("directory")
     if previous is None or current is None:
         return previous is current
-    return same_directory_identity(previous, current)
+    return (same_directory_subject if trust_refresh else same_directory_identity)(previous, current)

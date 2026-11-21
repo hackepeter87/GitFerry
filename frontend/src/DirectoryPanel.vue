@@ -87,6 +87,7 @@ function sourceValue(): DirectorySource {
     Object.assign(value, { userSearchBase: form.value.userSearchBase.trim() || undefined, groupSearchBase: form.value.groupSearchBase.trim() || undefined, bindSecretRef: form.value.bindSecretRef.trim() });
   }
   if (form.value.claimLookupEnabled) {
+    Object.assign(value, { caSecretRef: form.value.caSecretRef.trim() });
     Object.assign(value, { claimLookup: { searchBase: form.value.claimSearchBase.trim(), loginAttribute: form.value.claimLoginAttribute.trim(), externalIdAttribute: form.value.claimExternalIdAttribute.trim(), emailAttribute: form.value.claimEmailAttribute.trim() || undefined, bindDn: form.value.claimBindDn.trim() || undefined, bindCredentialRef: form.value.claimBindCredentialRef.trim() || undefined, groupSearchBase: form.value.claimGroupSearchBase.trim() || undefined, groupMemberAttribute: form.value.claimGroupMemberAttribute.trim() || undefined } });
   }
   return value;

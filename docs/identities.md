@@ -46,6 +46,10 @@ Configured directory facts are refreshed before approval and affected writes. A 
 ID, DN/OU or observed group set blocks the operation and records a conflict. A directory outage
 blocks the read/write prerequisite; it does not replace the binding with an administrator account.
 Email changes do not change identity. Restoring old facts does not automatically clear a conflict.
+For a legitimate CA/configuration rotation, explicitly reopen the conflicted candidate with its
+functional credential. GitFerry requires the same native account and directory subject, records
+the old/new trust digests, and returns it to pending. Review the displayed updated evidence and
+approve separately. A changed external ID, DN/OU or group set cannot use this trust-refresh path.
 
 Native account verification does not establish LDAP or Active Directory behavior. Directory
 bootstrap, directory claim refresh and real login/access qualification are tracked separately

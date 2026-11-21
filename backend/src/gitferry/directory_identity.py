@@ -69,7 +69,9 @@ def observe_target_directory(
         raise DirectoryClaimsConflict("directory claim lookup and explicit CA are required")
     references = references or LocalReferences()
     try:
-        ca = references._read(references.cas, source["caSecretRef"], secret=False).decode("ascii")
+        ca_bytes = references._read(references.cas, source["caSecretRef"], secret=False)
+        ca = ca_bytes.decode("ascii")
+        ca_sha256 = hashlib.sha256(ca_bytes).hexdigest()
         password = None
         if lookup.get("bindCredentialRef"):
             password = (
@@ -110,17 +112,27 @@ def observe_target_directory(
     return {
         "selection": selection.model_dump(),
         "source_digest": record["source_digest"],
+        "ca_sha256": ca_sha256,
         "claim": claim,
     }
 
 
-def same_directory_identity(expected: dict[str, Any], observed: dict[str, Any]) -> bool:
-    """Email is descriptive, never an identity or permission key."""
+def same_directory_subject(expected: dict[str, Any], observed: dict[str, Any]) -> bool:
+    """Immutable subject fields; trust/config rotation needs a separate explicit review."""
     fields = ("realm_key", "login", "external_id", "dn", "ou_path", "groups", "external_id_kind")
+    return all(
+        expected["selection"].get(key) == observed["selection"].get(key)
+        for key in ("source_name", "native_source_id", "login")
+    ) and all(expected["claim"].get(key) == observed["claim"].get(key) for key in fields)
+
+
+def same_directory_identity(expected: dict[str, Any], observed: dict[str, Any]) -> bool:
+    """Require the reviewed subject and trust facts; email remains informational."""
     return bool(
-        expected.get("selection") == observed.get("selection")
+        same_directory_subject(expected, observed)
+        and expected.get("selection") == observed.get("selection")
         and expected.get("source_digest") == observed.get("source_digest")
-        and all(expected["claim"].get(key) == observed["claim"].get(key) for key in fields)
+        and expected.get("ca_sha256") == observed.get("ca_sha256")
     )
 
 

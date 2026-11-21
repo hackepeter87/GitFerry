@@ -9,11 +9,17 @@ and is the only place where an existing identity binding should be created.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import sqlite3
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
+from gitferry.directory_identity import (
+    evidence_digest,
+    require_directory_revision,
+    same_directory_subject,
+)
 from gitferry.state_codec import canonical_json, find_secret_field, now, require_text
 from gitferry.state_store import BindingConflict, StateStore
 
@@ -307,6 +313,7 @@ class IdentityDecisionService:
         authority_digest: str,
         profile_revision: int,
         credential_checked: bool = False,
+        directory_evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Explicit re-review changes connection evidence, never the identity or account."""
         _text(actor, "actor")
@@ -324,6 +331,28 @@ class IdentityDecisionService:
                 raise IdentityDecisionStale("identity candidate revision is stale")
             if row["status"] not in {"rejected", "conflict"}:
                 raise IdentityDecisionConflict("only unresolved decisions can be reviewed again")
+            account = json.loads(row["target_account_evidence"])
+            refreshed: dict[str, Any] = {}
+            if directory_evidence is not None:
+                previous = account.get("directory")
+                if (
+                    previous is None
+                    or find_secret_field(directory_evidence)
+                    or not same_directory_subject(previous, directory_evidence)
+                ):
+                    raise IdentityDecisionConflict(
+                        "directory subject cannot be redirected during review"
+                    )
+                require_directory_revision(
+                    connection, row["target_instance_key"], directory_evidence
+                )
+                refreshed = {
+                    "previous_directory_digest": evidence_digest(previous),
+                    "directory_digest": evidence_digest(directory_evidence),
+                    "previous_ca_sha256": previous.get("ca_sha256"),
+                    "ca_sha256": directory_evidence.get("ca_sha256"),
+                }
+                account["directory"] = directory_evidence
             timestamp = now()
             evidence = canonical_json(
                 {
@@ -331,12 +360,20 @@ class IdentityDecisionService:
                     "authority_digest": authority_digest,
                     "profile_revision": profile_revision,
                     "credential_checked": credential_checked,
+                    **refreshed,
                 }
             )
             connection.execute(
                 "UPDATE identity_candidates SET status='pending',revision=revision+1,"
-                "authority_digest=?,profile_revision=?,updated_at=? WHERE candidate_id=?",
-                (authority_digest, profile_revision, timestamp, candidate_id),
+                "authority_digest=?,profile_revision=?,target_account_evidence=?,updated_at=? "
+                "WHERE candidate_id=?",
+                (
+                    authority_digest,
+                    profile_revision,
+                    canonical_json(account),
+                    timestamp,
+                    candidate_id,
+                ),
             )
             connection.execute(
                 "INSERT INTO identity_decision_events VALUES (NULL,?,?,?,?,?,?,?)",

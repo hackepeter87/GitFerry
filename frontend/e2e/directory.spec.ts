@@ -70,7 +70,7 @@ test("shows BindDN as manual-only and rejects oversized or secret-bearing import
   await page.getByLabel("Group search base", { exact: true }).fill("ou=Groups,dc=example,dc=invalid");
   await page.getByLabel("Bind secret reference").fill("secrets/directory-bind");
   await page.getByRole("button", { name: "Save revision" }).click();
-  expect(bindSaveBody?.source).toMatchObject({ bindSecretRef: "secrets/directory-bind", userSearchBase: "ou=People,dc=example,dc=invalid", groupSearchBase: "ou=Groups,dc=example,dc=invalid" });
+  expect(bindSaveBody?.source).toMatchObject({ bindSecretRef: "secrets/directory-bind", userSearchBase: "ou=People,dc=example,dc=invalid", groupSearchBase: "ou=Groups,dc=example,dc=invalid", caSecretRef: source.caSecretRef });
   expect(bindSaveBody?.source).not.toHaveProperty("mode");
   expect(bindSaveBody?.source).not.toHaveProperty("bindDn");
   expect(bindSaveBody?.source).not.toHaveProperty("bindPasswordSecretRef");
