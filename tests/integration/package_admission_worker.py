@@ -11,6 +11,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 from pathlib import Path
@@ -40,14 +41,22 @@ PACKAGE_REF = "source-export-real"
 TARGET = "target"
 SOURCE = "source"
 CONTEXT = "normal"
+DIRECTORY_USERS = {
+    "ldap-reader": "synthetic-directory-pass",
+    "ldap-writer": "synthetic-directory-writer-pass",
+    "ldap-outsider": "synthetic-directory-outsider-pass",
+}
 
 
 def remote(method: str, path: str, *, username: str = "gitferry-admin", **kwargs: Any) -> Any:
-    password = os.environ[
-        "GITFERRY_IT_ADMIN_PASSWORD"
-        if username == "gitferry-admin"
-        else "GITFERRY_IT_USER_PASSWORD"
-    ]
+    if username in DIRECTORY_USERS:
+        password = DIRECTORY_USERS[username]
+    else:
+        password = os.environ[
+            "GITFERRY_IT_ADMIN_PASSWORD"
+            if username == "gitferry-admin"
+            else "GITFERRY_IT_USER_PASSWORD"
+        ]
     response = httpx.request(
         method,
         URL + "/api/v1" + path,
@@ -61,17 +70,29 @@ def remote(method: str, path: str, *, username: str = "gitferry-admin", **kwargs
 
 
 def _mint_user_tokens(secrets: Path) -> None:
-    for username in ("gitferry-admin", "issue-author", "comment-author"):
+    usernames = (
+        ("gitferry-admin", "issue-author", "comment-author")
+        if CONTEXT == "collision"
+        else ("gitferry-admin", "ldap-reader", "ldap-writer")
+    )
+    for username in usernames:
         if CONTEXT == "collision":
             # Operator credentials are local to B; copy no application facts or database.
-            shutil.copyfile(Path("/state/package-admission/secrets") / username, secrets / username)
-            (secrets / username).chmod(0o600)
-            continue
+            existing = Path("/state/package-admission/secrets") / username
+            if existing.is_file():
+                shutil.copyfile(existing, secrets / username)
+                (secrets / username).chmod(0o600)
+                continue
+        scopes = {
+            "gitferry-admin": ["all"],
+            "ldap-reader": ["read:user", "read:repository", "write:issue"],
+            "ldap-writer": ["read:user", "write:repository", "write:issue"],
+        }.get(username, ["all"])
         token = remote(
             "POST",
             f"/users/{username}/tokens",
             username=username,
-            json={"name": "package-admission-probe", "scopes": ["all"]},
+            json={"name": "package-admission-probe", "scopes": scopes},
         )
         path = secrets / username
         path.write_text(token["sha1"], encoding="ascii")
@@ -168,6 +189,9 @@ def _initialize() -> tuple[PackageAdmissions, str, dict[str, Any]]:
         directory.mkdir(mode=0o700, exist_ok=True)
     shutil.copyfile("/tmp/package-admission-trusted.pem", ROOT / "trusted.pem")
     shutil.copyfile("/tmp/package-admission-trusted.key", ROOT / "trusted.key")
+    directory_ca = Path("/run/directory-ca/ca.pem")
+    if directory_ca.is_file():
+        shutil.copyfile(directory_ca, ROOT / "directory.pem")
     _mint_user_tokens(ROOT / "secrets")
     state = StateStore(DATABASE)
     DATABASE.chmod(0o600)
@@ -219,7 +243,7 @@ def _bind_authors(service: PackageAdmissions, package_ref: str) -> dict[str, str
         )
     refs: dict[str, str] = {}
     expected_realm = "gitea-" + hashlib.sha256(b"source:source-export-install").hexdigest()[:32]
-    allowed_logins = {"issue-author": "issue-author", "comment-author": "comment-author"}
+    allowed_logins = {"issue-author": "ldap-reader", "comment-author": "ldap-writer"}
     for claim in json.loads((artifact.directory / "metadata/manifest.json").read_text())[
         "identity_claims"
     ]:
@@ -230,7 +254,7 @@ def _bind_authors(service: PackageAdmissions, package_ref: str) -> dict[str, str
         service.state.confirm_identity_binding(
             binding_id=login,
             source_realm_key=claim["realm_key"],
-            source_login=login,
+            source_login=claim["login"],
             source_external_id=claim["external_id"],
             source_ou_path=claim["ou_path"],
             target_instance_key=TARGET,
@@ -238,7 +262,7 @@ def _bind_authors(service: PackageAdmissions, package_ref: str) -> dict[str, str
             target_login=login,
             mapping_version=1,
         )
-        refs[login] = login
+        refs[claim["login"]] = login
     return refs
 
 
@@ -278,6 +302,190 @@ def _git_visibility(
             observations.append({"read_status": status})
         time.sleep(0.1)
     raise RuntimeError("Gitea did not expose the imported Git branch within 20 seconds")
+
+
+def _directory_effective_rights() -> dict[str, bool]:
+    """Exercise the imported repository with LDAP identities, without token/admin auth."""
+    askpass = ROOT / "git-askpass.sh"
+    askpass.write_text(
+        "#!/bin/sh\n"
+        'case "$1" in *Username*) printf \'%s\\n\' "$GITFERRY_GIT_USERNAME";; '
+        "*) printf '%s\\n' \"$GITFERRY_GIT_PASSWORD\";; esac\n",
+        encoding="utf-8",
+    )
+    askpass.chmod(0o700)
+    repository_url = "http://target:3000/source-export-lab/selected.git"
+
+    def run_as(
+        username: str, password: str, arguments: list[str], cwd: Path
+    ) -> subprocess.CompletedProcess[str]:
+        environment = {
+            **os.environ,
+            "GIT_ASKPASS": str(askpass),
+            "GIT_TERMINAL_PROMPT": "0",
+            "GITFERRY_GIT_USERNAME": username,
+            "GITFERRY_GIT_PASSWORD": password,
+        }
+        return subprocess.run(  # noqa: S603
+            [shutil.which("git") or "/usr/bin/git", *arguments],
+            cwd=cwd,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    def commit_fixture(directory: Path, filename: str) -> subprocess.CompletedProcess[str]:
+        (directory / filename).write_text("synthetic directory rights proof\n", encoding="utf-8")
+        configured = run_as(
+            "fixture",
+            "unused",
+            ["-C", directory.name, "config", "user.email", "fixture@example.invalid"],
+            directory.parent,
+        )
+        if configured.returncode:
+            return configured
+        configured = run_as(
+            "fixture",
+            "unused",
+            ["-C", directory.name, "config", "user.name", "Synthetic Fixture"],
+            directory.parent,
+        )
+        if configured.returncode:
+            return configured
+        return run_as(
+            "fixture",
+            "unused",
+            ["-C", directory.name, "add", filename],
+            directory.parent,
+        )
+
+    with tempfile.TemporaryDirectory(prefix="directory-rights-", dir=ROOT / "work") as directory:
+        work = Path(directory)
+        reader_clone = run_as(
+            "ldap-reader", DIRECTORY_USERS["ldap-reader"], ["clone", repository_url, "reader"], work
+        )
+        reader_commit = (
+            commit_fixture(work / "reader", "reader-proof.txt")
+            if reader_clone.returncode == 0
+            else reader_clone
+        )
+        if reader_commit.returncode == 0:
+            reader_commit = run_as(
+                "fixture",
+                "unused",
+                ["-C", "reader", "commit", "-m", "synthetic rights proof"],
+                work,
+            )
+        reader_push = (
+            run_as(
+                "ldap-reader",
+                DIRECTORY_USERS["ldap-reader"],
+                ["-C", "reader", "push", "origin", "HEAD:refs/heads/reader-must-not-exist"],
+                work,
+            )
+            if reader_commit.returncode == 0
+            else reader_commit
+        )
+        writer_clone = run_as(
+            "ldap-writer", DIRECTORY_USERS["ldap-writer"], ["clone", repository_url, "writer"], work
+        )
+        writer_commit = (
+            commit_fixture(work / "writer", "writer-proof.txt")
+            if writer_clone.returncode == 0
+            else writer_clone
+        )
+        if writer_commit.returncode == 0:
+            writer_commit = run_as(
+                "fixture",
+                "unused",
+                ["-C", "writer", "commit", "-m", "synthetic rights proof"],
+                work,
+            )
+        writer_push = (
+            run_as(
+                "ldap-writer",
+                DIRECTORY_USERS["ldap-writer"],
+                ["-C", "writer", "push", "origin", "HEAD:refs/heads/writer-designated-branch"],
+                work,
+            )
+            if writer_commit.returncode == 0
+            else writer_commit
+        )
+        outsider_clone = run_as(
+            "ldap-outsider",
+            DIRECTORY_USERS["ldap-outsider"],
+            ["clone", repository_url, "outsider"],
+            work,
+        )
+    return {
+        "reader_clone_allowed": reader_clone.returncode == 0,
+        "reader_push_denied": reader_push.returncode != 0,
+        "writer_clone_allowed": writer_clone.returncode == 0,
+        "writer_push_allowed": writer_push.returncode == 0,
+        "outsider_clone_denied": outsider_clone.returncode != 0,
+    }
+
+
+def _directory_authority_snapshot() -> dict[str, Any]:
+    users = remote("GET", "/admin/users?limit=50")
+    functional = {
+        user["login"]: {
+            "id": user["id"],
+            "is_admin": bool(user.get("is_admin")),
+            "source_id": user.get("source_id"),
+        }
+        for user in users
+        if user.get("login") in {"ldap-reader", "ldap-writer", "ldap-outsider"}
+    }
+    teams = remote("GET", "/orgs/source-export-lab/teams")
+    team_snapshot: dict[str, Any] = {}
+    for team in teams:
+        if team["name"] not in {"reader", "writer", "Owners"}:
+            continue
+        members = remote("GET", f"/teams/{team['id']}/members")
+        repositories = remote("GET", f"/teams/{team['id']}/repos")
+        team_snapshot[team["name"]] = {
+            "permission": team.get("permission"),
+            "units": sorted(team.get("units", [])),
+            "unit_permissions": team.get("units_map", {}),
+            "members": sorted(member["login"] for member in members),
+            "repositories": sorted(repository["full_name"] for repository in repositories),
+        }
+    reader = team_snapshot.get("reader", {})
+    writer = team_snapshot.get("writer", {})
+    owners = team_snapshot.get("Owners", {})
+    selected = "source-export-lab/selected"
+    return {
+        "functional_users": functional,
+        "teams": team_snapshot,
+        "all_functional_users_non_admin": set(functional)
+        == {
+            "ldap-reader",
+            "ldap-writer",
+            "ldap-outsider",
+        }
+        and all(not item["is_admin"] for item in functional.values()),
+        "owners_members_only_admin": owners.get("members") == ["gitferry-admin"],
+        "intended_team_members": reader.get("members") == ["ldap-reader"]
+        and writer.get("members") == ["ldap-writer"],
+        "selected_repository_relations": selected in reader.get("repositories", [])
+        and selected in writer.get("repositories", [])
+        and "source-export-lab/not-selected" not in reader.get("repositories", [])
+        and "source-export-lab/not-selected" not in writer.get("repositories", []),
+        "reader_units_observed": reader.get("units") == ["repo.code", "repo.issues"],
+        "writer_units_observed": writer.get("units") == ["repo.code", "repo.issues"],
+        "reader_unit_permissions": reader.get("unit_permissions")
+        == {
+            "repo.code": "read",
+            "repo.issues": "read",
+        },
+        "writer_unit_permissions": writer.get("unit_permissions")
+        == {
+            "repo.code": "write",
+            "repo.issues": "write",
+        },
+    }
 
 
 def initial() -> dict[str, Any]:
@@ -360,8 +568,11 @@ def initial() -> dict[str, Any]:
         "comment_author": comments[0]["user"]["login"] if comments else "",
         "comment_author_id": comments[0]["user"]["id"] if comments else None,
         "target_author_ids": {
-            login: remote("GET", f"/users/{login}")["id"]
-            for login in ("issue-author", "comment-author")
+            source_login: remote("GET", f"/users/{target_login}")["id"]
+            for source_login, target_login in (
+                ("issue-author", "ldap-reader"),
+                ("comment-author", "ldap-writer"),
+            )
         },
         "comment_parent": comments[0]["body"] if comments else "",
         "comment_issue_url": comments[0].get("issue_url") if comments else "",
@@ -387,6 +598,9 @@ def prepare_browser() -> dict[str, Any]:
         directory.mkdir(mode=0o700, exist_ok=True)
     shutil.copyfile("/tmp/package-admission-trusted.pem", ROOT / "trusted.pem")
     shutil.copyfile("/tmp/package-admission-trusted.key", ROOT / "trusted.key")
+    directory_ca = Path("/run/directory-ca/ca.pem")
+    if directory_ca.is_file():
+        shutil.copyfile(directory_ca, ROOT / "directory.pem")
     _mint_user_tokens(ROOT / "secrets")
     state = StateStore(DATABASE)
     DATABASE.chmod(0o600)
@@ -564,6 +778,12 @@ def browser_structure_result() -> dict[str, Any]:
         "no_account_operations": not account_operations,
         "no_identity_bindings": counts["identity_bindings"] == 0,
         "no_target_memberships": memberships == 0,
+        "account_count_before": len(
+            json.loads((ROOT / "browser-accounts-before.json").read_text())
+        ),
+        "account_count_after": len(actual_accounts),
+        "account_counts_unchanged": len(actual_accounts)
+        == len(json.loads((ROOT / "browser-accounts-before.json").read_text())),
         "metadata_mappings": metadata_mappings,
         "object_counts": counts,
     }
@@ -662,8 +882,11 @@ def browser_result() -> dict[str, Any]:
         "comment_author": comments[0]["user"]["login"] if comments else "",
         "comment_author_id": comments[0]["user"]["id"] if comments else None,
         "target_author_ids": {
-            login: remote("GET", f"/users/{login}")["id"]
-            for login in ("issue-author", "comment-author")
+            source_login: remote("GET", f"/users/{target_login}")["id"]
+            for source_login, target_login in (
+                ("issue-author", "ldap-reader"),
+                ("comment-author", "ldap-writer"),
+            )
         },
         "comment_parent": comments[0]["body"] if comments else "",
         "comment_issue_url": comments[0].get("issue_url") if comments else "",
@@ -755,6 +978,10 @@ def replay() -> dict[str, Any]:
         "comments": len(remote("GET", "/repos/source-export-lab/selected/issues/1/comments")),
     }
     after_events = (ROOT / "remote-events.jsonl").read_text(encoding="utf-8").splitlines()
+    # Run after replay/reference checks so the writer proof's new branch cannot
+    # alter the original imported refs or the replay no-write evidence.
+    effective_rights = _directory_effective_rights()
+    authority_snapshot = _directory_authority_snapshot()
     return {
         "replay": receipt["replay"] and result["status"] == "confirmed",
         "plan_id": plan["plan_id"],
@@ -769,6 +996,8 @@ def replay() -> dict[str, Any]:
         "upload_archive_sha256": upload["archive_sha256"],
         "upload_resumed_status": upload["resumed"]["status"],
         "upload_counts_unchanged": before_upload == after_upload,
+        "effective_rights": effective_rights,
+        "authority_snapshot": authority_snapshot,
     }
 
 

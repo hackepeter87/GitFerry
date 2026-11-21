@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 
 const target = { instance_key: "target.synthetic", display_name: "Synthetic target", base_url: "https://target.synthetic", installation_marker: "install-target", credential_ref: "target-ref", ca_ref: "ca-ref", revision: 3, enabled: true, locally_approved: true };
 const realm = { realm_key: "directory.synthetic", display_name: "Synthetic directory", external_marker: "directory-1" };
-const source = { name: "synthetic-ldap", type: "ldaps", directoryRealm: realm.realm_key, host: "ldap.synthetic.example", port: 636, mode: "simple", securityProtocol: "ldaps", userDn: "uid=%s,ou=People,dc=example,dc=invalid", userFilter: "(&(objectClass=posixAccount)(uid=%s))", emailAttribute: "mail", usernameAttribute: "uid", caSecretRef: "trust/directory-ca" };
+const source = { name: "synthetic-ldap", type: "ldaps", directoryRealm: realm.realm_key, host: "ldap.synthetic.example", port: 636, mode: "simple", securityProtocol: "ldaps", userDn: "uid=%s,ou=People,dc=example,dc=invalid", userFilter: "(&(objectClass=posixAccount)(uid=%s))", emailAttribute: "mail", usernameAttribute: "uid", caSecretRef: "trust/directory-ca", claimLookup: { searchBase: "ou=People,dc=example,dc=invalid", loginAttribute: "uid", externalIdAttribute: "employeeNumber", emailAttribute: "mail", groupSearchBase: "ou=Groups,dc=example,dc=invalid", groupMemberAttribute: "member" } };
 const record = { instance_key: target.instance_key, source_name: source.name, realm_key: realm.realm_key, source, revision: 1, source_digest: "a".repeat(64), profile_revision: 3, status: "ready-for-target-local-bootstrap", prerequisites: ["simple", "TLS", "CA"], updated_at: "2026-01-01T00:00:00Z" };
 
 async function open(page: import("@playwright/test").Page, directories: unknown[] = []): Promise<void> {
@@ -35,10 +35,17 @@ test("creates, edits with a revision, and exports a local directory blueprint", 
   await page.getByLabel("User DN template").fill(source.userDn);
   await page.getByLabel("User filter").fill(source.userFilter);
   await page.getByLabel("CA secret reference").fill(source.caSecretRef);
+  await page.getByLabel("Enable claim lookup").check();
+  await page.getByLabel("Claim search base").fill(source.claimLookup.searchBase);
+  await page.getByLabel("Claim login attribute").fill(source.claimLookup.loginAttribute);
+  await page.getByLabel("Claim external ID attribute").fill(source.claimLookup.externalIdAttribute);
+  await page.getByLabel("Claim email attribute (optional)").fill(source.claimLookup.emailAttribute);
+  await page.getByLabel("Claim group search base (optional)").fill(source.claimLookup.groupSearchBase);
+  await page.getByLabel("Claim group member attribute (optional)").fill(source.claimLookup.groupMemberAttribute);
   await page.getByLabel("Source name").press("Tab");
   await expect(page.getByLabel("Registered realm")).toBeFocused();
   await page.getByRole("button", { name: "Save reviewed settings" }).click();
-  expect(saveBody).toMatchObject({ instance_key: target.instance_key, expected_revision: null, source: { name: source.name, caSecretRef: source.caSecretRef } });
+  expect(saveBody).toMatchObject({ instance_key: target.instance_key, expected_revision: null, source: { name: source.name, caSecretRef: source.caSecretRef, claimLookup: source.claimLookup } });
   await expect(page.getByText("Directory settings reviewed and saved locally.")).toBeVisible();
   await page.getByRole("button", { name: "Download blueprint" }).click();
   await expect(page.getByText("Versioned InstanceBlueprint downloaded.")).toBeVisible();
@@ -60,10 +67,10 @@ test("shows BindDN as manual-only and rejects oversized or secret-bearing import
   });
   await expect(page.getByText(/BindDN automation is unsupported/)).toBeVisible();
   await page.getByLabel("User search base").fill("ou=People,dc=example,dc=invalid");
-  await page.getByLabel("Group search base").fill("ou=Groups,dc=example,dc=invalid");
+  await page.getByLabel("Group search base", { exact: true }).fill("ou=Groups,dc=example,dc=invalid");
   await page.getByLabel("Bind secret reference").fill("secrets/directory-bind");
   await page.getByRole("button", { name: "Save revision" }).click();
-  expect(bindSaveBody?.source).toMatchObject({ bindSecretRef: "secrets/directory-bind", userSearchBase: "ou=People,dc=example,dc=invalid", groupSearchBase: "ou=Groups,dc=example,dc=invalid" });
+  expect(bindSaveBody?.source).toMatchObject({ bindSecretRef: "secrets/directory-bind", userSearchBase: "ou=People,dc=example,dc=invalid", groupSearchBase: "ou=Groups,dc=example,dc=invalid", caSecretRef: source.caSecretRef });
   expect(bindSaveBody?.source).not.toHaveProperty("mode");
   expect(bindSaveBody?.source).not.toHaveProperty("bindDn");
   expect(bindSaveBody?.source).not.toHaveProperty("bindPasswordSecretRef");

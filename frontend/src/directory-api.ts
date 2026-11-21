@@ -16,6 +16,16 @@ export interface DirectorySource {
   userSearchBase?: string;
   groupSearchBase?: string;
   bindSecretRef?: string;
+  claimLookup?: {
+    searchBase: string;
+    loginAttribute: string;
+    externalIdAttribute: string;
+    emailAttribute?: string;
+    bindDn?: string;
+    bindCredentialRef?: string;
+    groupSearchBase?: string;
+    groupMemberAttribute?: string;
+  };
 }
 
 export interface DirectoryRecord {

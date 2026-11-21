@@ -40,6 +40,32 @@ def complete_probe_report() -> dict[str, object]:
     report: dict[str, object] = {
         "directory": {
             "status": "passed",
+            "application_claim_reader": {
+                "status": "passed",
+                "client": "ldap3 2.9.1",
+                "duplicate_login_conflict": True,
+                "filter_escaping": True,
+                "real_bind_and_wrong_password": True,
+                "first": {
+                    "login": "ldap-reader",
+                    "external_id": "SYNTHETIC-EXT-10001",
+                    "dn": "uid=ldap-reader,ou=People,dc=example,dc=invalid",
+                    "directory_realm": "directory-a",
+                    "ou_path": "ou=People",
+                    "groups": ["cn=gitea-users,ou=Groups,dc=example,dc=invalid"],
+                },
+                "second": {
+                    "login": "ldap-reader",
+                    "external_id": "SYNTHETIC-EXT-20001",
+                    "dn": "uid=ldap-reader,ou=People-B,dc=example,dc=invalid",
+                    "directory_realm": "directory-b",
+                    "ou_path": "ou=People-B",
+                },
+                "missing_mail": {
+                    "email": None,
+                    "dn": "uid=missing-mail,ou=People,dc=example,dc=invalid",
+                },
+            },
             "local_application_bootstrap": {
                 "first": {"status": "passed", "create_call_count": 1},
                 "replay": {"status": "passed", "create_call_count": 1},
@@ -69,6 +95,31 @@ def complete_probe_report() -> dict[str, object]:
             "authenticated_account_readback": True,
             "directory_facts": {"duplicate_uid_scopes": True},
             "missing_mail_native_email": "synthetic@localhost.local",
+        },
+        "directory_ad": {
+            "status": "passed",
+            "client": "ldap3 2.9.1",
+            "image_id": "sha256:synthetic",
+            "platform": "linux/arm64",
+            "server_version": "Version 4.22.11-synthetic",
+            "claims": {
+                "external_id_kind": "sid",
+                "dn": "CN=ldap-same,OU=People,DC=synth,DC=ad",
+                "ou_path": "OU=People,DC=synth,DC=ad",
+                "external_id": "S-1-5-21-1-2-3-1103",
+                "email": None,
+                "groups": ["CN=Direct,OU=Groups,DC=synth,DC=ad"],
+            },
+            "negative_assertions": {
+                "wrong_password": "passed",
+                "wrong_ca": "passed",
+                "disabled_filter": "passed",
+            },
+            "credential_forms": {"upn": True, "domain_login": True},
+            "nested_matching_rule_results": [
+                "CN=Direct,OU=Groups,DC=synth,DC=ad",
+                "CN=Nested,OU=Groups,DC=synth,DC=ad",
+            ],
         },
         "source_exports": {
             "status": "passed",
@@ -103,6 +154,19 @@ def complete_probe_report() -> dict[str, object]:
                     "guided_browser_production_runtime",
                     "guided_selected_set_and_control",
                     "guided_browser_restart_read_only",
+                    "directory_claim_drift_restart_blocked",
+                    "directory_functional_users_non_admin",
+                    "directory_intended_team_members",
+                    "directory_ldap_outsider_denied",
+                    "directory_ldap_reader_clone_allowed",
+                    "directory_ldap_reader_push_denied",
+                    "directory_ldap_writer_clone_allowed",
+                    "directory_ldap_writer_push_allowed",
+                    "directory_owners_isolated",
+                    "directory_reader_unit_permissions",
+                    "directory_selected_repository_relations",
+                    "directory_writer_unit_permissions",
+                    "structure_account_counts_unchanged",
                     "structure_phase_confirmed_without_bindings_or_memberships",
                     "late_full_plan_reused_structure_operations",
                 ),
@@ -595,6 +659,19 @@ def test_application_plan_assertion_is_required(tmp_path: Path, assertion: str) 
         "guided_browser_production_runtime",
         "guided_selected_set_and_control",
         "guided_browser_restart_read_only",
+        "directory_claim_drift_restart_blocked",
+        "directory_functional_users_non_admin",
+        "directory_intended_team_members",
+        "directory_ldap_outsider_denied",
+        "directory_ldap_reader_clone_allowed",
+        "directory_ldap_reader_push_denied",
+        "directory_ldap_writer_clone_allowed",
+        "directory_ldap_writer_push_allowed",
+        "directory_owners_isolated",
+        "directory_reader_unit_permissions",
+        "directory_selected_repository_relations",
+        "directory_writer_unit_permissions",
+        "structure_account_counts_unchanged",
     ],
 )
 def test_source_capture_assertion_is_required(tmp_path: Path, assertion: str) -> None:
@@ -672,3 +749,56 @@ def test_directory_unknown_result_requires_explicit_missing_confirmation(tmp_pat
         "native_source_id"
     ]
     assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "first",
+        "second",
+        "missing_mail",
+        "duplicate_login_conflict",
+        "filter_escaping",
+        "real_bind_and_wrong_password",
+    ],
+)
+def test_application_directory_claim_evidence_is_required(tmp_path, key):
+    module = report_contract()
+    report = complete_probe_report()
+    del report["directory"]["application_claim_reader"][key]
+    assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize(
+    "section,key",
+    [
+        ("negative_assertions", "wrong_password"),
+        ("negative_assertions", "wrong_ca"),
+        ("negative_assertions", "disabled_filter"),
+        ("credential_forms", "upn"),
+        ("credential_forms", "domain_login"),
+        ("claims", "email"),
+        ("claims", "groups"),
+    ],
+)
+def test_samba_ad_evidence_must_be_present(tmp_path: Path, section: str, key: str) -> None:
+    report = complete_probe_report()
+    del report["directory_ad"][section][key]
+    assert not report_contract().probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize(
+    "value", [None, [], ["CN=Direct,OU=Groups,DC=synth,DC=ad"], ["unexpected"]]
+)
+def test_nested_ad_server_evidence_is_required(tmp_path: Path, value: object) -> None:
+    report = complete_probe_report()
+    report["directory_ad"]["nested_matching_rule_results"] = value
+    assert not report_contract().probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize("side", ["first", "second", "missing_mail"])
+@pytest.mark.parametrize("value", [None, "", 12])
+def test_ldap_dn_evidence_is_required(tmp_path: Path, side: str, value: object) -> None:
+    report = complete_probe_report()
+    report["directory"]["application_claim_reader"][side]["dn"] = value
+    assert not report_contract().probe_contract_is_complete(prepare_results(tmp_path, report))

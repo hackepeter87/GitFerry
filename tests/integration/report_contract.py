@@ -306,6 +306,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
 
     mandatory_sections = (
         "directory",
+        "directory_ad",
         "connection_profiles",
         "application_plans",
         "source_exports",
@@ -326,6 +327,84 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         and all(_value(report, f"{section}.status") == "passed" for section in mandatory_sections)
     )
     entries = [
+        (
+            "separate_samba_ad_claim_qualification",
+            _value(report, "directory_ad.status") == "passed"
+            and _value(report, "directory_ad.client") == "ldap3 2.9.1"
+            and bool(_value(report, "directory_ad.image_id"))
+            and bool(_value(report, "directory_ad.platform"))
+            and str(_value(report, "directory_ad.server_version")).startswith("Version 4.22.11")
+            and _value(report, "directory_ad.claims.dn") == "CN=ldap-same,OU=People,DC=synth,DC=ad"
+            and _value(report, "directory_ad.claims.ou_path") == "OU=People,DC=synth,DC=ad"
+            and _value(report, "directory_ad.nested_matching_rule_results")
+            in (
+                ["CN=Direct,OU=Groups,DC=synth,DC=ad", "CN=Nested,OU=Groups,DC=synth,DC=ad"],
+                ["CN=Nested,OU=Groups,DC=synth,DC=ad", "CN=Direct,OU=Groups,DC=synth,DC=ad"],
+            )
+            and _value(report, "directory_ad.claims.external_id_kind") == "sid"
+            and str(_value(report, "directory_ad.claims.external_id")).startswith("S-1-5-21-")
+            and _value(report, "directory_ad.claims.groups")
+            == ["CN=Direct,OU=Groups,DC=synth,DC=ad"]
+            and isinstance(_value(report, "directory_ad.claims"), dict)
+            and "email" in _value(report, "directory_ad.claims")
+            and _value(report, "directory_ad.claims.email") is None
+            and all(
+                _value(report, "directory_ad.negative_assertions." + key) == "passed"
+                for key in ("wrong_password", "wrong_ca", "disabled_filter")
+            )
+            and all(
+                _value(report, "directory_ad.credential_forms." + key) is True
+                for key in ("upn", "domain_login")
+            ),
+            "tests/integration/ad_probe.py",
+            "directory_ad",
+        ),
+        (
+            "real_application_directory_claim_reader",
+            _value(report, "directory.application_claim_reader.status") == "passed"
+            and _value(report, "directory.application_claim_reader.client") == "ldap3 2.9.1"
+            and all(
+                _value(report, "directory.application_claim_reader." + key) is True
+                for key in (
+                    "duplicate_login_conflict",
+                    "filter_escaping",
+                    "real_bind_and_wrong_password",
+                )
+            )
+            and all(
+                isinstance(
+                    _value(report, "directory.application_claim_reader." + side + ".dn"), str
+                )
+                and bool(_value(report, "directory.application_claim_reader." + side + ".dn"))
+                for side in ("first", "second", "missing_mail")
+            )
+            and _value(report, "directory.application_claim_reader.first.login") == "ldap-reader"
+            and _value(report, "directory.application_claim_reader.second.login") == "ldap-reader"
+            and _value(report, "directory.application_claim_reader.first.external_id")
+            == "SYNTHETIC-EXT-10001"
+            and _value(report, "directory.application_claim_reader.second.external_id")
+            == "SYNTHETIC-EXT-20001"
+            and _value(report, "directory.application_claim_reader.first.directory_realm")
+            == "directory-a"
+            and _value(report, "directory.application_claim_reader.second.directory_realm")
+            == "directory-b"
+            and all(
+                isinstance(
+                    _value(report, "directory.application_claim_reader." + side + ".ou_path"), str
+                )
+                and bool(_value(report, "directory.application_claim_reader." + side + ".ou_path"))
+                for side in ("first", "second")
+            )
+            and _value(report, "directory.application_claim_reader.first.ou_path")
+            != _value(report, "directory.application_claim_reader.second.ou_path")
+            and _value(report, "directory.application_claim_reader.first.groups")
+            == ["cn=gitea-users,ou=Groups,dc=example,dc=invalid"]
+            and isinstance(_value(report, "directory.application_claim_reader.missing_mail"), dict)
+            and "email" in _value(report, "directory.application_claim_reader.missing_mail")
+            and _value(report, "directory.application_claim_reader.missing_mail.email") is None,
+            "tests/integration/directory_claim_worker.py",
+            "directory.application_claim_reader",
+        ),
         (
             "local_directory_bootstrap_restart_and_uncertainty",
             all(
@@ -413,6 +492,19 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                         "guided_browser_production_runtime",
                         "guided_selected_set_and_control",
                         "guided_browser_restart_read_only",
+                        "directory_claim_drift_restart_blocked",
+                        "directory_functional_users_non_admin",
+                        "directory_intended_team_members",
+                        "directory_ldap_outsider_denied",
+                        "directory_ldap_reader_clone_allowed",
+                        "directory_ldap_reader_push_denied",
+                        "directory_ldap_writer_clone_allowed",
+                        "directory_ldap_writer_push_allowed",
+                        "directory_owners_isolated",
+                        "directory_reader_unit_permissions",
+                        "directory_selected_repository_relations",
+                        "directory_writer_unit_permissions",
+                        "structure_account_counts_unchanged",
                         "structure_phase_confirmed_without_bindings_or_memberships",
                         "late_full_plan_reused_structure_operations",
                     }

@@ -88,25 +88,38 @@ def _setup_source_repository(token: str) -> None:
         "/orgs",
         json={"username": "source-export-lab", "visibility": "private"},
     )
-    team = _admin_request(
+    reader_team = _admin_request(
         token,
         "POST",
         "/orgs/source-export-lab/teams",
         json={
-            "name": "read-write",
+            "name": "reader",
+            "permission": "read",
+            "units_map": {"repo.code": "read", "repo.issues": "read"},
+        },
+    ).json()
+    writer_team = _admin_request(
+        token,
+        "POST",
+        "/orgs/source-export-lab/teams",
+        json={
+            "name": "writer",
             "permission": "write",
             "units_map": {"repo.code": "write", "repo.issues": "write"},
         },
     ).json()
-    for username in ("issue-author", "comment-author"):
-        _admin_request(token, "PUT", f"/teams/{team['id']}/members/{username}")
     _admin_request(
         token,
         "POST",
         "/orgs/source-export-lab/repos",
         json={"name": "selected", "private": True, "auto_init": True},
     )
-    _admin_request(token, "PUT", f"/teams/{team['id']}/repos/source-export-lab/selected")
+    for team_id, username in (
+        (reader_team["id"], "issue-author"),
+        (writer_team["id"], "comment-author"),
+    ):
+        _admin_request(token, "PUT", f"/teams/{team_id}/members/{username}")
+        _admin_request(token, "PUT", f"/teams/{team_id}/repos/source-export-lab/selected")
     for name in ("selected-extra", "not-selected"):
         _admin_request(
             token,
@@ -114,7 +127,8 @@ def _setup_source_repository(token: str) -> None:
             "/orgs/source-export-lab/repos",
             json={"name": name, "private": True, "auto_init": True},
         )
-    _admin_request(token, "PUT", f"/teams/{team['id']}/repos/source-export-lab/selected-extra")
+        for team_id in (reader_team["id"], writer_team["id"]):
+            _admin_request(token, "PUT", f"/teams/{team_id}/repos/source-export-lab/selected-extra")
 
 
 def _service() -> SourceExports:

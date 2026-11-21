@@ -61,6 +61,19 @@ ASSERTIONS = frozenset(
         "guided_browser_production_runtime",
         "guided_selected_set_and_control",
         "guided_browser_restart_read_only",
+        "directory_claim_drift_restart_blocked",
+        "directory_ldap_reader_clone_allowed",
+        "directory_ldap_reader_push_denied",
+        "directory_ldap_writer_clone_allowed",
+        "directory_ldap_writer_push_allowed",
+        "directory_ldap_outsider_denied",
+        "directory_functional_users_non_admin",
+        "directory_owners_isolated",
+        "directory_intended_team_members",
+        "directory_selected_repository_relations",
+        "directory_reader_unit_permissions",
+        "directory_writer_unit_permissions",
+        "structure_account_counts_unchanged",
     }
 )
 
@@ -346,6 +359,7 @@ def run_source_export_probe() -> dict[str, Any]:
             {
                 "initial": {key: target_package[key] for key in evidence_keys},
                 "replay": target_replay,
+                "effective_rights": target_replay["effective_rights"],
             },
             sort_keys=True,
             indent=2,
@@ -408,16 +422,17 @@ def run_source_export_probe() -> dict[str, Any]:
             and structure["no_account_operations"]
             and structure["no_identity_bindings"]
             and structure["no_target_memberships"]
+            and structure["account_counts_unchanged"]
         ),
         "late_full_plan_reused_structure_operations": (
             target_package["structure_plan_id"] == structure["plan_id"]
             and target_package["structure_operation_ids_reused"] > 0
         ),
         "native_authors_parent_and_git_refs": (
-            target_package["issue_author"] == "issue-author"
+            target_package["issue_author"] == "ldap-reader"
             and target_package["issue_author_id"]
             == target_package["target_author_ids"]["issue-author"]
-            and target_package["comment_author"] == "comment-author"
+            and target_package["comment_author"] == "ldap-writer"
             and target_package["comment_author_id"]
             == target_package["target_author_ids"]["comment-author"]
             # Gitea's comment.issue_url is the parent's web URL; issue.url is
@@ -508,10 +523,37 @@ def run_source_export_probe() -> dict[str, Any]:
     assertions["guided_browser_restart_read_only"] = (
         restart["status"] == "passed" and restart["read_only"]
     )
+    rights = target_replay["effective_rights"]
+    assertions["directory_ldap_reader_clone_allowed"] = rights["reader_clone_allowed"]
+    assertions["directory_ldap_reader_push_denied"] = rights["reader_push_denied"]
+    assertions["directory_ldap_writer_clone_allowed"] = rights["writer_clone_allowed"]
+    assertions["directory_ldap_writer_push_allowed"] = rights["writer_push_allowed"]
+    assertions["directory_ldap_outsider_denied"] = rights["outsider_clone_denied"]
+    authority = target_replay["authority_snapshot"]
+    assertions["directory_functional_users_non_admin"] = authority["all_functional_users_non_admin"]
+    assertions["directory_owners_isolated"] = authority["owners_members_only_admin"]
+    assertions["directory_intended_team_members"] = authority["intended_team_members"]
+    assertions["directory_selected_repository_relations"] = authority[
+        "selected_repository_relations"
+    ]
+    assertions["directory_reader_unit_permissions"] = authority["reader_unit_permissions"]
+    assertions["directory_writer_unit_permissions"] = authority["writer_unit_permissions"]
+    assertions["structure_account_counts_unchanged"] = (
+        structure["account_count_before"] == structure["account_count_after"]
+    )
+    from directory_identity_recovery_probe import run as run_identity_recovery
+
+    identity_recovery = run_identity_recovery()
+    assertions["directory_claim_drift_restart_blocked"] = (
+        identity_recovery["status"] == "passed"
+        and identity_recovery["binding_unchanged"]
+        and identity_recovery["restored_facts_do_not_reopen"]
+    )
     if set(assertions) != ASSERTIONS or not all(assertions.values()):
         raise ProbeFailure(f"Source export assertions failed: {assertions}")
     return {
         "status": "passed",
+        "identity_recovery": identity_recovery,
         "assertions": assertions,
         "browser_runtime": runtimes,
         "image_id": built_image,

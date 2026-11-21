@@ -171,6 +171,7 @@ phase=environment-start
 docker compose -p "$project" -f "$compose_file" up -d --build
 wait_for_service_state source healthy 120
 wait_for_service_state target healthy 120
+wait_for_service_state ad healthy 120
 wait_for_service_state importer running 120
 wait_for_service_state gitferry-a running 120
 wait_for_service_state gitferry-b running 120

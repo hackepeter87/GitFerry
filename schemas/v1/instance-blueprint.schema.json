@@ -31,6 +31,7 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["name", "type", "directoryRealm", "host"],
+            "dependentRequired": {"claimLookup": ["caSecretRef"]},
             "properties": {
               "name": {"type": "string", "minLength": 1},
               "type": {"enum": ["ldap", "ldaps"]},
@@ -46,7 +47,63 @@
               "emailAttribute": {"type": "string", "minLength": 1},
               "usernameAttribute": {"type": "string", "minLength": 1},
               "bindSecretRef": {"$ref": "#/$defs/secretRef"},
-              "caSecretRef": {"$ref": "#/$defs/secretRef"}
+              "caSecretRef": {"$ref": "#/$defs/secretRef"},
+              "claimLookup": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "searchBase",
+                  "loginAttribute",
+                  "externalIdAttribute"
+                ],
+                "properties": {
+                  "searchBase": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "loginAttribute": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z][A-Za-z0-9-]{0,127}$"
+                  },
+                  "externalIdAttribute": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z][A-Za-z0-9-]{0,127}$"
+                  },
+                  "emailAttribute": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z][A-Za-z0-9-]{0,127}$"
+                  },
+                  "bindDn": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "bindCredentialRef": {
+                    "$ref": "#/$defs/secretRef"
+                  },
+                  "groupSearchBase": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "groupMemberAttribute": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z][A-Za-z0-9-]{0,127}$"
+                  }
+                },
+                "dependentRequired": {
+                  "bindDn": [
+                    "bindCredentialRef"
+                  ],
+                  "bindCredentialRef": [
+                    "bindDn"
+                  ],
+                  "groupMemberAttribute": [
+                    "groupSearchBase"
+                  ]
+                }
+              }
             },
             "oneOf": [
               {"required": ["bindSecretRef"], "not": {"required": ["mode"]}},

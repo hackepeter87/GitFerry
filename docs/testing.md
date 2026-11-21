@@ -775,3 +775,35 @@ interruption create counter; missing facts fail closed.
 
 Run evidence belongs to the associated issue/PR and Actions artifacts. These additional tests
 are development work until the exact delivery commit passes the complete gates and review.
+
+### Directory claim refresh
+
+`test_directory_claims.py` checks bounded searches, filter escaping, ambiguous results, binary
+SID normalization, group ordering and verified TLS client configuration. The real
+`directory_claim_worker.py` uses the installed `ldap3==2.9.1` client against the isolated
+OpenLDAP service. Its required report entry distinguishes equal logins in separate realms by
+external ID and DN/OU, preserves missing email, and checks direct groups, real BindDN credentials,
+wrong credentials and duplicate-search rejection. The synthetic CA includes strict key usages;
+the application does not weaken certificate validation to accept the fixture.
+
+`test_directory_identity_application.py` checks separate source/target claims, missing email,
+configuration revision races, immutable bindings, native account/source correlation and durable
+conflicts for changed external IDs, DN/OU and groups. An unavailable directory blocks execution
+without inventing a conflict-free fallback. Restoring facts does not clear a recorded conflict.
+The desktop tests additionally reject a check response that omits evidence for a selected
+directory. These unit/browser contracts do not by themselves qualify real directory permissions.
+
+
+### Separate Samba AD-compatible claim probe
+
+The common runner also starts Samba 4.22.11 from explicitly pinned Debian packages on the
+existing Python base. `ad_probe.py` records its actual version, image ID and platform. The
+application reader observes real binary SIDs, DN/OU, missing mail and direct membership over
+verified LDAPS. Enabled functional-user UPN/domain binds, a different CA, wrong password and
+disabled-account exclusion are explicit assertions. A separate nested matching-rule query
+qualifies the server response only; the product does not expand transitive groups. Searches
+use an explicit OU base because referrals are intentionally rejected.
+
+This is Samba AD-compatible evidence, not Windows Server AD, trust/replication, Kerberos client
+or Gitea AD-authentication qualification. `tests/integration/ad/run.sh` is the focused diagnostic
+entry; common report assertions and scoped cleanup remain mandatory for delivery.

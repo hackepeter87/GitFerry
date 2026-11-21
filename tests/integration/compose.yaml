@@ -64,6 +64,25 @@ services:
       timeout: 2s
       retries: 60
 
+  ad:
+    build:
+      context: ./ad
+    hostname: synthdc
+    environment:
+      AD_ADMIN_PASSWORD: Synthetic-Admin-Only-42!
+      PYTHONPATH: /opt/gitferry-backend
+    volumes:
+      - ../../backend/src:/opt/gitferry-backend:ro
+    networks:
+      target-net:
+        aliases: [synthdc]
+    healthcheck:
+      test: ["CMD-SHELL", "openssl s_client -connect 127.0.0.1:636 -CAfile /run/ad-ca/ca.pem -verify_return_error </dev/null 2>/dev/null | grep -q 'Verify return code: 0'"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    stop_grace_period: 5s
+
   importer:
     image: docker.gitea.com/gitea:1.27.2@sha256:d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd
     entrypoint: ["/bin/sh", "-c"]
@@ -126,6 +145,20 @@ services:
       target:
         condition: service_healthy
 
+  directory-claims:
+    image: ${GITFERRY_IT_RUNTIME_IMAGE:-gitferry-it-runtime:dev}
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["sleep infinity"]
+    healthcheck:
+      disable: true
+    volumes:
+      - directory-ca:/run/directory-ca:ro
+      - ./directory_claim_worker.py:/probe/directory_claim_worker.py:ro
+    networks: [target-net]
+    depends_on:
+      openldap:
+        condition: service_healthy
+
   gitferry-b:
     build:
       context: ../..
@@ -144,9 +177,11 @@ services:
       GITFERRY_GITEA_URL: http://target:3000
       GITFERRY_IT_USER_PASSWORD: ${GITFERRY_IT_USER_PASSWORD}
       GITFERRY_IT_ADMIN_PASSWORD: ${GITFERRY_IT_ADMIN_PASSWORD}
+      GITFERRY_IT_DIRECTORY_PASSWORD: synthetic-directory-pass
       GITFERRY_IT_INSTANCE_NONCE: ${GITFERRY_IT_INSTANCE_NONCE}
     volumes:
       - gitferry-b-state:/state
+      - directory-ca:/run/directory-ca:ro
       - ./transport_worker.py:/probe/transport_worker.py:ro
       - ./comment_transport_worker.py:/probe/comment_transport_worker.py:ro
       - ./provisioning_worker.py:/probe/provisioning_worker.py:ro

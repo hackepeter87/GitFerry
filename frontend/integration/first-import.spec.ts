@@ -155,30 +155,70 @@ async function bindThroughIdentityAdmin(page: Page, panel: Locator): Promise<voi
   await expect(identity.getByLabel("Approved target instance")).toBeVisible();
   await choose(page, identity.getByLabel("Approved target instance"), "target");
   for (const claim of claims) {
-    await enter(page, identity.getByLabel("Target login"), claim.login);
+    const targetLogin = claim.login === "issue-author" ? "ldap-reader" : "ldap-writer";
+    await enter(page, identity.getByLabel("Target login"), targetLogin);
     await enter(page, identity.getByLabel("Source login"), claim.login);
     await enter(page, identity.getByLabel("External ID"), claim.externalId);
     await enter(page, identity.getByLabel("OU path (optional)"), claim.ouPath);
     const realm = identity.getByLabel("Registered realm");
     await choose(page, realm, claim.realm);
+    await choose(page, identity.getByLabel("Configured directory claim source"), "synthetic-openldap-simple");
+    await enter(page, identity.getByLabel("Directory login"), targetLogin);
+    await enter(page, identity.getByLabel("Expected Gitea auth source ID"), "");
     const credential = identity.getByLabel("Credential reference (optional)");
-    await enter(page, credential, claim.roles.includes("author") ? claim.login : "");
+    await enter(page, credential, targetLogin);
     for (const [label, enabled] of [["Issue author", claim.roles.includes("author")], ["Comment author", claim.roles.includes("author")], ["Team member", claim.roles.includes("member")]] as const) {
       const checkbox = identity.getByLabel(label);
       if (enabled !== await checkbox.isChecked()) { await tabTo(page, checkbox); await page.keyboard.press("Space"); }
     }
     await activate(page, identity.getByRole("button", { name: "Check target account" }));
-    await expect(identity.getByText(new RegExp(`Checked ${claim.login}`))).toBeVisible();
+    await expect(identity.getByText(new RegExp(`Target account checked:.*${targetLogin}`))).toBeVisible();
     await activate(page, identity.getByRole("button", { name: "Submit for approval" }));
-    const candidate = identity.locator(".identity-card", { hasText: `${claim.login} → ${claim.login}` });
+    const candidate = identity.locator(".identity-card", { hasText: `${claim.login} → ${targetLogin}` });
     await expect(candidate).toBeVisible();
     await activate(page, candidate.getByRole("button", { name: "Approve" }));
     await expect(candidate.getByText("approved", { exact: true })).toBeVisible();
   }
 }
 
+async function configureDirectory(page: Page): Promise<void> {
+  const panel = page.locator(".directory-panel");
+  await activate(page, panel.getByRole("button", { name: "Manage directories" }));
+  await choose(page, panel.getByLabel("Approved target connection"), "target");
+  await enter(page, panel.getByLabel("Source name"), "synthetic-openldap-simple");
+  await choose(page, panel.getByLabel("Registered realm"), "SYNTHETIC-OPENLDAP");
+  await enter(page, panel.getByLabel("Directory host"), "openldap");
+  await enter(page, panel.getByLabel("Directory port"), "636");
+  await enter(page, panel.getByLabel("User DN template"), "uid=%s,ou=People,dc=example,dc=invalid");
+  await enter(page, panel.getByLabel("User filter"), "(&(objectClass=posixAccount)(uid=%s)(!(employeeNumber=DISABLED)))");
+  await enter(page, panel.getByLabel("CA secret reference"), "directory.pem");
+  await check(page, panel.getByLabel("Enable claim lookup"));
+  await enter(page, panel.getByLabel("Claim search base"), "ou=People,dc=example,dc=invalid");
+  await enter(page, panel.getByLabel("Claim login attribute"), "uid");
+  await enter(page, panel.getByLabel("Claim external ID attribute"), "employeeNumber");
+  await enter(page, panel.getByLabel("Claim email attribute"), "mail");
+  await enter(page, panel.getByLabel("Claim group search base"), "ou=Groups,dc=example,dc=invalid");
+  await enter(page, panel.getByLabel("Claim group member attribute"), "member");
+  await activate(page, panel.getByRole("button", { name: "Save reviewed settings" }));
+  await expect(panel).toContainText("Directory settings reviewed and saved locally.");
+}
+
+async function registerDirectoryRealm(page: Page): Promise<void> {
+  const identity = page.locator(".identity-panel");
+  await activate(page, identity.getByRole("button", { name: "Manage identities" }));
+  await enter(page, identity.getByLabel("Realm key"), "SYNTHETIC-OPENLDAP");
+  await enter(page, identity.getByLabel("Display name"), "Synthetic OpenLDAP");
+  await enter(page, identity.getByLabel("External marker"), "synthetic-openldap-fixture");
+  await activate(page, identity.getByRole("button", { name: "Register realm" }));
+  await expect(identity).toContainText("Identity realm registered.");
+}
+
 async function prepareTargetPlan(page: Page, options: PlanPreparationOptions = {}): Promise<{ blocked: boolean; missing: string | null }> {
   await login(page);
+  if (options.identityAdmin) {
+    await registerDirectoryRealm(page);
+    await configureDirectory(page);
+  }
   let panel = await intake(page);
   if (await panel.getByRole("button", { name: "Confirm sender locally" }).isVisible()) {
   await enter(page, panel.getByLabel(/Local sender display name/), "Captured source");
@@ -220,10 +260,10 @@ async function prepareTargetPlan(page: Page, options: PlanPreparationOptions = {
     await bindThroughIdentityAdmin(page, panel);
     await page.reload();
     panel = await intake(page);
-    for (const name of ["issue-author", "comment-author"]) {
+    for (const [name, targetLogin] of [["issue-author", "ldap-reader"], ["comment-author", "ldap-writer"]] as const) {
       const row = panel.locator(".identity-row").filter({ has: page.locator("strong", { hasText: new RegExp(`^${name}$`) }) });
-      await expect(row).toContainText(`Already bound to ${name}`);
-      await enter(page, row.getByLabel(/Author credential reference/), name);
+      await expect(row).toContainText(`Already bound to ${targetLogin}`);
+      await enter(page, row.getByLabel(/Author credential reference/), targetLogin);
     }
   } else if (!options.structureOnly) {
     // Immediate package-local binding remains covered for the collision preparation path.

@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
+from gitferry.connection_probe import LocalReferences
 from gitferry.gitea_provisioning import (
     ProvisioningTargetConflict,
     verify_account,
@@ -253,6 +254,7 @@ def _verify_remote_bindings(
     client: ProvisioningClient,
     bindings: Mapping[str, IdentityBindingRecord],
     administrator_id: int,
+    references: LocalReferences | None,
 ) -> None:
     for binding in bindings.values():
         if binding.target_account_id == administrator_id:
@@ -261,7 +263,7 @@ def _verify_remote_bindings(
             )
         account = client.get_user(binding.target_login)
         verify_account(account, binding.target_login, binding.target_account_id)
-        require_current_account(state, binding, account)
+        require_current_account(state, binding, account, references)
 
 
 def _prepare_plan(
@@ -506,7 +508,11 @@ def prepare_provisioning_operations(
 
 
 def preflight_provisioning_operations(
-    state: StateStore, client: ProvisioningClient, plan: ProvisioningPlan
+    state: StateStore,
+    client: ProvisioningClient,
+    plan: ProvisioningPlan,
+    *,
+    references: LocalReferences | None = None,
 ) -> None:
     """Check every selected structure before any write; recheck at the write boundary too."""
     _preflight_origins(state, plan)
@@ -515,7 +521,7 @@ def preflight_provisioning_operations(
     administrator_id = verify_technical_administrator(
         client.get_authenticated_user(), client.authenticated_login
     )
-    _verify_remote_bindings(state, client, bindings, administrator_id)
+    _verify_remote_bindings(state, client, bindings, administrator_id, references)
     organization = client.find_organization(plan.organization)
     try:
         _verify_or_reject_target(
@@ -574,6 +580,7 @@ def provision_selected_repository(
     plan: ProvisioningPlan,
     *,
     bundle_pusher: BundlePusher | None = None,
+    references: LocalReferences | None = None,
 ) -> ProvisioningResult:
     """Apply one explicit selected-repository plan through the durable journal."""
 
@@ -581,7 +588,7 @@ def provision_selected_repository(
         raise OperationBlocked("a separate technical provisioning administrator is required")
     if plan.bundle is not None and bundle_pusher is None:
         raise OperationBlocked("bundle content was planned but no bundle pusher was provided")
-    preflight_provisioning_operations(state, client, plan)
+    preflight_provisioning_operations(state, client, plan, references=references)
     _preflight_origins(state, plan)
     bindings = _local_bindings(state, plan)
     prepared = _prepare_plan(state, plan, bindings)
@@ -591,7 +598,7 @@ def provision_selected_repository(
     administrator_id = verify_technical_administrator(
         client.get_authenticated_user(), client.authenticated_login
     )
-    _verify_remote_bindings(state, client, bindings, administrator_id)
+    _verify_remote_bindings(state, client, bindings, administrator_id, references)
     completed: list[OperationRecord] = []
 
     try:

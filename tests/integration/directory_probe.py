@@ -453,8 +453,25 @@ def run_directory_probe() -> dict[str, Any]:
     expected_packages = {"slapd=2.6.10+dfsg-1", "ldap-utils=2.6.10+dfsg-1"}
     if set(package_versions.splitlines()) != expected_packages:
         raise ProbeFailure("directory fixture package versions differ from pinned contract")
+    claims_process = support.run(
+        [
+            *DIRECTORY_COMPOSE,
+            "exec",
+            "-T",
+            "directory-claims",
+            "python",
+            "/probe/directory_claim_worker.py",
+        ],
+        check=False,
+    )
+    if claims_process.returncode:
+        raise ProbeFailure("application LDAP reader failed: " + claims_process.stderr)
+    claims = json.loads(claims_process.stdout)
+    if claims.get("status") != "passed":
+        raise ProbeFailure("application LDAP reader did not pass")
     return {
         "status": "passed",
+        "application_claim_reader": claims,
         "local_application_bootstrap": bootstrap,
         "gitea_version": version,
         "fixture": {

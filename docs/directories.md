@@ -6,6 +6,13 @@ Only local secret/CA references belong in configuration. The versioned `Instance
 can be downloaded and imported again; it does not approve a different connection or realm.
 Updates require the displayed configuration revision. Saving settings does not configure Gitea.
 
+Enable **Directory claim lookup** to configure the read-only search base, login/external-ID
+attributes, optional email attribute and direct group search. Choose anonymous read explicitly
+or provide both a bind DN and a local credential reference. The password is resolved in memory;
+it is never a command argument or exported value. This read-only BindDN lookup is separate from
+the unsupported secret-bearing Gitea bootstrap command. An explicit CA is required, referrals
+are not followed, and missing/ambiguous results block identity decisions.
+
 LDAP simple authentication is the bounded automated bootstrap path for Gitea **1.27.2**.
 Gitea binds with the user's own password at login; no directory bind password is required by
 the bootstrap. LDAPS or StartTLS and an explicit trusted CA are required. Install that CA for

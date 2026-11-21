@@ -17,6 +17,8 @@ from gitferry.auth_api import (
     require_authenticated,
 )
 from gitferry.connection_probe import ConnectionUnavailable
+from gitferry.directory_claims import DirectoryClaimsError, DirectoryClaimsUnavailable
+from gitferry.directory_settings import DirectorySettingsConflict
 from gitferry.gitea_provisioning import ProvisioningTargetConflict
 from gitferry.identity_application import (
     CandidateRequest,
@@ -55,6 +57,8 @@ def create_identity_router(settings: AuthCookieSettings) -> APIRouter:
             PackageAdmissionConflict,
             PlanConflict,
             ProvisioningTargetConflict,
+            DirectoryClaimsError,
+            DirectorySettingsConflict,
         ):
             raise AuthBoundaryError(
                 409,
@@ -62,7 +66,7 @@ def create_identity_router(settings: AuthCookieSettings) -> APIRouter:
                 "Identity, target account or local approval changed. "
                 "Refresh the decision; no binding was replaced.",
             ) from None
-        except ConnectionUnavailable:
+        except (ConnectionUnavailable, DirectoryClaimsUnavailable):
             raise AuthBoundaryError(
                 422,
                 "account_unavailable",

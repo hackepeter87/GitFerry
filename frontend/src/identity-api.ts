@@ -21,6 +21,33 @@ export interface IdentityPrerequisites {
   team_member: boolean;
 }
 
+export interface IdentityDirectorySelection {
+  source_name: string;
+  source_revision: number;
+  native_source_id: string;
+  login: string;
+}
+
+export type IdentityDirectorySelectionInput = Omit<IdentityDirectorySelection, "native_source_id"> & { native_source_id?: string };
+
+export interface IdentityDirectoryClaim {
+  external_id_kind?: "text" | "sid";
+  realm_key: string;
+  login: string;
+  external_id: string;
+  dn: string;
+  ou_path: string;
+  email?: string | null;
+  groups: string[];
+}
+
+export interface IdentityDirectoryEvidence {
+  selection: IdentityDirectorySelection;
+  source_digest: string;
+  ca_sha256?: string;
+  claim: IdentityDirectoryClaim;
+}
+
 export interface IdentityCandidate {
   candidate_id: string;
   selector: IdentitySelector;
@@ -36,7 +63,7 @@ export interface IdentityCandidate {
   prerequisites: IdentityPrerequisites;
   status: IdentityStatus;
   revision: number;
-  account_evidence?: { source_id: string | null; login_name: string | null };
+  account_evidence?: { source_id: string | null; login_name: string | null; directory?: IdentityDirectoryEvidence };
   authority_digest: string;
   profile_revision: number;
   created_at: string;
@@ -48,6 +75,8 @@ export interface IdentityAccountCheck {
   target_login: string;
   authority_digest: string;
   credential_checked: boolean;
+  directory_evidence?: IdentityDirectoryEvidence;
+  directory_digest?: string;
 }
 
 export interface IdentityEvent {
@@ -77,7 +106,7 @@ export function createIdentityRealm(value: IdentityRealm): Promise<IdentityRealm
   return request("/api/v1/identities/realms", json(value));
 }
 
-export function checkIdentityAccount(value: { target_instance_key: string; profile_revision: number; target_login: string; credential_ref?: string }): Promise<IdentityAccountCheck> {
+export function checkIdentityAccount(value: { target_instance_key: string; profile_revision: number; target_login: string; credential_ref?: string; directory?: IdentityDirectorySelectionInput }): Promise<IdentityAccountCheck> {
   return request("/api/v1/identities/check-account", json(value));
 }
 
@@ -90,6 +119,8 @@ export function createIdentityCandidate(value: {
   target_login: string;
   email?: string | null;
   credential_ref?: string;
+  directory?: IdentityDirectorySelection;
+  directory_digest?: string;
   prerequisites: IdentityPrerequisites;
 }): Promise<IdentityCandidate> {
   return request("/api/v1/identities/candidates", json(value));
