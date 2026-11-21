@@ -25,39 +25,11 @@ from support import (
     api,
     docker_copy,
     docker_service_exec,
+    flush_fixture_queues,
     run,
 )
 
 REPOSITORY = "source-export-lab/selected"
-
-
-def _flush_target_fixture_queues(phase: str) -> None:
-    # The preceding functional writer push schedules native Gitea work. Finish
-    # that setup before freezing a no-write snapshot; do not discard updated_at
-    # or mask differences after the operation being checked.
-    command = [
-        *COMPOSE,
-        "exec",
-        "-T",
-        "--user",
-        "git",
-        "target",
-        "gitea",
-        "manager",
-        "flush-queues",
-        "--timeout",
-        "30s",
-    ]
-    record: dict[str, Any] = {"phase": phase, "exit_code": None, "status": "failed"}
-    try:
-        result = run(command, check=False, timeout=45)
-        record["exit_code"] = result.returncode
-        if result.returncode:
-            raise ProbeFailure("prior Gitea fixture queues did not finish")
-        record["status"] = "passed"
-    finally:
-        # Also retain failure/timeout evidence before the runner's cleanup.
-        (WORK / f"fixture-queues-{phase}.json").write_text(json.dumps(record), encoding="utf-8")
 
 
 ASSERTIONS = frozenset(
@@ -358,7 +330,7 @@ def run_source_export_probe() -> dict[str, Any]:
             os.environ["GITFERRY_IT_RUNTIME_IMAGE"],
         ]
     ).stdout.strip()
-    _flush_target_fixture_queues("collision")
+    flush_fixture_queues("target", "collision")
     collision_before = _target_worker("collision-snapshot")
     _target_worker("prepare-browser", "collision")
     _target_worker("start-browser", "collision")
@@ -617,7 +589,7 @@ def run_source_export_probe() -> dict[str, Any]:
         and identity_recovery["group_restored"]["after_status"] == "conflict"
         and identity_recovery["group_restored"]["binding_unchanged"]
     )
-    _flush_target_fixture_queues("identity-recovery")
+    flush_fixture_queues("target", "identity-recovery")
     recovery_snapshot = _target_worker("collision-snapshot")
     recovery_events = docker_service_exec(
         "gitferry-b", ["wc", "-l", "/state/package-admission/remote-events.jsonl"]

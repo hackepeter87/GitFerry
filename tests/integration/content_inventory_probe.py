@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import base64
+import json
 import ssl
 from typing import Any
 
 import httpx
 from gitferry.content_inventory import CONTENT_CLASSES
 from gitferry.source_inventory import collect_inventory
-from support import ADMIN, SOURCE_URL, ProbeFailure, api, request
+from support import ADMIN, SOURCE_URL, WORK, ProbeFailure, api, flush_fixture_queues, request
 
 ORG = "inventory-qualification"
 SELECTED = f"{ORG}/selected"
@@ -302,6 +303,7 @@ def _direct_counts() -> dict[str, int | None]:
 
 def run_content_inventory_probe() -> dict[str, Any]:
     selected, control, fixture = _ensure_fixture()
+    flush_fixture_queues("source", "inventory")
     control_issues_before = (
         _get(SOURCE_URL, f"/repos/{CONTROL}/issues", params={"state": "all", "type": "issues"})
         or []
@@ -400,8 +402,30 @@ def run_content_inventory_probe() -> dict[str, Any]:
     upstream.close()
     inventory = document.repositories[0]
     by_class = {item.content_class: item for item in inventory.classes}
-    if {name: item.count for name, item in by_class.items()} != direct_counts:
-        raise ProbeFailure("inventory counts differ from independent fixture enumeration")
+    observed_counts = {name: item.count for name, item in by_class.items()}
+    after_counts = _direct_counts()
+    count_evidence = {
+        "expected": direct_counts,
+        "observed": observed_counts,
+        "independent_after": after_counts,
+        "differences": {
+            name: {
+                "expected": direct_counts[name],
+                "observed": observed_counts.get(name),
+                "independent_after": after_counts.get(name),
+            }
+            for name in direct_counts
+            if observed_counts.get(name) != direct_counts[name]
+            or observed_counts.get(name) != after_counts.get(name)
+        },
+    }
+    WORK.mkdir(parents=True, exist_ok=True)
+    (WORK / "inventory-counts.json").write_text(json.dumps(count_evidence, indent=2) + "\n")
+    if observed_counts != direct_counts or observed_counts != after_counts:
+        raise ProbeFailure(
+            "inventory counts differ from independent fixture enumeration: "
+            + json.dumps(count_evidence["differences"], sort_keys=True)
+        )
     unsupported = {"lfs", "other_content"}
     observed = set(CONTENT_CLASSES) - unsupported
     if {name for name, item in by_class.items() if item.status == "observed"} != observed:
