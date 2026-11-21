@@ -301,6 +301,35 @@ def _direct_counts() -> dict[str, int | None]:
     return counts
 
 
+def _assert_counts(
+    direct_counts: dict[str, int | None],
+    observed_counts: dict[str, int | None],
+    after_counts: dict[str, int | None],
+) -> None:
+    count_evidence = {
+        "expected": direct_counts,
+        "observed": observed_counts,
+        "independent_after": after_counts,
+        "differences": {
+            name: {
+                "expected": direct_counts[name],
+                "observed": observed_counts.get(name),
+                "independent_after": after_counts.get(name),
+            }
+            for name in direct_counts
+            if observed_counts.get(name) != direct_counts[name]
+            or observed_counts.get(name) != after_counts.get(name)
+        },
+    }
+    WORK.mkdir(parents=True, exist_ok=True)
+    (WORK / "inventory-counts.json").write_text(json.dumps(count_evidence, indent=2) + "\n")
+    if observed_counts != direct_counts or observed_counts != after_counts:
+        raise ProbeFailure(
+            "inventory counts differ from independent fixture enumeration: "
+            + json.dumps(count_evidence["differences"], sort_keys=True)
+        )
+
+
 def run_content_inventory_probe() -> dict[str, Any]:
     selected, control, fixture = _ensure_fixture()
     flush_fixture_queues("source", "inventory")
@@ -404,28 +433,7 @@ def run_content_inventory_probe() -> dict[str, Any]:
     by_class = {item.content_class: item for item in inventory.classes}
     observed_counts = {name: item.count for name, item in by_class.items()}
     after_counts = _direct_counts()
-    count_evidence = {
-        "expected": direct_counts,
-        "observed": observed_counts,
-        "independent_after": after_counts,
-        "differences": {
-            name: {
-                "expected": direct_counts[name],
-                "observed": observed_counts.get(name),
-                "independent_after": after_counts.get(name),
-            }
-            for name in direct_counts
-            if observed_counts.get(name) != direct_counts[name]
-            or observed_counts.get(name) != after_counts.get(name)
-        },
-    }
-    WORK.mkdir(parents=True, exist_ok=True)
-    (WORK / "inventory-counts.json").write_text(json.dumps(count_evidence, indent=2) + "\n")
-    if observed_counts != direct_counts or observed_counts != after_counts:
-        raise ProbeFailure(
-            "inventory counts differ from independent fixture enumeration: "
-            + json.dumps(count_evidence["differences"], sort_keys=True)
-        )
+    _assert_counts(direct_counts, observed_counts, after_counts)
     unsupported = {"lfs", "other_content"}
     observed = set(CONTENT_CLASSES) - unsupported
     if {name for name, item in by_class.items() if item.status == "observed"} != observed:

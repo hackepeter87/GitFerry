@@ -43,3 +43,24 @@ def test_queue_boundary_retains_success_failure_and_timeout_evidence(
         "exit_code": None if result == "timeout" else result,
         "status": "passed" if result == 0 else "failed",
     }
+
+
+@pytest.mark.parametrize("before,observed,after", [(1, 1, 1), (1, 1, 2), (1, 2, 2), (1, 2, 3)])
+def test_inventory_counts_require_both_independent_snapshots(
+    tmp_path, monkeypatch, before, observed, after
+):
+    monkeypatch.setenv("GITFERRY_IT_ADMIN_PASSWORD", "synthetic-fixture-only")
+    monkeypatch.setenv("GITFERRY_IT_USER_PASSWORD", "synthetic-fixture-only")
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[2] / "tests/integration"))
+    probe = importlib.import_module("content_inventory_probe")
+    monkeypatch.setattr(probe, "WORK", tmp_path)
+    values = [{"git_refs": count, "lfs": None} for count in (before, observed, after)]
+    if before == observed == after:
+        probe._assert_counts(*values)
+    else:
+        with pytest.raises(probe.ProbeFailure, match="inventory counts differ"):
+            probe._assert_counts(*values)
+    evidence = json.loads((tmp_path / "inventory-counts.json").read_text())
+    assert evidence["expected"] == values[0]
+    assert evidence["observed"] == values[1]
+    assert evidence["independent_after"] == values[2]
