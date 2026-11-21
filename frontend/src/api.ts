@@ -68,6 +68,16 @@ export interface BrowseResponse {
 }
 
 export type PlanStatus = "draft" | "queued" | "preflighting" | "running" | "confirmed" | "blocked" | "failed" | "cancelled" | (string & {});
+export type PlanPreviewStatus = "queued" | "checking" | "passed" | "blocked" | "failed";
+export interface PlanPreview {
+  generation: number;
+  plan_digest: string;
+  status: PlanPreviewStatus;
+  reason: string | null;
+  scope: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface PlanOperation {
   operation_id: string;
@@ -104,6 +114,7 @@ export interface TransferPlan {
   reason: string | null;
   created_at: string;
   updated_at: string;
+  preview?: PlanPreview | null;
   operations?: PlanOperation[];
   events?: Array<Record<string, unknown>>;
 }
@@ -372,11 +383,17 @@ export function getPlan(planId: string): Promise<TransferPlan> {
   return request(`/api/v1/plans/${encodeURIComponent(planId)}`);
 }
 
-export function queuePlan(planId: string, digest: string): Promise<TransferPlan> {
+export function requestPlanPreview(planId: string, digest: string): Promise<TransferPlan> {
+  return request(`/api/v1/plans/${encodeURIComponent(planId)}/preview`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ digest }),
+  });
+}
+
+export function queuePlan(planId: string, digest: string, previewGeneration?: number): Promise<TransferPlan> {
   return request(`/api/v1/plans/${encodeURIComponent(planId)}/queue`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ digest }),
+    body: JSON.stringify({ digest, ...(previewGeneration === undefined ? {} : { preview_generation: previewGeneration }) }),
   });
 }
 

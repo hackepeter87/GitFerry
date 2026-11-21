@@ -11,7 +11,7 @@ from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
 from gitferry.operations import ExecutorBusy, OperationExecutor, RemoteWrite
-from gitferry.plan_diagnostics import PreflightBlocked
+from gitferry.plan_diagnostics import PreflightBlocked, PreflightCheck
 from gitferry.state_store import OperationBlocked, OperationRecord
 from gitferry.transfer_plans import PlanConflict, PlanService
 
@@ -135,6 +135,41 @@ class PlanRunner:
             ).fetchone()
         return None if row is None else self.run(row["plan_id"])
 
+    def preview(self, plan_id: str) -> dict[str, Any]:
+        # Same exclusion as execution, but no call to adapter.apply or executor.execute.
+        with _PlanExecutor(self.service, plan_id, self.stop, None):
+            plan = self.service.begin_preview(plan_id)
+            if plan["preview"]["status"] != "checking":
+                return plan
+            generation = plan["preview"]["generation"]
+            if self.stop.is_set():
+                return plan
+            try:
+                with self.adapter_factory(plan) as adapter:
+                    adapter.preflight(plan)
+            except PreflightBlocked as exc:
+                return self.service.finish_preview(
+                    plan_id, generation, check=exc.check, scope=exc.scope
+                )
+            except (OperationBlocked, PlanConflict):
+                return self.service.finish_preview(
+                    plan_id, generation, check=PreflightCheck.SELECTION
+                )
+            except Exception:
+                return self.service.finish_preview(plan_id, generation, failed=True)
+            if self.stop.is_set():
+                # Interrupted reads are repeated on restart; no success is manufactured.
+                return self.service.get(plan_id)
+            return self.service.finish_preview(plan_id, generation)
+
+    def preview_next(self) -> dict[str, Any] | None:
+        with self.service.store.read_connection() as connection:
+            row = connection.execute(
+                "SELECT plan_id FROM plan_previews WHERE status IN ('queued','checking') "
+                "ORDER BY created_at,plan_id LIMIT 1"
+            ).fetchone()
+        return None if row is None else self.preview(row["plan_id"])
+
 
 class BackgroundPlanWorker:
     """Process-owned thread; HTTP clients only persist commands and read status."""
@@ -160,11 +195,14 @@ class BackgroundPlanWorker:
         while not self.runner.stop.is_set():
             try:
                 result = self.runner.run_next()
+                previewed = None
+                if not self.runner.stop.is_set():
+                    previewed = self.runner.preview_next()
                 exported = None
                 if self.run_export is not None and not self.runner.stop.is_set():
                     exported = self.run_export()
                 self.last_error = None
-                if result is not None or exported is not None:
+                if result is not None or previewed is not None or exported is not None:
                     continue
             except ExecutorBusy:
                 pass

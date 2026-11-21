@@ -39,6 +39,11 @@ def configure(parser: argparse.ArgumentParser, database_default: str | None) -> 
     database(queue)
     queue.add_argument("--plan-id", required=True)
     queue.add_argument("--digest", required=True)
+    queue.add_argument("--preview-generation", type=int)
+    preview = actions.add_parser("preview")
+    database(preview)
+    preview.add_argument("--plan-id", required=True)
+    preview.add_argument("--digest", required=True)
     cancel = actions.add_parser("cancel")
     database(cancel)
     cancel.add_argument("--plan-id", required=True)
@@ -73,7 +78,15 @@ def execute(args: argparse.Namespace) -> int:
         elif action == "show":
             result = service.get(args.plan_id)
         elif action == "queue":
-            result = service.queue(args.plan_id, args.digest)
+            result = service.queue(
+                args.plan_id, args.digest, preview_generation=args.preview_generation
+            )
+        elif action == "preview":
+            paths = _paths(args.database)
+            service.request_preview(args.plan_id, args.digest)
+            result = PlanRunner(service, lambda _: GiteaPlanAdapter(state, paths)).preview(
+                args.plan_id
+            )
         elif action == "cancel":
             result = service.cancel(args.plan_id)
         elif action == "run":
@@ -84,6 +97,12 @@ def execute(args: argparse.Namespace) -> int:
             raise ValueError("Unknown plan command")
         print(json.dumps(result, sort_keys=True))
         if action == "run" and isinstance(result, dict) and result["status"] != "confirmed":
+            return 2
+        if (
+            action == "preview"
+            and isinstance(result, dict)
+            and result["preview"]["status"] != "passed"
+        ):
             return 2
         return 0
     except (
