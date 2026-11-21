@@ -839,3 +839,27 @@ are fixture administration over verified LDAPS, not direct database manipulation
 These checks qualify AD-compatible binding preflight and recovery. The complete desktop
 provisioning/rights workflow remains separately OpenLDAP-qualified. A passed blocking test leaves
 the changed-SID operation unresolved; it does not report that identity as migrated.
+
+
+## Selected-content inventory and offline plan coverage
+
+Issue #17 uses the existing entry points; there is no second integration runner.
+`content_inventory_probe.py` seeds real Gitea 1.27.2 content and compares all 21 class counts
+against independent fixture enumeration: 19 observable classes, with LFS and additional
+unenumerated features explicitly unknown. It also qualifies native empty repositories, API
+reaction null semantics, parent relationships, binary size facts and an unchanged unselected
+control repository. Collection performs only GET requests.
+
+The required report entry `selected_content_inventory_and_portable_plan` combines these facts
+with the actual desktop inventory review, inventory-bound application-package v2 export and
+existing isolated file-first-import flow. Missing assertions or counts fail the report contract.
+The TLS test proxy preserves Gitea pagination headers; dropping them must block collection.
+
+Focused tests cover exact-page totals, duplicates, permission/rate/API failures, source drift,
+immutable snapshots after real process restart, schema limits, auth/CSRF, API/CLI parity, and
+package source/replica/author/parent consistency. Browser cases cover explicit review, option
+changes, unsupported-class diagnosis, reload and lost-response replay. Product support is
+limited to the current transfer adapters; observing wiki, LFS limitations, assets or reviews
+does not establish their transfer. See [inventory operation](content-inventory.md) and
+[ADR 0024](decisions/0024-selected-content-inventory.md). Exact run results remain in the issue,
+PR and Actions artifacts.

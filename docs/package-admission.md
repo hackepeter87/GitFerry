@@ -1,7 +1,9 @@
 # Receive a package and prepare a local first-import plan
 
-The receiving application uses its own SQLite database, local connection profiles and credential
-references. A source export contains portable facts, not permission to write to the target.
+The receiving application uses its own SQLite database (schema 16), local connection profiles
+and credential references. A source export contains portable facts, not permission to write to
+the target. Current application-package v2 receipts may include `inventory/document.json`, its
+byte SHA-256 and semantic/content digest, plus the `include_members` decision.
 This operator path supports the shared core; the complete guided browser workflow is still in
 development under [Issue #10](https://github.com/hackepeter87/GitFerry/issues/10).
 
@@ -35,6 +37,12 @@ development under [Issue #10](https://github.com/hackepeter87/GitFerry/issues/10
    its separate execution. Changed selection, package bytes or local prerequisites require a
    fresh review. Unknown outcomes require the existing controlled reconciliation procedure.
 
+For an inventory-bound request, the package must contain a ready inventory whose repository
+scope, selected classes, source installation and digest exactly match the request. The plan is
+not ready when a requested class is unsupported, unknown, excluded, or blocked. Labels and
+label assignments, split or additional team units, direct collaborators, and technical-owner
+teams remain explicit limitations; no new metadata transfer capability follows from admission.
+
 All intake commands accept `--database` or use `GITFERRY_STATE_DB`; package and work paths use
 the existing runtime environment. `gitferry intake list` lists locally admitted receipts. An
 admitted receipt is not an applied or completed transfer.
@@ -47,8 +55,9 @@ requires `expected_review_digest`. Plan options are `include_metadata` (default 
 `apply_members` (default false) and `author_credential_refs` (binding ID to local secret reference).
 Requests contain references, never token values. No intake endpoint sends Gitea writes.
 
-Existing manifest-v1/v2 files retain their exact bytes and digests. SQLite schema 9 records local
-receipts without changing those formats. There is no signature verification yet: hashes check
+Existing manifest-v1/v2 files retain their exact bytes and digests, and package v1 remains
+unchanged. Current native source-copy IDs remain distinct from portable object origins. There is
+no signature verification yet: hashes check
 consistency, not authenticated sender provenance. See [ADR 0015](decisions/0015-package-admission-and-local-plan.md)
 for transaction and trust boundaries.
 
@@ -120,6 +129,7 @@ never resumes a partial byte stream: retry the same complete file when the candi
 incomplete or unavailable.
 
 
-SQLite schema 11 adds local upload receipts; package v1 and manifest v1/v2 remain unchanged.
+SQLite schema 16 adds the durable inventory and upload receipt state; package v1 and manifest
+v1/v2 remain unchanged.
 See [ADR 0017](decisions/0017-durable-package-upload-receipt.md) for publication and restart
 boundaries, and [testing](testing.md) for executed evidence.

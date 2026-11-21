@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -611,5 +611,24 @@ CREATE TABLE directory_configuration_events (
     occurred_at TEXT NOT NULL,
     UNIQUE (configuration_id, config_revision)
 );
+""",
+    16: """
+CREATE TABLE source_inventory_jobs (
+    inventory_id TEXT PRIMARY KEY,
+    source_instance_key TEXT NOT NULL REFERENCES instances(instance_key),
+    request_hash TEXT NOT NULL CHECK (length(request_hash) = 64),
+    request_json TEXT NOT NULL,
+    source_identity_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('queued','running','ready','blocked','failed')),
+    document_json TEXT,
+    document_digest TEXT CHECK (document_digest IS NULL OR length(document_digest) = 64),
+    error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK ((document_json IS NULL) = (document_digest IS NULL)),
+    CHECK (status NOT IN ('ready','blocked') OR document_json IS NOT NULL),
+    CHECK (status NOT IN ('queued','running') OR document_json IS NULL)
+);
+CREATE INDEX source_inventory_jobs_status ON source_inventory_jobs(status, created_at);
 """,
 }

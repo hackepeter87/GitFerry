@@ -14,6 +14,7 @@ from ad_probe import run_ad_probe
 from application_plan_probe import run_application_plan_probe
 from comment_transport_roundtrip_probe import run_comment_transport_roundtrip_probe
 from connection_profile_probe import run_connection_profile_probe
+from content_inventory_probe import run_content_inventory_probe
 from directory_probe import run_directory_probe
 from metadata_roundtrip_probe import run_metadata_roundtrip_probe
 from oci_runtime_probe import run_oci_runtime_probe
@@ -312,6 +313,7 @@ def main() -> None:
         "directory": run_directory_probe(),
         "directory_ad": run_ad_probe(),
         "connection_profiles": run_connection_profile_probe(),
+        "content_inventory": run_content_inventory_probe(),
         "application_plans": run_application_plan_probe(),
         "source_exports": run_source_export_probe(),
         "git_bundle": git_bundle_probe(),

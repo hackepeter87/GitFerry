@@ -111,8 +111,8 @@ test("phase0 selects an approved repository and downloads its export", async ({ 
   if (!sourceDownload) throw new Error("source download path is required");
   await login(page);
   await choose(page, page.getByLabel("Source connection"), "source");
-  await expect(page.getByLabel("Organization")).toBeVisible();
-  await choose(page, page.getByLabel("Organization"), "source-export-lab");
+  await expect(page.getByLabel("Organization", { exact: true })).toBeVisible();
+  await choose(page, page.getByLabel("Organization", { exact: true }), "source-export-lab");
   for (const name of ["source-export-lab/selected", "source-export-lab/selected-extra"]) {
     const repository = page.locator(".browse-grid label").filter({ has: page.locator("span", { hasText: new RegExp(`^${name}$`) }) }).getByRole("checkbox");
     await expect(repository).toBeVisible();
@@ -120,11 +120,27 @@ test("phase0 selects an approved repository and downloads its export", async ({ 
   }
   await choose(page, page.getByLabel("Recipient registration"), "target");
   await check(page, page.getByLabel("Include membership records"));
+  const inventoryQueuedResponse = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/v1/inventories");
+  await activate(page, page.getByRole("button", { name: "Inspect selected content" }));
+  const inventoryQueued = await inventoryQueuedResponse;
+  expect(inventoryQueued.ok()).toBeTruthy();
+  const inventoryId = (await inventoryQueued.json()).inventory_id;
+  let inventoryState: Record<string, unknown> = {};
+  await expect.poll(async () => {
+    inventoryState = await (await page.request.get(`/api/v1/inventories/${inventoryId}`)).json();
+    return inventoryState.status;
+  }, { timeout: 120_000, intervals: [1000, 2000, 5000] }).toMatch(/^(ready|blocked|failed)$/);
+  if (evidencePath) writeFileSync(`${evidencePath}.inventory.json`, JSON.stringify(inventoryState));
+  expect(inventoryState.status, JSON.stringify(inventoryState.summary ?? inventoryState.error_code)).toBe("ready");
+  await expect(page.getByRole("button", { name: "Use this inventory" })).toBeEnabled();
+  await activate(page, page.getByRole("button", { name: "Use this inventory" }));
   const queuedResponse = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/v1/exports");
   await activate(page, page.getByRole("button", { name: "Create and queue export" }));
   const queued = await queuedResponse;
   expect(queued.ok()).toBeTruthy();
   const queuedJob = await queued.json();
+  expect(queuedJob.request.version).toBe(2);
+  expect(queuedJob.request.inventory_digest).toMatch(/^[0-9a-f]{64}$/);
   const row = page.locator(".export-list li").last();
   await expect(row.locator(".export-status")).toHaveText("ready", { timeout: 60_000 });
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
@@ -134,7 +150,9 @@ test("phase0 selects an approved repository and downloads its export", async ({ 
   const download = await downloadPromise;
   const response = await responsePromise;
   await download.saveAs(sourceDownload);
-  record({ source_capture: true, selected_repository: "source-export-lab/selected", downloaded: true,
+  record({ inventory_reviewed: true, inventory_request_version: queuedJob.request.version,
+    inventory_id: queuedJob.request.inventory_id, inventory_digest: queuedJob.request.inventory_digest,
+    source_capture: true, selected_repository: "source-export-lab/selected", downloaded: true,
     queue_status: queuedJob.status, export_id: queuedJob.export_id, download_header_sha256: response.headers()["x-archive-sha256"],
     download_header_bytes: Number(response.headers()["content-length"]) });
 });
@@ -252,6 +270,7 @@ async function prepareTargetPlan(page: Page, options: PlanPreparationOptions = {
     await activate(page, panel.getByRole("button", { name: "Admit package locally" }));
     await activate(page, panel.getByRole("button", { name: "Review plan selection" }));
     await expect(panel.getByRole("heading", { name: "Plan review", exact: true })).toBeVisible();
+    await expect(panel.locator(".coverage")).toContainText("Content inventory coverage");
   }
   let blocked = false;
   let missing: string | null = null;

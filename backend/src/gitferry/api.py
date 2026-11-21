@@ -26,6 +26,8 @@ from gitferry.connection_profiles import ProfileConflict, ProfileValidationError
 from gitferry.directory_api import create_directory_router
 from gitferry.gitea_plan_adapter import GiteaPlanAdapter
 from gitferry.identity_api import create_identity_router
+from gitferry.inventory_api import create_inventory_router
+from gitferry.inventory_jobs import InventoryJobs
 from gitferry.package_api import create_package_admission_router
 from gitferry.package_decision_api import create_package_decision_router
 from gitferry.package_upload_api import create_package_upload_router
@@ -76,8 +78,11 @@ def create_app(
                 application.state.package_uploads = PackageUploads(
                     application.state.runtime.store, application.state.runtime.paths
                 )
+                application.state.inventory_jobs = InventoryJobs(application.state.runtime.store)
                 application.state.plan_worker = BackgroundPlanWorker(
-                    runner, run_export=application.state.export_jobs.run_next
+                    runner,
+                    run_export=application.state.export_jobs.run_next,
+                    run_inventory=application.state.inventory_jobs.run_next,
                 )
                 application.state.plan_worker.start()
             except Exception as exc:
@@ -168,6 +173,7 @@ def create_app(
     application.include_router(create_identity_router(cookie_settings))
     application.include_router(create_directory_router(cookie_settings))
     application.include_router(create_source_export_router(cookie_settings))
+    application.include_router(create_inventory_router(cookie_settings))
     application.include_router(create_package_upload_router(cookie_settings))
     application.post(
         "/api/v1/blueprints/validate",

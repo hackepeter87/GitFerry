@@ -59,6 +59,8 @@ def configure(parser: argparse.ArgumentParser, database_default: str | None) -> 
     prepare.add_argument("--include-metadata", action="store_true")
     prepare.add_argument("--include-members", action="store_true")
     prepare.add_argument("--export-id")
+    prepare.add_argument("--inventory-id")
+    prepare.add_argument("--inventory-digest")
 
     list_action = actions.add_parser("list")
     database(list_action)
@@ -101,6 +103,12 @@ def execute(args: argparse.Namespace) -> int:
                 "include_metadata": args.include_metadata,
                 "include_members": args.include_members,
             }
+            if args.inventory_id is not None or args.inventory_digest is not None:
+                request.update(
+                    version=2,
+                    inventory_id=args.inventory_id,
+                    inventory_digest=args.inventory_digest,
+                )
             result = service.prepare(request, export_id=args.export_id)
         elif action == "list":
             result = service.list()

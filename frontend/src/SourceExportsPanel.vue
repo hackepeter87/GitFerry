@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InventoryPanel from "./InventoryPanel.vue";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   ApiError,
@@ -24,6 +25,7 @@ const emit = defineEmits<{ (event: "session-expired"): void }>();
 const recipients = ref<SourceExportRecipient[]>([]);
 const jobs = ref<SourceExportJob[]>([]);
 const recipientKey = ref("");
+const reviewedInventory = ref<{ inventory_id: string; digest: string } | null>(null);
 const includeMetadata = ref(true);
 const includeMembers = ref(false);
 const loading = ref(true);
@@ -37,11 +39,12 @@ let disposed = false;
 
 const availableRecipients = computed(() => recipients.value.filter((item) => item.instance_key !== props.sourceProfile?.instance_key));
 const selectedCount = computed(() => props.selectedRepositories.size);
-const canCreate = computed(() => Boolean(props.sourceProfile && recipientKey.value && selectedCount.value && !saving.value));
+const canCreate = computed(() => Boolean(props.sourceProfile && recipientKey.value && selectedCount.value && reviewedInventory.value && !saving.value));
 
 onMounted(load);
 onUnmounted(() => { disposed = true; });
 watch(() => props.sourceProfile?.instance_key, () => {
+  reviewedInventory.value = null;
   if (!availableRecipients.value.some((item) => item.instance_key === recipientKey.value)) recipientKey.value = "";
 });
 
@@ -59,14 +62,16 @@ async function load(): Promise<void> {
 
 function makeRequest(): SourceExportRequest | null {
   const profile = props.sourceProfile;
-  if (!profile || !recipientKey.value || !selectedCount.value) return null;
+  if (!profile || !recipientKey.value || !selectedCount.value || !reviewedInventory.value) return null;
   const repositories = [...props.selectedRepositories.values()].map((entry) => ({
     repository: entry.repository ?? entry.name ?? "",
     global_id: String(entry.id),
   })).sort((a, b) => a.repository.localeCompare(b.repository));
   if (repositories.some((entry) => !entry.repository || !entry.global_id)) return null;
   return {
-    version: 1,
+    version: 2,
+    inventory_id: reviewedInventory.value.inventory_id,
+    inventory_digest: reviewedInventory.value.digest,
     source_instance_key: profile.instance_key,
     source_profile_revision: profile.revision,
     recipient_instance_key: recipientKey.value,
@@ -176,6 +181,8 @@ function formatSize(size: number | null): string {
       <label><input v-model="includeMembers" type="checkbox" :disabled="saving"> Include membership records</label>
       <p class="supporting">The archive includes ordinary Git content and supported organization/team structure. LFS, wikis, attachments, releases and reviews are not included. Membership records are proposals; target identities and permissions need local approval.</p>
     </fieldset>
+    <InventoryPanel v-if="sourceProfile" :source-profile="sourceProfile" :selected-repositories="selectedRepositories" :include-metadata="includeMetadata" :include-members="includeMembers" @reviewed="reviewedInventory = $event" @session-expired="emit('session-expired')" />
+    <p v-if="!reviewedInventory" class="supporting">Inspect and review the current inventory before queueing an export.</p>
     <button class="primary" type="button" :disabled="!canCreate" @click="createAndQueue">{{ saving ? "Queueing export…" : "Create and queue export" }}</button>
 
     <div class="saved-exports" aria-labelledby="saved-exports-title">

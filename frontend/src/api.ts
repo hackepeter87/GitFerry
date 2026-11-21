@@ -67,6 +67,102 @@ export interface BrowseResponse {
   inventory_complete: false;
 }
 
+export type InventoryStatus = "queued" | "running" | "ready" | "blocked" | "failed";
+export type InventoryClassStatus = "observed" | "not-supported" | "not-checked" | "excluded" | "blocked" | "failed";
+export interface InventoryCapabilities { classes: string[]; supported: string[]; schema_version: number; }
+export interface InventoryRepositoryRequest { repository: string; global_id: string; }
+export interface InventoryRequest {
+  source_instance_key: string;
+  source_profile_revision: number;
+  repositories: InventoryRepositoryRequest[];
+  requested_classes: string[];
+}
+export interface InventoryObject {
+  key: string;
+  namespace: string;
+  native_id?: string | null;
+  issue_index?: string | null;
+  parent?: { content_class: string; key: string } | null;
+  author?: { account_id: string; login: string } | null;
+  facts: Record<string, unknown>;
+  size_bytes?: number | null;
+}
+export interface InventoryClassObservation {
+  content_class: string;
+  status: InventoryClassStatus;
+  count: number | null;
+  objects: InventoryObject[];
+  reason: string;
+  limitations: string[];
+}
+export interface InventoryRepository {
+  repository: string;
+  native_id: string;
+  requested_classes: string[];
+  classes: InventoryClassObservation[];
+  git_size_estimate_bytes: number | null;
+  size_assumptions: string[];
+}
+export interface InventoryDocument {
+  format: "gitferry.content-inventory";
+  schema_version: number;
+  comparison_version: number;
+  snapshot_id: string;
+  created_at: string;
+  source_instance_key: string;
+  source_installation_marker: string;
+  gitea_version: string;
+  repositories: InventoryRepository[];
+  deletion_semantics: string;
+}
+export interface InventoryBlocker { repository: string; content_class: string; reason: string; }
+export interface InventorySummary {
+  inventory_complete: boolean;
+  transfer_ready: boolean;
+  full_transfer: boolean;
+  blockers: InventoryBlocker[];
+  excluded_classes: InventoryBlocker[];
+  known_payload_bytes: number;
+  objects_without_size: number;
+  temporary_space_assumption: string;
+}
+export interface InventoryCoverageClass {
+  content_class: string;
+  selected: boolean;
+  status: InventoryClassStatus;
+  count: number | null;
+  reason: string;
+  limitations: string[];
+}
+export interface InventoryCoverageRepository {
+  repository: string;
+  native_id: string;
+  git_size_estimate_bytes: number | null;
+  size_assumptions: string[];
+  classes: InventoryCoverageClass[];
+}
+export interface InventoryCoverageReport {
+  snapshot_id: string;
+  content_digest: string;
+  source_instance_key: string;
+  comparison_version: number;
+  summary: InventorySummary;
+  repositories: InventoryCoverageRepository[];
+}
+export interface InventoryJobSummary {
+  inventory_id: string;
+  status: InventoryStatus;
+  document_digest: string | null;
+  error_code: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface InventoryJob extends InventoryJobSummary {
+  request: InventoryRequest;
+  document: InventoryDocument | null;
+  summary: InventorySummary | null;
+}
+
 export type PlanStatus = "draft" | "queued" | "preflighting" | "running" | "confirmed" | "blocked" | "failed" | "cancelled" | (string & {});
 export type PlanPreviewStatus = "queued" | "checking" | "passed" | "blocked" | "failed";
 export interface PlanPreview {
@@ -106,6 +202,7 @@ export interface TransferPlan {
       included_operations?: string[];
       inventory_complete?: boolean;
       limitations?: string[];
+      content_inventory?: InventoryCoverageReport | null;
     };
     [key: string]: unknown;
   };
@@ -128,7 +225,9 @@ export interface SourceExportRepository {
 }
 
 export interface SourceExportRequest {
-  version: 1;
+  version: 1 | 2;
+  inventory_id?: string;
+  inventory_digest?: string;
   source_instance_key: string;
   source_profile_revision: number;
   recipient_instance_key: string;
@@ -213,6 +312,7 @@ export interface PackagePlanReview {
     blocked_operations: string[];
     [key: string]: unknown;
   };
+  content_inventory: InventoryCoverageReport | null;
   [key: string]: unknown;
 }
 
@@ -434,6 +534,30 @@ export function getSourceExport(exportId: string): Promise<SourceExportJob> {
 
 export function sourceExportDownloadUrl(exportId: string): string {
   return `/api/v1/exports/${encodeURIComponent(exportId)}/download`;
+}
+
+export function getInventoryCapabilities(): Promise<InventoryCapabilities> {
+  return request("/api/v1/inventories/capabilities");
+}
+
+export function listInventories(): Promise<InventoryJobSummary[]> {
+  return request("/api/v1/inventories");
+}
+
+export function getInventory(inventoryId: string): Promise<InventoryJob> {
+  return request(`/api/v1/inventories/${encodeURIComponent(inventoryId)}`);
+}
+
+export function createInventory(inventoryId: string, value: InventoryRequest): Promise<InventoryJob> {
+  return request("/api/v1/inventories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ inventory_id: inventoryId, request: value }),
+  });
+}
+
+export function inventoryDocumentUrl(inventoryId: string): string {
+  return `/api/v1/inventories/${encodeURIComponent(inventoryId)}/document`;
 }
 
 function readCookie(name: string): string | undefined {

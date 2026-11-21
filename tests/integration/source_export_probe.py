@@ -56,6 +56,7 @@ ASSERTIONS = frozenset(
         "target_upload_replay_persistent_identity",
         "guided_browser_first_import",
         "guided_browser_source_export",
+        "guided_browser_inventory_bound_export",
         "guided_browser_target_collision",
         "guided_browser_preview_no_remote_write",
         "guided_browser_production_runtime",
@@ -496,6 +497,11 @@ def run_source_export_probe() -> dict[str, Any]:
         and source_browser["downloaded"]
         and source_browser["selected_repository"] == REPOSITORY
         and archive_digest == captured["archive_sha256"]
+    )
+    assertions["guided_browser_inventory_bound_export"] = (
+        source_browser.get("inventory_reviewed") is True
+        and source_browser.get("inventory_request_version") == 2
+        and captured["job"]["request"].get("version") == 2
     )
     assertions["guided_browser_target_collision"] = (
         collision_browser["collision_blocked"]

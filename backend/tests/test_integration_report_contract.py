@@ -38,6 +38,22 @@ def complete_probe_report() -> dict[str, object]:
         "control_repository_change_preserved": True,
     }
     report: dict[str, object] = {
+        "content_inventory": {
+            "status": "passed",
+            "gitea_version": "1.27.2",
+            "assertions": {key: True for key in report_contract().INVENTORY_ASSERTIONS},
+            "counts": {
+                **{key: 1 for key in report_contract().INVENTORY_OBSERVED},
+                "lfs": None,
+                "other_content": None,
+            },
+            "direct_counts": {
+                **{key: 1 for key in report_contract().INVENTORY_OBSERVED},
+                "lfs": None,
+                "other_content": None,
+            },
+            "source_writes_during_collection": 0,
+        },
         "directory": {
             "status": "passed",
             "application_claim_reader": {
@@ -187,6 +203,7 @@ def complete_probe_report() -> dict[str, object]:
                     "target_upload_replay_persistent_identity",
                     "guided_browser_first_import",
                     "guided_browser_source_export",
+                    "guided_browser_inventory_bound_export",
                     "guided_browser_target_collision",
                     "guided_browser_preview_no_remote_write",
                     "guided_browser_production_runtime",
@@ -930,4 +947,42 @@ def test_ad_recovery_failed_or_missing_status_cannot_pass(status: str | None) ->
         evidence["status"] = status
     entries = report_contract().evidence_catalog(report, True)
     entry = next(item for item in entries if item["id"] == "separate_samba_ad_claim_qualification")
+    assert entry["status"] == "failed"
+
+
+@pytest.mark.parametrize("name", sorted(report_contract().INVENTORY_ASSERTIONS))
+def test_inventory_report_requires_each_assertion(name: str) -> None:
+    report = complete_probe_report()
+    del report["content_inventory"]["assertions"][name]
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "selected_content_inventory_and_portable_plan"
+    )
+    assert entry["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "change", ["missing", "zero", "unsupported-zero", "mismatch", "write", "browser"]
+)
+def test_inventory_partial_or_mismatched_evidence_cannot_pass(change: str) -> None:
+    report = complete_probe_report()
+    inventory = report["content_inventory"]
+    if change == "missing":
+        del inventory["counts"]["wiki"]
+    elif change == "zero":
+        inventory["counts"]["wiki"] = 0
+    elif change == "unsupported-zero":
+        inventory["counts"]["lfs"] = 0
+    elif change == "mismatch":
+        inventory["direct_counts"]["wiki"] = 2
+    elif change == "write":
+        inventory["source_writes_during_collection"] = 1
+    else:
+        del report["source_exports"]["assertions"]["guided_browser_inventory_bound_export"]
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "selected_content_inventory_and_portable_plan"
+    )
     assert entry["status"] == "failed"

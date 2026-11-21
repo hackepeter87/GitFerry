@@ -22,8 +22,10 @@ from gitferry.application_package import (
 )
 from gitferry.connection_probe import ConnectionUnavailable, LocalReferences, probe_connection
 from gitferry.connection_profiles import ProfileConflict, ProfileService, _identifier
+from gitferry.content_inventory import InventoryDocument, InventoryError, export_classes
 from gitferry.gitea_bundles import GiteaBundleError, GiteaBundlePusher
 from gitferry.gitea_provisioning import ProvisioningTargetConflict, _repository_segments
+from gitferry.inventory_jobs import InventoryJobs
 from gitferry.operations import OperationExecutor
 from gitferry.package_archive import _rename_noreplace, _sync_directory
 from gitferry.runtime import RuntimePaths
@@ -48,7 +50,9 @@ class _Selection(BaseModel):
 
 class _Request(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-    version: Literal[1]
+    version: Literal[1, 2]
+    inventory_id: str | None = None
+    inventory_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
     source_instance_key: str
     source_profile_revision: Annotated[int, Field(gt=0)]
     recipient_instance_key: str
@@ -60,11 +64,21 @@ class _Request(BaseModel):
 def parse_export_request(value: Mapping[str, Any]) -> dict[str, Any]:
     try:
         request = _Request.model_validate(value).model_dump()
+        if type(value.get("version")) is not int:
+            raise ValueError("version must be an integer")
+        if request["version"] == 1:
+            if "inventory_id" in value or "inventory_digest" in value:
+                raise ValueError("legacy requests cannot bind inventory")
+            del request["inventory_id"], request["inventory_digest"]
+        else:
+            _identifier(request["inventory_id"])
+            if request["inventory_digest"] is None:
+                raise ValueError("inventory digest is required")
         _identifier(request["source_instance_key"])
         _identifier(request["recipient_instance_key"])
         for item in request["repositories"]:
             _repository_segments(item["repository"])
-    except (ValueError, ValidationError, ProvisioningTargetConflict):
+    except (ValueError, TypeError, ValidationError, ProvisioningTargetConflict):
         raise SourceExportConflict("invalid source export selection") from None
     if request["source_instance_key"] == request["recipient_instance_key"]:
         raise SourceExportConflict("source and recipient must be different instances")
@@ -135,6 +149,7 @@ class SourceExports:
                 if existing["request_hash"] != digest:
                     raise SourceExportConflict("export ID cannot be reused for a changed selection")
             else:
+                self._inventory(request)
                 profile = self.profiles._get(connection, request["source_instance_key"])
                 self.profiles._check_revision(profile, request["source_profile_revision"])
                 evidence = connection.execute(
@@ -161,6 +176,31 @@ class SourceExports:
                     (identifier, digest, request_json, evidence[0], timestamp, timestamp),
                 )
         return self.get(identifier)
+
+    def _inventory(
+        self, request: dict[str, Any], *, reobserve: bool = False
+    ) -> InventoryDocument | None:
+        if request["version"] == 1:
+            return None  # Existing bounded exports remain explicit legacy selections.
+        try:
+            service = InventoryJobs(self.state, self.references)
+            job = service.get(request["inventory_id"])
+            expected = {
+                key: request[key]
+                for key in ("source_instance_key", "source_profile_revision", "repositories")
+            }
+            expected["requested_classes"] = export_classes(
+                metadata=request["include_metadata"], members=request["include_members"]
+            )
+            if job["request"] != expected:
+                raise InventoryError("inventory and export selections differ")
+            return service.require_ready(
+                request["inventory_id"], request["inventory_digest"], reobserve=reobserve
+            )
+        except (InventoryError, KeyError, ProfileConflict):
+            raise SourceExportConflict(
+                "reviewed inventory is unavailable, stale, blocked or belongs to another selection"
+            ) from None
 
     def _check_local(self, export_id: str) -> dict[str, Any]:
         job = self.get(export_id)
@@ -263,6 +303,7 @@ class SourceExports:
 
     def _capture(self, job: dict[str, Any], work: Path) -> PackageArtifact:
         request = job["request"]
+        inventory = self._inventory(request, reobserve=True)
         source = request["source_instance_key"]
         profile = self.profiles.get(source)
         self.profiles._check_revision(profile, request["source_profile_revision"])
@@ -332,17 +373,29 @@ class SourceExports:
             for selected in package["repositories"]:
                 payload = selected["bundle"]
                 if payload:
-                    git.check_remote(
+                    observed_refs = git.check_remote(
                         selected["repository"],
                         bundle=BundleIntent(payload["path"], payload["sha256"], payload["size"]),
                         expected_empty=False,
                     )
+                    if inventory is not None:
+                        from gitferry.package_inventory import expected_git_refs
+
+                        if observed_refs != expected_git_refs(inventory, selected["repository"]):
+                            raise SourceExportConflict("Git bundle differs from reviewed inventory")
                 elif git._git_remote(
                     "ls-remote", git._repository_url(selected["repository"]), None
                 ):
                     raise SourceExportConflict(
                         "empty source repository acquired refs during capture"
                     )
+        if inventory is not None:
+            from gitferry.package_inventory import attach_inventory
+
+            self._inventory(request, reobserve=True)
+            attach_inventory(
+                directory, package, inventory, snapshot, include_members=request["include_members"]
+            )
         if metadata is not None:
             manifest = write_transport(directory / "metadata", metadata)
             package["metadata"]["digest_sha256"] = manifest.digest_sha256

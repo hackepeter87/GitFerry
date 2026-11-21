@@ -87,6 +87,7 @@ class _SnapshotReader:
         self.total_entries = 0
         self.total_bytes = 0
         self.limitations: list[str] = []
+        self.last_response_headers: dict[str, str] = {}
 
     def close(self) -> None:
         self.client.close()
@@ -104,6 +105,7 @@ class _SnapshotReader:
                     or response.headers.get("content-encoding", "identity") != "identity"
                 ):
                     raise SourceSnapshotError("source API rejected a snapshot request")
+                self.last_response_headers = dict(response.headers)
                 body = bytearray()
                 for chunk in response.iter_bytes():
                     self._check()
