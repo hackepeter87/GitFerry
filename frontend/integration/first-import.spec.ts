@@ -33,10 +33,17 @@ async function enter(page: Page, control: Locator, value: string): Promise<void>
 async function choose(page: Page, control: Locator, value: string): Promise<void> {
   const optionIndex = () => control.locator("option").evaluateAll((options, selected) => options.filter((option) => !(option as HTMLOptionElement).disabled).findIndex((option) => (option as HTMLOptionElement).value === selected), value);
   await expect.poll(optionIndex).toBeGreaterThanOrEqual(0);
-  const index = await optionIndex();
   await tabTo(page, control);
-  await page.keyboard.press("Home");
-  for (let step = 0; step < index; step++) await page.keyboard.press("ArrowDown");
+  const optionCount = await control.locator("option").count();
+  const label = await control.locator("option").evaluateAll((options, selected) => options.find((option) => (option as HTMLOptionElement).value === selected)?.textContent?.trim() ?? "", value);
+  expect(label.length).toBeGreaterThan(0);
+  // Native popup arrows are platform-dependent in Chromium. Printable type-ahead
+  // cycles same-initial options on macOS and Linux; verify the actual value.
+  for (let step = 0; step <= optionCount && await control.inputValue() !== value; step++) {
+    await expect(control).toBeEnabled();
+    if (!(await control.evaluate((element) => element === document.activeElement))) await tabTo(page, control);
+    await page.keyboard.type(label[0]);
+  }
   await page.keyboard.press("Tab");
   await expect(control).toHaveValue(value);
 }
