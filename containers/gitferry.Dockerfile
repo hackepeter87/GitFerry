@@ -38,7 +38,8 @@ COPY pyproject.toml README.md ./
 COPY backend ./backend
 COPY schemas ./schemas
 COPY --from=frontend-build /build/frontend/dist ./frontend-dist
-RUN python -m pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir --upgrade pip==26.3 \
+    && python -m pip install --no-cache-dir .
 
 USER 10001:10001
 EXPOSE 8080

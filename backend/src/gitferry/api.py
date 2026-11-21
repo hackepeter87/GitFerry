@@ -131,7 +131,7 @@ def create_app(
         response.headers["X-XSS-Protection"] = "0"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        if request.url.path.startswith("/api/"):
+        if request.scope["path"].startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         route = request.scope.get("route")
         route_template = getattr(route, "path", "<unmatched>")
