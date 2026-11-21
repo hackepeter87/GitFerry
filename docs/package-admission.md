@@ -63,9 +63,39 @@ An incomplete body requires resending the complete file. Selecting a different f
 new receipt; existing receipts remain inspectable.
 
 A ready upload makes its `package_ref` available to the admission workflow above. It does not
-approve identities or a target connection, admit transport facts, or write to Gitea. The browser
-connection from this file receipt to local identity decisions and plan review remains under
-Issue #10. Historical source timestamps are still separate from native target timestamps.
+approve identities or a target connection, admit transport facts, or write to Gitea.
+Historical source timestamps are still separate from native target timestamps.
+
+## Local decisions and plan review in the browser
+
+Select a ready receipt and an enabled, locally approved target, then **Load prerequisites**.
+Review the package digest, selected repositories, bundle byte estimate and limitations.
+The estimate is not a complete capacity guarantee.
+
+1. Confirm the sender installation and required realms locally when they are not registered.
+   Review the installation marker and qualified realm. A source URL is a registration value;
+   this step does not reconnect to the offline source or authenticate the package signer.
+2. For each required identity, inspect its realm, external ID and OU. Enter the intended target
+   login and, for authors, a mounted local credential reference. **Check target account** reads
+   the target; **Confirm binding** independently rechecks and persists that explicit decision.
+   Existing bindings cannot be retargeted. No business accounts are created.
+3. Choose metadata and team-membership inclusion explicitly. Both can be excluded for a
+   structure/Git-only plan without business-user bindings. The exclusions remain visible.
+4. **Admit package locally**, then **Review plan selection**. Admission alone grants no target
+   permission. Missing bindings, credentials, parents or unresolved operations block draft
+   preparation. Review the selected repositories, team permissions, metadata and limitations.
+5. **Prepare draft for Transfer plans**, inspect the saved plan, then explicitly start it.
+   Execution belongs to the background worker. Reopening the application observes durable
+   progress instead of resubmitting writes. Conflicts and unknown outcomes use the existing
+   controlled recovery workflow.
+
+Changed options require another review. An expired session returns to sign-in; changed local
+authority or package facts require fresh review rather than a blind retry. The new administrator
+POST routes are `/prerequisites`, `/confirm-sender`, `/confirm-realm`, `/check-account` and
+`/confirm-binding` below `/api/v1/packages/{package_ref}`. They share the existing authentication,
+CSRF, digest and profile-revision checks. See [ADR 0018](decisions/0018-guided-local-package-decisions.md).
+The complete Issue #10 acceptance, including all supported viewports and accessibility checks,
+remains separate from implementation of these controls.
 
 ## Upload API
 

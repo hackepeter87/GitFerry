@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ApiError, cancelPlan, getPlan, listPlans, preparePlan, queuePlan, type PlanOperation, type PlanStatus, type TransferPlan } from "./api";
 
 const emit = defineEmits<{ (event: "session-expired"): void }>();
+const props = defineProps<{ preparedPlan?: TransferPlan }>();
 const plans = ref<TransferPlan[]>([]);
 const selectedId = ref<string>();
 const selected = ref<TransferPlan>();
@@ -46,6 +47,10 @@ const selectedActors = computed(() => {
 
 onMounted(load);
 onBeforeUnmount(() => { disposed = true; ++generation; stopPolling(); });
+watch(() => props.preparedPlan, (plan) => {
+  if (!plan || disposed) return;
+  stopPolling(); selectedId.value = plan.plan_id; selected.value = plan; replaceSummary(plan); notice.value = "A new draft is ready for review below."; schedulePoll(++generation, 0);
+});
 
 async function load(): Promise<void> {
   if (saving.value) return;
