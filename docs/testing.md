@@ -47,6 +47,21 @@ Hosted CI run `44840084900` passed for initial commit `0f7c92a`; current correct
 are tracked on [PR #49](https://github.com/hackepeter87/GitFerry/pull/49). Evidence for the initial
 commit does not approve a later correction or merge commit.
 
+## Issue #9: plan-core work in progress
+
+The branch for Issue #9 introduces local plan-state and runner tests. The current local quality
+gate passed 244 backend tests, lint/format/type checks and the frontend build. New tests cover
+plan publication rollback, concurrent publication, actual child-process reload, unchanged
+original baselines after observation, stale profile rejection and safe cancellation. A child
+process exits after a simulated remote acceptance but before journal confirmation; a fresh
+process recovers `outcome_unknown` and does not increment the remote counter again, including
+under a new plan round. These simulated remote tests do not establish the complete Gitea plan
+workflow. API/CLI/UI integration and real-Gitea plan-specific interruption probes remain open.
+
+Existing Gitea regression run `f61b3ad56bea4134` passed on the unchanged image pin and reported
+successful run-scoped cleanup after the schema/adapter/structure-preflight changes. This is
+regression evidence, not acceptance of Issue #9. See [ADR 0012](decisions/0012-durable-transfer-plans.md).
+
 ## Environment
 
 The documented integration entry point is `make test-integration` on both local development and

@@ -41,7 +41,7 @@ def comment_operation_id(origin_id: str, operation_type: str, intent: Mapping[st
     return f"{operation_type}-{origin_id[-16:]}-{digest}"
 
 
-def _binding_for_author(
+def resolve_author_binding(
     state: StateStore, author: Mapping[str, Any], target_instance_key: str
 ) -> IdentityBindingRecord:
     try:
@@ -75,7 +75,7 @@ def prepare_comment_operation(
     origin = state.get_origin(origin_id)
     if origin.key.object_type != "comment" or origin.key.parent_origin_id is None:
         raise OperationBlocked("comment origin has no immutable parent issue origin")
-    binding = _binding_for_author(state, author, target_instance_key)
+    binding = resolve_author_binding(state, author, target_instance_key)
     intent: dict[str, Any] = {
         "body": body,
         "parent_origin_id": origin.key.parent_origin_id,
