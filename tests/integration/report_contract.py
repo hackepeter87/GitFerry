@@ -336,6 +336,12 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                         "offline_replay_exact",
                         "target_only_archive_verified",
                         "source_and_target_databases_independent",
+                        "package_admission_apply_confirmed",
+                        "native_authors_parent_and_git_refs",
+                        "target_only_archive_and_external_unreachable",
+                        "package_admission_database_independent",
+                        "no_user_preparation_blocks_metadata",
+                        "package_replay_process_restart_no_extra_posts_or_objects",
                     }
                 ),
             ),

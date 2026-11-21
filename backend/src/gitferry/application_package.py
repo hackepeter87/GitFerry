@@ -16,6 +16,7 @@ from gitferry.state_codec import canonical_json
 from gitferry.transport import (
     MAX_MANIFEST_BYTES,
     ManifestValidationError,
+    TransportArtifact,
     _parse,
     load_transport,
 )
@@ -34,6 +35,22 @@ class PackageArtifact:
     digest_sha256: str
     document: dict[str, Any]
     files: dict[str, tuple[int, str]]
+
+
+def load_package_metadata(artifact: PackageArtifact) -> TransportArtifact:
+    """Reload metadata only when the read bytes match the verified descriptor."""
+    reference = artifact.document["metadata"]
+    if reference is None:
+        raise PackageError("package has no metadata selection")
+    _file(artifact.directory, "metadata/manifest.json")
+    _file(artifact.directory, "metadata/manifest.json.sha256")
+    manifest = load_transport(artifact.directory / "metadata")
+    if (
+        manifest.digest_sha256 != reference["digest_sha256"]
+        or manifest.document["manifest_id"] != reference["manifest_id"]
+    ):
+        raise PackageError("embedded metadata changed after package inspection")
+    return manifest
 
 
 def package_path(value: str) -> PurePosixPath:

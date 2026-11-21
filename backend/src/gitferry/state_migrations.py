@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -456,6 +456,16 @@ CREATE TABLE source_exports (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     CHECK ((status = 'captured') = (package_digest IS NOT NULL))
+);
+""",
+    9: """
+CREATE TABLE package_receipts (
+    package_id TEXT PRIMARY KEY,
+    digest_sha256 TEXT NOT NULL CHECK (length(digest_sha256) = 64),
+    target_instance_key TEXT NOT NULL REFERENCES instances(instance_key),
+    package_ref TEXT NOT NULL UNIQUE,
+    document_json TEXT NOT NULL,
+    received_at TEXT NOT NULL
 );
 """,
 }

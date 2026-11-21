@@ -48,8 +48,10 @@ run `44851149501`. The persisted-plan Gitea execution, API/CLI paths, plan UI an
 disconnect flow are covered by their documented real and simulated evidence. Issue #10 is
 now active for the complete first-import workflow. Source selection and the package file boundary
 are integrated (PRs #51 and #52). The source-export slice now connects selected source reads and
-Git bundles to that package without changing metadata v1/v2 bytes. Its integration and review
-remain in progress. Local receipt/admission, identity decisions and the complete wizard remain
+Git bundles to that package without changing metadata v1/v2 bytes. PR #53 is integrated as
+`5c7d303` with hosted-main run `44862775964` passing all 23 mandatory checks. Local
+receipt/admission and translation into the existing durable plan are in development; local
+identity decisions and the complete wizard remain
 open acceptance work; this does not close Issue #10 or milestone 0.2.
 The [plan guide](transfer-plans.md) describes the current boundary without claiming a complete
 first-import wizard.

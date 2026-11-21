@@ -23,6 +23,7 @@ from gitferry.auth_api import (
 from gitferry.blueprints import MAX_BLUEPRINT_BYTES, BlueprintValidationError, validate_text
 from gitferry.connection_profiles import ProfileConflict, ProfileValidationError
 from gitferry.gitea_plan_adapter import GiteaPlanAdapter
+from gitferry.package_api import create_package_admission_router
 from gitferry.plan_api import create_plan_router
 from gitferry.plan_runner import BackgroundPlanWorker, PlanRunner
 from gitferry.profile_api import create_profile_router, profile_error
@@ -146,6 +147,7 @@ def create_app(
     application.include_router(create_auth_router(cookie_settings))
     application.include_router(create_profile_router(cookie_settings))
     application.include_router(create_plan_router(cookie_settings))
+    application.include_router(create_package_admission_router(cookie_settings))
     application.post(
         "/api/v1/blueprints/validate",
         dependencies=[Depends(admin_csrf_dependency(cookie_settings))],

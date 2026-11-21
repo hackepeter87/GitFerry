@@ -75,6 +75,16 @@ class GiteaPlanAdapter:
             raise OperationBlocked("plan selection points at another target")
         if request.unsupported_items:
             raise OperationBlocked("selected unsupported contents require a revised selection")
+        if request.package_digest is not None:
+            from gitferry.package_admission import PackageAdmissions
+
+            if request.package_ref is None:
+                raise OperationBlocked("package-bound plan has no local package reference")
+            PackageAdmissions(self.state, self.paths).verify_receipt(
+                request.package_ref,
+                target_instance_key=request.target_instance_key,
+                expected_digest=request.package_digest,
+            )
         # The estimate is explicit, not a claim about arbitrary Git expansion. A
         # bounded initial import still needs both payload and working space.
         self.check = PreflightCheck.STORAGE

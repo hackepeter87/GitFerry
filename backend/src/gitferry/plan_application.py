@@ -98,6 +98,8 @@ class PlanRequest(_Input):
     target_instance_key: Reference
     round_key: Text
     package_ref: Optional[Reference] = None  # noqa: UP045 -- Pydantic evaluates on Python 3.9
+    package_digest: Optional[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]] = None  # noqa: UP045
+    source_limitations: list[Text] = Field(default_factory=list, max_length=1000)
     repositories: list[RepositoryInput] = Field(default_factory=list, max_length=1000)
     metadata: list[MetadataInput] = Field(default_factory=list, max_length=10000)
     author_credential_refs: dict[str, Reference] = Field(default_factory=dict)
@@ -121,6 +123,8 @@ def parse_plan_request(value: Mapping[str, Any]) -> PlanRequest:
         _repository_segments(repository)
     if any(item.bundle for item in parsed.repositories) and parsed.package_ref is None:
         raise PlanConflict("bundle selections require an owned local package reference")
+    if parsed.package_digest is not None and parsed.package_ref is None:
+        raise PlanConflict("package digest requires an owned package reference")
     return parsed
 
 
@@ -215,7 +219,9 @@ def _metadata_operation(
     )
 
 
-def prepare_transfer_plan(state: StateStore, value: Mapping[str, Any]) -> dict[str, Any]:
+def prepare_transfer_plan(
+    state: StateStore, value: Mapping[str, Any], *, expected_profile_revision: int | None = None
+) -> dict[str, Any]:
     request = parse_plan_request(value)
     with state.read_connection() as connection:
         profile = connection.execute(
@@ -228,6 +234,8 @@ def prepare_transfer_plan(state: StateStore, value: Mapping[str, Any]) -> dict[s
         ).fetchone()
     if profile is None or evidence is None or not evidence["approved_identity"]:
         raise PlanConflict("test and locally approve the target connection first")
+    if expected_profile_revision is not None and profile["revision"] != expected_profile_revision:
+        raise PlanConflict("target profile changed since package selection review")
     digest = hashlib.sha256(evidence["approved_identity"].encode()).hexdigest()
     operations: dict[str, OperationRecord] = {}
     dependencies: dict[str, list[str]] = {}
@@ -298,6 +306,7 @@ def prepare_transfer_plan(state: StateStore, value: Mapping[str, Any]) -> dict[s
             "Selected explicit inputs only; not a complete remote inventory",
             "Native historical creation timestamps are not restored",
             "No general exactly-once guarantee or atomic comment PATCH precondition",
+            *request.source_limitations,
         ],
     }
     required_bytes = 64 * 1024 * 1024 + 3 * sum(
