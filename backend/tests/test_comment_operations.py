@@ -323,3 +323,27 @@ def test_identical_text_comments_keep_distinct_origins_and_targets(tmp_path: Pat
         state.get_object_mapping(first, "instance-b").target_global_id
         != state.get_object_mapping(second.id, "instance-b").target_global_id
     )
+
+
+def test_unknown_resolution_rejects_same_login_with_wrong_native_author(tmp_path: Path) -> None:
+    state, _, comment = configured(tmp_path)
+    client = FakeComments()
+    client.fail_after_create = True
+    operation = prepare_comment_operation(
+        state,
+        origin_id=comment,
+        target_instance_key="instance-b",
+        target_repository_scope="org/repo",
+        operation_type="create_comment",
+        body="same content",
+        author=AUTHOR,
+    )
+    with OperationExecutor(state, "lost") as executor, pytest.raises(OperationBlocked):
+        execute_comment_operation(state, executor, client, operation.operation_id)
+    client.comments[8][0]["user"]["id"] = 999
+    with pytest.raises(CommentTargetConflict, match="author ID"):
+        resolve_unknown_comment_operation(
+            state, client, operation.operation_id, target_comment_id="101"
+        )
+    assert state.get_operation(operation.operation_id).status == "outcome_unknown"
+    assert client.posts == 1

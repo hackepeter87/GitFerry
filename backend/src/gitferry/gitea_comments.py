@@ -135,6 +135,8 @@ def verify_comment_facts(
     issue_index: int,
     expected_body: str,
     expected_author_login: str,
+    expected_author_id: int | None = None,
+    expected_created_at: str | None = None,
 ) -> None:
     if not GiteaCommentClient._belongs_to_issue(comment, issue_index):
         raise CommentTargetConflict("comment belongs to another parent issue")
@@ -142,5 +144,11 @@ def verify_comment_facts(
     actual_login = user.get("login") if isinstance(user, Mapping) else None
     if actual_login != expected_author_login:
         raise CommentTargetConflict("native comment author does not match identity binding")
+    if expected_author_id is not None and (
+        not isinstance(user, Mapping) or str(user.get("id")) != str(expected_author_id)
+    ):
+        raise CommentTargetConflict("native comment author ID does not match identity binding")
+    if expected_created_at is not None and comment.get("created_at") != expected_created_at:
+        raise CommentTargetConflict("native comment creation time changed")
     if comment.get("body") != expected_body:
         raise CommentTargetConflict("comment body does not match the expected content")
