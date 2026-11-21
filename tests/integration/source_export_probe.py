@@ -35,26 +35,29 @@ def _flush_target_fixture_queues(phase: str) -> None:
     # The preceding functional writer push schedules native Gitea work. Finish
     # that setup before freezing a no-write snapshot; do not discard updated_at
     # or mask differences after the operation being checked.
-    result = run(
-        [
-            *COMPOSE,
-            "exec",
-            "-T",
-            "--user",
-            "git",
-            "target",
-            "gitea",
-            "manager",
-            "flush-queues",
-            "--timeout",
-            "30s",
-        ],
-        timeout=45,
-    )
-    (WORK / f"fixture-queues-{phase}.json").write_text(
-        json.dumps({"phase": phase, "exit_code": result.returncode, "status": "passed"}),
-        encoding="utf-8",
-    )
+    command = [
+        *COMPOSE,
+        "exec",
+        "-T",
+        "--user",
+        "git",
+        "target",
+        "gitea",
+        "manager",
+        "flush-queues",
+        "--timeout",
+        "30s",
+    ]
+    record: dict[str, Any] = {"phase": phase, "exit_code": None, "status": "failed"}
+    try:
+        result = run(command, check=False, timeout=45)
+        record["exit_code"] = result.returncode
+        if result.returncode:
+            raise ProbeFailure("prior Gitea fixture queues did not finish")
+        record["status"] = "passed"
+    finally:
+        # Also retain failure/timeout evidence before the runner's cleanup.
+        (WORK / f"fixture-queues-{phase}.json").write_text(json.dumps(record), encoding="utf-8")
 
 
 ASSERTIONS = frozenset(
