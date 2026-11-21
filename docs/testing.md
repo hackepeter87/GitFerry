@@ -20,6 +20,19 @@
 
 Mocks do not replace Gitea integration evidence.
 
+## Python and planning contracts
+
+Python 3.11 is the declared development minimum; the required quality job installs and runs
+all backend tests there before its primary Python 3.13.9 gates. The OCI base remains pinned to
+3.13.9. `make setup` rejects older interpreters before modifying the environment; select an
+installed supported Python using `PYTHON_BOOTSTRAP` when necessary. Historical 3.9 runs are
+not rewritten. [ADR-0020](decisions/0020-python-support-contract.md) explains the correction.
+
+The [issue-contract audit](issue-contract.md) validates complete GitHub snapshots and fails on
+missing/inconsistent metadata, evidence flags or truncated Project exports. Negative fixtures
+run in `make test`. Scope adequacy and dependency direction still require independent review;
+a passing structural audit is not a migration or milestone acceptance result.
+
 ## First-import delivery checks
 
 The common `make test-integration` entry runs the packaged source and target applications in

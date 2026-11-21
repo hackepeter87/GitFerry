@@ -50,9 +50,9 @@ A release candidate is not a release. Candidate preparation must:
 No later rebuild inherits the earlier evidence. Stable publication, a stable channel, `latest`, or
 production activation requires the separate owner decision reserved in the project mandate.
 
-## Current status
+## Historical 0.1.0 foundation
 
-The repository remains at `0.1.0.dev0`. The technical 0.1.0 foundation evidence is integrated at
+The 0.1.0 foundation used application version `0.1.0.dev0`. The technical 0.1.0 foundation evidence is integrated at
 commit `07fe353a896b83a29ee8013bddb80ef638e50c56`. Hosted run `44811562483` passed
 `quality` and `gitea-integration` on that exact clean Linux checkout; artifact `14668890407` records
 all required checks, controlled failure exit 86 with diagnostics, and successful run-local and
@@ -65,3 +65,20 @@ recorded in [the 0.1.0 foundation report](verification-0.1.0-foundation.md). The
 merge and its final main check are durable GitHub evidence on Issue #5. No OCI/offline release
 candidate was built, tagged or published for 0.1.0; stable publication remains a separate owner
 decision.
+
+
+## 0.2 first-import candidate
+
+The application candidate uses Python version `0.2.0rc1` and equivalent frontend SemVer
+`0.2.0-rc.1`. The API reports the application version instead of a separate scaffold constant.
+Manifest v1/v2 and SQLite schema 12 are unchanged. This version is a candidate identifier,
+not stable publication. Exact candidate records and acceptance belong to Issue #11 and its
+Actions artifacts; the issue remains open until all required evidence is inspected.
+
+Use the integrated commit to build once, keep the resulting image identity through the complete
+runtime/reference-Compose/browser/Gitea tests, then retain that same image as an offline OCI
+archive. Record the image configuration digest and archive byte SHA-256 separately. Include a
+package inventory/SBOM from the tested image, build labels, platform, versions and the successful
+report. A separately built architecture has its own identity and evidence. The documented
+Compose installation must use the accepted image, not silently rebuild it. No `latest` or stable
+release is published by milestone acceptance.

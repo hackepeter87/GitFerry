@@ -1,4 +1,4 @@
-"""Minimal iteration-1 REST boundary."""
+"""Authenticated administration REST boundary over the shared application core."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from gitferry import __version__
 from gitferry.auth import AuthService
 from gitferry.auth_api import (
     AuthBoundaryError,
@@ -93,8 +94,8 @@ def create_app(
 
     application = FastAPI(
         title="GitFerry API",
-        version="0.1.0-dev",
-        description="Iteration-1 validation API; no general migration endpoint exists.",
+        version=__version__,
+        description="GitFerry administration API for the supported file-based transfer workflow.",
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,

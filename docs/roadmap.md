@@ -43,24 +43,16 @@ editing and preserve confirmed progress across browser and process restart.
 
 Owning issues: [#6](https://github.com/hackepeter87/GitFerry/issues/6)–[#11](https://github.com/hackepeter87/GitFerry/issues/11).
 
-Issue #9 is accepted through PR #50, integrated as `1b0bed5` and verified by hosted-main
-run `44851149501`. The persisted-plan Gitea execution, API/CLI paths, plan UI and browser
-disconnect flow are covered by their documented real and simulated evidence. Issue #10 is
-now active for the complete first-import workflow. Source selection and the package file boundary
-are integrated (PRs #51 and #52). The source-export slice now connects selected source reads and
-Git bundles to that package without changing metadata v1/v2 bytes. PR #53 is integrated as
-`5c7d303` with hosted-main run `44862775964` passing all 23 mandatory checks. Local
-receipt/admission and translation into the existing durable plan are integrated through PR #54,
-main `9e6b2f4`, with hosted-main run `44866950765` passing all 23 mandatory checks. Guided source
-capture and verified download are integrated through PR #55, main `de6fcf4`, with hosted-main
-run `44870014502` passing all 23 mandatory checks. Durable target archive upload is integrated
-through PR #56, main `f2b4518`, with hosted-main run `44872758690` passing all 23 mandatory
-checks. The current delivery adds explicit local identity decisions and browser admission/plan
-review. Local run `2e007e9bfabe4733` executes the target first import and observes its confirmed
-result after application restart. Exact-commit hosted verification and the remaining complete
-Issue #10 acceptance are still required; Issue #10 and milestone 0.2 remain open.
-The [plan guide](transfer-plans.md) describes the current boundary without claiming a complete
-first-import wizard.
+The implemented desktop workflow selects source organizations/repositories, exports and downloads
+an actual file package, admits it on an independent target, reviews local identity decisions and
+prerequisites, and executes the first import. Confirmed state remains visible after browser and
+application restart without repeated writes. See the [first-import guide](first-import.md) and
+[plan guide](transfer-plans.md). The supported classes and fidelity limits remain explicit.
+
+The [delivery index](../tasks/plan.md) maps #6–#10 to their real PRs, including the completed
+end-to-end delivery in #58. Dependency maintenance #47, the planning contract #48 and final
+candidate acceptance #11 complete this milestone. Their current acceptance and exact commit/run/
+artifact records live in GitHub; this roadmap does not duplicate a changing execution status.
 
 ## 0.3.0 — Identities, directories, and effective permissions
 

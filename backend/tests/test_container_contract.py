@@ -53,3 +53,25 @@ def test_build_version_matches_python_package_metadata() -> None:
 
     assert f"ARG GITFERRY_VERSION={version}" in DOCKERFILE.read_text(encoding="utf-8")
     assert f"GITFERRY_VERSION := {version}" in makefile
+
+
+def test_candidate_version_is_shared_by_api_frontend_and_build() -> None:
+    import json
+
+    from gitferry import __version__
+    from gitferry.api import create_app
+
+    assert create_app().version == __version__
+    package = json.loads((ROOT / "frontend/package.json").read_text())
+    lock = json.loads((ROOT / "frontend/package-lock.json").read_text())
+    assert package["version"] == lock["version"] == lock["packages"][""]["version"]
+    assert package["version"].replace("-rc.", "rc") == __version__
+    assert (
+        f"GITFERRY_VERSION: ${{GITFERRY_VERSION:-{__version__}}}"
+        in (ROOT / "tests/integration/compose.yaml").read_text()
+    )
+
+    runner = (ROOT / "tests/integration/run.sh").read_text()
+    probe = (ROOT / "tests/integration/oci_runtime_probe.py").read_text()
+    assert "from gitferry import __version__; print(__version__)" in runner
+    assert 'labels.get("org.opencontainers.image.version") == __version__' in probe

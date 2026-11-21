@@ -4,6 +4,10 @@ GitFerry uses issue-first delivery. Public issues and version milestones define 
 GitHub Project adds operational status, priority, type, area, target release, risk, and decision
 state without replacing those public records.
 
+See the [issue contract and bounded audit](docs/issue-contract.md) for required fields,
+evidence flags and read-only GitHub export commands. The [delivery index](tasks/plan.md)
+records dependency direction and actual completed delivery PRs; GitHub owns live status.
+
 ## Before implementation
 
 An implementation issue must describe the problem and expected result, scope and exclusions,

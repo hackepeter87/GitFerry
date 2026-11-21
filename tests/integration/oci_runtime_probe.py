@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from gitferry import __version__
 from support import COMPOSE_PROJECT, ROOT, ProbeFailure, run
 
 IMAGE = os.environ["GITFERRY_IT_RUNTIME_IMAGE"]
@@ -345,7 +346,7 @@ def run_oci_runtime_probe() -> dict[str, Any]:
         labels = config.get("Labels") or {}
         image_contract = {
             "non_root_user": config.get("User") == "10001:10001",
-            "version_label": labels.get("org.opencontainers.image.version") == "0.1.0.dev0",
+            "version_label": labels.get("org.opencontainers.image.version") == __version__,
             "revision_label": labels.get("org.opencontainers.image.revision") == SOURCE_REVISION,
             "license_label": labels.get("org.opencontainers.image.licenses") == "Apache-2.0",
             "healthcheck_present": bool(config.get("Healthcheck")),
