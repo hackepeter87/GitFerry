@@ -299,6 +299,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
 
     mandatory_sections = (
         "connection_profiles",
+        "application_plans",
         "git_bundle",
         "metadata",
         "identity_and_permissions",
@@ -316,6 +317,35 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         and all(_value(report, f"{section}.status") == "passed" for section in mandatory_sections)
     )
     entries = [
+        (
+            "durable_application_plan_and_remote_interruptions",
+            _all_required_true(
+                report,
+                "application_plans.assertions",
+                frozenset(
+                    {
+                        "structure_bundle_and_metadata_confirmed",
+                        "distinct_native_authors",
+                        "parent_mapping_confirmed",
+                        "target_only_context",
+                        "confirmed_restart_no_duplicates",
+                        "crash_remote_post_accepted",
+                        "crash_restart_outcome_unknown",
+                        "crash_no_second_post",
+                        "lost_remote_post_accepted",
+                        "lost_restart_outcome_unknown",
+                        "lost_no_second_post",
+                        "new_packaging_cannot_bypass_unknown",
+                        "explicit_resolution_rejects_wrong_parent_author_and_content",
+                        "explicit_resolution_then_restart_confirms_without_post",
+                        "control_repository_unchanged",
+                        "credentials_absent_from_state_and_report",
+                    }
+                ),
+            ),
+            "tests/integration/application_plan_probe.py",
+            "application_plans.assertions",
+        ),
         (
             "connection_profiles_strict_tls_and_local_authority",
             _all_required_true(

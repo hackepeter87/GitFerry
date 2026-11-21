@@ -41,7 +41,7 @@ def comment_operation_id(origin_id: str, operation_type: str, intent: Mapping[st
     return f"{operation_type}-{origin_id[-16:]}-{digest}"
 
 
-def _binding_for_author(
+def resolve_author_binding(
     state: StateStore, author: Mapping[str, Any], target_instance_key: str
 ) -> IdentityBindingRecord:
     try:
@@ -75,7 +75,7 @@ def prepare_comment_operation(
     origin = state.get_origin(origin_id)
     if origin.key.object_type != "comment" or origin.key.parent_origin_id is None:
         raise OperationBlocked("comment origin has no immutable parent issue origin")
-    binding = _binding_for_author(state, author, target_instance_key)
+    binding = resolve_author_binding(state, author, target_instance_key)
     intent: dict[str, Any] = {
         "body": body,
         "parent_origin_id": origin.key.parent_origin_id,
@@ -109,6 +109,79 @@ def prepare_comment_operation(
     return operation
 
 
+def preflight_comment_operation(
+    state: StateStore,
+    client: CommentClient,
+    operation_id: str,
+    *,
+    planned_parent_origins: frozenset[str] = frozenset(),
+) -> None:
+    """Read-only remote validation before any selected plan write; conflicts remain local."""
+    operation = state.get_operation(operation_id)
+    if operation.status in ("outcome_unknown", "executing", "conflict", "failed"):
+        raise OperationBlocked("comment operation requires reconciliation")
+    binding = state.get_identity_binding(str(operation.intent["author_binding_id"]))
+    if (
+        binding.target_instance_key != operation.target_instance_key
+        or binding.target_login != client.authenticated_login
+    ):
+        raise OperationBlocked("comment client does not match the explicitly bound author")
+    parent_origin = str(operation.intent["parent_origin_id"])
+    try:
+        parent = state.get_object_mapping(parent_origin, operation.target_instance_key)
+    except KeyError:
+        if (
+            operation.operation_type == "create_comment"
+            and operation.status != "confirmed"
+            and parent_origin in planned_parent_origins
+        ):
+            return
+        raise OperationBlocked("comment parent has no confirmed target mapping") from None
+    try:
+        if (
+            parent.target_repository_scope != operation.target_repository_scope
+            or parent.target_issue_index is None
+        ):
+            raise CommentTargetConflict("parent mapping points at another repository")
+        try:
+            mapping = state.get_object_mapping(operation.origin_id, operation.target_instance_key)
+        except KeyError:
+            if operation.operation_type == "create_comment" and operation.status != "confirmed":
+                return
+            raise CommentTargetConflict("mapped comment is missing") from None
+        if operation.operation_type == "create_comment" and operation.status != "confirmed":
+            raise CommentTargetConflict("an existing comment copy cannot be created again")
+        if (
+            mapping.target_repository_scope != operation.target_repository_scope
+            or mapping.target_issue_index != parent.target_issue_index
+        ):
+            raise CommentTargetConflict("comment mapping points at another parent")
+        current = client.verified_comment(
+            operation.target_repository_scope, parent.target_issue_index, mapping.target_global_id
+        )
+        verify_comment_facts(
+            current,
+            issue_index=parent.target_issue_index,
+            expected_body=str(
+                operation.intent["body" if operation.status == "confirmed" else "expected_body"]
+            ),
+            expected_author_login=binding.target_login,
+            expected_author_id=binding.target_account_id,
+            expected_created_at=mapping.target_native_created_at,
+        )
+    except CommentTargetConflict as exc:
+        if operation.status != "confirmed":
+            state.mark_operation_conflict(
+                operation_id,
+                conflict_type="comment_target_drift",
+                reason=str(exc),
+                evidence={"expected_parent_origin": parent_origin},
+            )
+        raise OperationBlocked(
+            "comment target differs from its expected parent or baseline"
+        ) from None
+
+
 def execute_comment_operation(
     state: StateStore,
     executor: OperationExecutor,
@@ -137,38 +210,15 @@ def execute_comment_operation(
     issue_index = parent.target_issue_index
     body = str(operation.intent["body"])
 
+    try:
+        preflight_comment_operation(state, client, operation_id)
+    except OperationBlocked:
+        conflicted = state.get_operation(operation_id)
+        if conflicted.status == "conflict":
+            return conflicted
+        raise
     if operation.operation_type == "update_comment":
         mapping = state.get_object_mapping(operation.origin_id, operation.target_instance_key)
-        if (
-            mapping.target_repository_scope != operation.target_repository_scope
-            or mapping.target_issue_index != issue_index
-        ):
-            return state.mark_operation_conflict(
-                operation_id,
-                conflict_type="comment_parent_mismatch",
-                reason="mapped comment does not point at the expected parent issue",
-                evidence={"expected_issue_index": issue_index},
-            )
-        try:
-            current = client.verified_comment(
-                operation.target_repository_scope, issue_index, mapping.target_global_id
-            )
-            verify_comment_facts(
-                current,
-                issue_index=issue_index,
-                expected_body=str(operation.intent["expected_body"]),
-                expected_author_login=binding.target_login,
-            )
-        except CommentTargetConflict as exc:
-            return state.mark_operation_conflict(
-                operation_id,
-                conflict_type="comment_target_drift",
-                reason=str(exc),
-                evidence={
-                    "target_global_id": mapping.target_global_id,
-                    "expected_issue_index": issue_index,
-                },
-            )
 
         def update(_: dict[str, Any]) -> Any:
             changed = client.update_comment(
@@ -179,6 +229,8 @@ def execute_comment_operation(
                 issue_index=issue_index,
                 expected_body=body,
                 expected_author_login=binding.target_login,
+                expected_author_id=binding.target_account_id,
+                expected_created_at=mapping.target_native_created_at,
             )
             return confirmation_from_comment(changed, issue_index)
 
@@ -191,6 +243,7 @@ def execute_comment_operation(
             issue_index=issue_index,
             expected_body=body,
             expected_author_login=binding.target_login,
+            expected_author_id=binding.target_account_id,
         )
         return confirmation_from_comment(created, issue_index)
 
@@ -208,13 +261,19 @@ def resolve_unknown_comment_operation(
     if operation.status != "outcome_unknown" or operation.operation_type != "create_comment":
         raise OperationBlocked("comment operation is not an unknown create awaiting resolution")
     binding = state.get_identity_binding(str(operation.intent["author_binding_id"]))
-    if client.authenticated_login != binding.target_login:
+    if (
+        client.authenticated_login != binding.target_login
+        or binding.target_instance_key != operation.target_instance_key
+    ):
         raise OperationBlocked("reconciliation client is not the mapped comment author")
     parent = state.get_object_mapping(
         str(operation.intent["parent_origin_id"]), operation.target_instance_key
     )
-    if parent.target_issue_index is None:
-        raise OperationBlocked("expected parent issue has no target mapping")
+    if (
+        parent.target_issue_index is None
+        or parent.target_repository_scope != operation.target_repository_scope
+    ):
+        raise OperationBlocked("expected parent issue has no matching target mapping")
     comment = client.verified_comment(
         operation.target_repository_scope, parent.target_issue_index, target_comment_id
     )
@@ -223,6 +282,7 @@ def resolve_unknown_comment_operation(
         issue_index=parent.target_issue_index,
         expected_body=str(operation.intent["body"]),
         expected_author_login=binding.target_login,
+        expected_author_id=binding.target_account_id,
     )
     return state.resolve_unknown_operation(
         operation_id,

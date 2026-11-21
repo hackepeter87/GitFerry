@@ -109,6 +109,7 @@ services:
       - ./transport_worker.py:/probe/transport_worker.py:ro
       - ./comment_transport_worker.py:/probe/comment_transport_worker.py:ro
       - ./provisioning_worker.py:/probe/provisioning_worker.py:ro
+      - ./plan_worker.py:/probe/plan_worker.py:ro
       - ../../integration-results/package:/package:ro
     networks:
       - target-net

@@ -10,6 +10,8 @@ from gitferry.provisioning import (
     ProvisioningMember,
     ProvisioningPlan,
     ProvisioningTeam,
+    preflight_provisioning_operations,
+    prepare_provisioning_operations,
     provision_selected_repository,
 )
 from gitferry.state_store import OriginKey, StateStore, TargetConfirmation
@@ -487,3 +489,40 @@ def test_remote_success_before_local_confirmation_leaves_no_mapping(tmp_path: Pa
             "SELECT status FROM operations WHERE operation_type = 'create_organization'"
         ).fetchone()
     assert operation["status"] == "outcome_unknown"
+
+
+def test_repository_collision_is_found_before_organization_creation(tmp_path: Path) -> None:
+    state, plan = configured(tmp_path)
+    client = FakeProvisioningClient()
+    client.existing_repositories[plan.repository] = client.repository
+    with OperationExecutor(state, "preflight") as executor, pytest.raises(OperationBlocked):
+        provision_selected_repository(
+            state, executor, client, plan, bundle_pusher=FakeBundlePusher()
+        )
+    assert (client.organizations, client.repositories, client.teams, client.memberships) == (
+        0,
+        0,
+        0,
+        0,
+    )
+    operations, graph = prepare_provisioning_operations(state, plan)
+    repository = next(item for item in operations if item.operation_type == "create_repository")
+    organization = next(item for item in operations if item.operation_type == "create_organization")
+    assert repository.status == "conflict"
+    assert graph[repository.operation_id] == [organization.operation_id]
+
+
+def test_structure_preflight_is_read_only_and_reuses_journal_ids(tmp_path: Path) -> None:
+    state, plan = configured(tmp_path)
+    client = FakeProvisioningClient()
+    first, graph = prepare_provisioning_operations(state, plan)
+    preflight_provisioning_operations(state, client, plan)
+    second, repeated = prepare_provisioning_operations(state, plan)
+    assert [item.operation_id for item in first] == [item.operation_id for item in second]
+    assert graph == repeated
+    assert (client.organizations, client.repositories, client.teams, client.assignments) == (
+        0,
+        0,
+        0,
+        0,
+    )

@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from application_plan_probe import run_application_plan_probe
 from comment_transport_roundtrip_probe import run_comment_transport_roundtrip_probe
 from connection_profile_probe import run_connection_profile_probe
 from metadata_roundtrip_probe import run_metadata_roundtrip_probe
@@ -306,6 +307,7 @@ def main() -> None:
     report = {
         "gitea": {"source": source_version, "target": target_version},
         "connection_profiles": run_connection_profile_probe(),
+        "application_plans": run_application_plan_probe(),
         "git_bundle": git_bundle_probe(),
         "metadata": metadata_probe(source_users, target_users),
         "identity_and_permissions": permissions,

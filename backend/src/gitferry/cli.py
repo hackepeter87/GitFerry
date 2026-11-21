@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from gitferry import profile_cli
+from gitferry import plan_cli, profile_cli
 from gitferry.auth import AuthError, AuthService
 from gitferry.blueprints import BlueprintValidationError, load_and_validate
 from gitferry.comment_operations import resolve_unknown_comment_operation
@@ -35,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     database_default = os.environ.get("GITFERRY_STATE_DB")
     profile_cli.configure(subparsers.add_parser("connections"), database_default)
+    plan_cli.configure(subparsers.add_parser("plans"), database_default)
     validate = subparsers.add_parser("validate-blueprint")
     validate.add_argument("path", type=Path)
 
@@ -155,6 +156,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "connections":
         return profile_cli.execute(args)
+    if args.command == "plans":
+        return plan_cli.execute(args)
     if args.command == "admin":
         try:
             auth = AuthService(StateStore(args.database))

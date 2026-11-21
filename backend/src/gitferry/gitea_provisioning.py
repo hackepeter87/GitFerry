@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import ssl
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import quote
@@ -22,18 +23,24 @@ class GiteaProvisioningClient:
         base_url: str,
         *,
         username: str,
-        password: str,
-        verify: bool | str = True,
+        password: str | None = None,
+        token: str | None = None,
+        verify: bool | str | ssl.SSLContext = True,
         timeout: float = 20.0,
         transport: httpx.BaseTransport | None = None,
     ):
+        if (password is None) == (token is None):
+            raise ValueError("supply one local credential mechanism")
         self.authenticated_login = username
         self._client = httpx.Client(
             base_url=base_url.rstrip("/") + "/api/v1",
-            auth=(username, password),
+            auth=(username, password) if password is not None else None,
+            headers={"Authorization": "token " + token} if token is not None else None,
             verify=verify,
             timeout=timeout,
             transport=transport,
+            follow_redirects=False,
+            trust_env=False,
         )
 
     def close(self) -> None:

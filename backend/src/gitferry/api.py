@@ -22,9 +22,13 @@ from gitferry.auth_api import (
 )
 from gitferry.blueprints import MAX_BLUEPRINT_BYTES, BlueprintValidationError, validate_text
 from gitferry.connection_profiles import ProfileConflict, ProfileValidationError
+from gitferry.gitea_plan_adapter import GiteaPlanAdapter
+from gitferry.plan_api import create_plan_router
+from gitferry.plan_runner import BackgroundPlanWorker, PlanRunner
 from gitferry.profile_api import create_profile_router, profile_error
 from gitferry.runtime import RuntimeStatus, initialize_runtime
 from gitferry.state_migrations import SCHEMA_VERSION
+from gitferry.transfer_plans import PlanService
 
 # Uvicorn configures ``uvicorn.error`` for production output.  A child logger
 # keeps the allowlisted request record visible while the raw access logger is
@@ -50,6 +54,15 @@ def create_app(
                 application.state.runtime = initialize_runtime()
                 if auth_service is None:
                     application.state.auth = AuthService(application.state.runtime.store)
+                service = PlanService(application.state.runtime.store)
+                runner = PlanRunner(
+                    service,
+                    lambda _plan: GiteaPlanAdapter(
+                        application.state.runtime.store, application.state.runtime.paths
+                    ),
+                )
+                application.state.plan_worker = BackgroundPlanWorker(runner)
+                application.state.plan_worker.start()
             except Exception as exc:
                 readiness.failed(exc)
                 raise
@@ -59,6 +72,9 @@ def create_app(
         try:
             yield
         finally:
+            worker = getattr(application.state, "plan_worker", None)
+            if worker is not None:
+                worker.stop()
             readiness.stopping()
 
     application = FastAPI(
@@ -116,13 +132,20 @@ def create_app(
 
     @application.get("/readyz")
     def ready() -> JSONResponse:
+        content = readiness.snapshot()
+        worker = getattr(application.state, "plan_worker", None)
+        if content.get("mode") == "managed" and content["status"] == "ready":
+            if worker is None or not worker.thread.is_alive():
+                content.update(status="failed", workerError="worker_unavailable")
+            elif worker.last_error is not None:
+                content.update(status="failed", workerError=worker.last_error)
         return JSONResponse(
-            status_code=200 if readiness.is_ready else 503,
-            content=readiness.snapshot(),
+            status_code=200 if content["status"] == "ready" else 503, content=content
         )
 
     application.include_router(create_auth_router(cookie_settings))
     application.include_router(create_profile_router(cookie_settings))
+    application.include_router(create_plan_router(cookie_settings))
     application.post(
         "/api/v1/blueprints/validate",
         dependencies=[Depends(admin_csrf_dependency(cookie_settings))],

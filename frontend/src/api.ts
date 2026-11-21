@@ -46,6 +46,47 @@ export interface ConnectionIdentity {
   certificate_sha256: string | null;
 }
 
+export type PlanStatus = "draft" | "queued" | "preflighting" | "running" | "confirmed" | "blocked" | "failed" | "cancelled" | (string & {});
+
+export interface PlanOperation {
+  operation_id: string;
+  step_index?: number;
+  operation_type: string;
+  target_repository_scope?: string | null;
+  origin_id?: string | null;
+  status: string;
+  target_global_id?: string | null;
+  error_reason?: string | null;
+  intent?: Record<string, unknown>;
+  bindings?: Record<string, unknown>;
+  baseline?: Record<string, unknown> | null;
+}
+
+export interface TransferPlan {
+  plan_id: string;
+  digest: string;
+  target_instance_key: string;
+  profile_revision: number;
+  evidence_digest: string;
+  round_key: string;
+  document: {
+    inventory?: {
+      request?: Record<string, unknown>;
+      included_operations?: string[];
+      inventory_complete?: boolean;
+      limitations?: string[];
+    };
+    [key: string]: unknown;
+  };
+  status: PlanStatus;
+  cancel_requested: boolean;
+  reason: string | null;
+  created_at: string;
+  updated_at: string;
+  operations?: PlanOperation[];
+  events?: Array<Record<string, unknown>>;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -136,6 +177,35 @@ export function exportConnections(): Promise<ConnectionConfiguration> {
 
 export function importConnections(rawJson: string): Promise<ConnectionProfile[]> {
   return request("/api/v1/connections/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: rawJson });
+}
+
+export function preparePlan(selection: Record<string, unknown>): Promise<TransferPlan> {
+  return request("/api/v1/plans/prepare", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(selection),
+  });
+}
+
+export function listPlans(): Promise<TransferPlan[]> {
+  return request("/api/v1/plans");
+}
+
+export function getPlan(planId: string): Promise<TransferPlan> {
+  return request(`/api/v1/plans/${encodeURIComponent(planId)}`);
+}
+
+export function queuePlan(planId: string, digest: string): Promise<TransferPlan> {
+  return request(`/api/v1/plans/${encodeURIComponent(planId)}/queue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ digest }),
+  });
+}
+
+export function cancelPlan(planId: string): Promise<TransferPlan> {
+  return request(`/api/v1/plans/${encodeURIComponent(planId)}/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 function readCookie(name: string): string | undefined {

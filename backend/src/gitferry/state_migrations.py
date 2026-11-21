@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -406,5 +406,41 @@ CREATE TABLE connection_checks (
     approved_identity TEXT,
     checked_at TEXT NOT NULL
 );
+""",
+    7: """
+CREATE TABLE transfer_plans (
+    plan_id TEXT PRIMARY KEY,
+    digest TEXT NOT NULL UNIQUE CHECK (length(digest) = 64),
+    target_instance_key TEXT NOT NULL REFERENCES instances(instance_key),
+    profile_revision INTEGER NOT NULL CHECK (profile_revision >= 1),
+    evidence_digest TEXT NOT NULL CHECK (length(evidence_digest) = 64),
+    round_key TEXT NOT NULL,
+    document_json TEXT NOT NULL,
+    cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancel_requested IN (0, 1)),
+    status TEXT NOT NULL CHECK (status IN (
+        'draft','queued','preflighting','running','confirmed','blocked','failed','cancelled'
+    )),
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE plan_steps (
+    plan_id TEXT NOT NULL REFERENCES transfer_plans(plan_id) ON DELETE CASCADE,
+    step_index INTEGER NOT NULL CHECK (step_index >= 0),
+    operation_id TEXT NOT NULL REFERENCES operations(operation_id),
+    snapshot_json TEXT NOT NULL,
+    PRIMARY KEY (plan_id, step_index),
+    UNIQUE (plan_id, operation_id)
+);
+CREATE TABLE plan_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id TEXT NOT NULL REFERENCES transfer_plans(plan_id) ON DELETE CASCADE,
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    reason TEXT,
+    evidence_json TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX transfer_plans_status ON transfer_plans(status, updated_at);
 """,
 }

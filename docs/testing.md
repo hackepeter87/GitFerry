@@ -47,6 +47,57 @@ Hosted CI run `44840084900` passed for initial commit `0f7c92a`; current correct
 are tracked on [PR #49](https://github.com/hackepeter87/GitFerry/pull/49). Evidence for the initial
 commit does not approve a later correction or merge commit.
 
+## Issue #9: application-plan work in progress
+
+The plan core now connects to the fixed Gitea adapter and protected API/local CLI. Local tests
+cover immutable plans, atomic publication, original baseline preservation, writer exclusion,
+real child-process recovery with a simulated remote, exact author bindings and parent ordering.
+A managed-worker test closes the HTTP client while a simulated write is in progress. The
+Chromium suite now adds a real-backend browser test: queue with the keyboard, wait for the
+simulated remote-write synchronization point, close the page, release the write, reopen and
+observe the same confirmed journal operation. It also prepares a new draft through the UI
+without changing that operation identity. All 14 browser tests passed; mocked API cases cover
+review/queue/cancel, empty state, unknown-parent distinctions and delayed-response selection.
+The browser remote is simulated; the independent Gitea probe below supplies remote evidence.
+
+Local integration run `e5b4cbd772c74829` passed all 21 required report checks. Its new
+`application_plans` section passed 14 assertions in the target-only Linux/arm64 container:
+organization/team/repository plus Git-bundle/issue/comment execution; distinct native authors and
+parent mapping; confirmed replay after process restart; real accepted comment POST followed by
+hard exit before local confirmation; real accepted POST with its HTTP response discarded;
+restart and new-packaging refusal without another POST; unchanged control repository; and
+absence of token values in state and diagnostic evidence. Interrupted operations remain
+`outcome_unknown`, and those plans remain blocked—not successfully imported.
+
+The host was Darwin/arm64, Docker Server Linux/arm64 29.9.3, with no observed emulation. Both
+Gitea instances retained pinned version 1.27.2 and the existing image digest. Run-scoped cleanup
+passed. The first attempt correctly failed because the new test TLS proxy omitted the HTTP
+authentication challenge for Git; diagnostic artifacts and cleanup worked. The proxy now
+forwards that challenge. Existing manifest-v1/v2 and separate-state roundtrip regressions passed.
+
+The initial local quality gate passed 270 backend tests plus lint, formatting, MyPy and frontend
+build. The controlled failure contract and `make test-clean` also passed. Hosted run `44847979869` passed the backend/adapter source commit `79f25db` on Linux x86_64
+with Docker Linux/amd64 28.0.4 and no emulation. Its tested PR merge checkout was `0f069e6`;
+the report records both identities, all 22 mandatory checks including workflow cleanup, and
+all 14 application-plan assertions. Both Gitea containers resolved to image ID
+`sha256:e8be8e1f776fe453b811d88887306b1d7bdf83577789465e5d186924014a57a6`.
+The controlled failure report correctly remains failed with exit 86 and successful cleanup.
+Hosted run `44849763511` also passed the UI source commit `380e33c`.
+
+Independent review then required categorized preflight diagnostics and real explicit-resolution
+evidence. Local follow-up run `a0307e5e64414afc` passed all 21 required checks and 16 application
+assertions on the same Linux/arm64 environment. Wrong-parent, wrong-native-author and wrong-body
+comment candidates were rejected while the operation stayed unknown. Only after the restart and
+new-packaging halt checks did an explicit operator-selected ID resolve the accepted comment;
+resolution and another process restart confirmed the same target without any additional POST.
+The lost-response case remains blocked. This is controlled reconciliation, not automatic identity
+inference. The report records a dirty workspace at parent `380e33c`; final-commit hosted evidence
+is required separately. The follow-up quality gate passed 281 backend tests, lint, formatting,
+MyPy and frontend build. Closed diagnostic categories are tested for secret redaction.
+Issue #9 remains open for final requirement review and integration. The bounded
+selection probe is not proof of a complete inventory or guided source-to-target import wizard.
+See [the operator boundary](transfer-plans.md) and [ADR 0012](decisions/0012-durable-transfer-plans.md).
+
 ## Environment
 
 The documented integration entry point is `make test-integration` on both local development and
