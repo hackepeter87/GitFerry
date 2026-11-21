@@ -253,3 +253,120 @@ def test_export_rejects_completed_clone_over_limit_before_bundle(
             )
         assert not (tmp_path / "package-export/repo.bundle").exists()
         assert not list(pusher.work_root.rglob("gitferry-source-*"))
+
+
+def test_source_mirror_uses_explicit_wiki_url_and_empty_is_none(
+    tmp_path: Path, monkeypatch
+) -> None:
+    pusher = _export_pusher(tmp_path)
+    urls: list[str] = []
+    identities: list[str] = []
+    monkeypatch.setattr(
+        pusher,
+        "_verify_repository_id",
+        lambda repository, expected: identities.append(repository),
+    )
+
+    def empty_remote(command: str, url: str, cwd: Path | None) -> dict[str, str]:
+        urls.append(url)
+        return {}
+
+    monkeypatch.setattr(pusher, "_git_remote", empty_remote)
+    with pusher.source_mirror("org/repo", "42", wiki=True) as mirror:
+        assert mirror is None
+    assert urls == ["https://target.invalid/org/repo.wiki.git"] * 3
+    assert identities == ["org/repo"] * 3
+
+
+def test_push_wiki_bundle_uses_leases_and_rejects_stale_expected_refs(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _, bundle = _source(tmp_path)
+    remote = tmp_path / "wiki.git"
+    _git("init", "--bare", str(remote), cwd=tmp_path)
+    with GiteaBundlePusher(
+        tmp_path / "package", tmp_path / "work", "https://target.invalid", "actor", "synthetic"
+    ) as pusher:
+        monkeypatch.setattr(pusher, "_wiki_url", lambda _: str(remote))
+        identities: list[str] = []
+        monkeypatch.setattr(
+            pusher,
+            "_verify_repository_id",
+            lambda repository, _: identities.append(repository),
+        )
+        captured: list[list[str]] = []
+        original_run = pusher._run_git
+
+        def capture(args: list[str], *, cwd: Path | None):
+            captured.append(args)
+            return original_run(args, cwd=cwd)
+
+        monkeypatch.setattr(pusher, "_run_git", capture)
+        result = pusher.push_wiki_bundle(
+            "org/repo", bundle.member, bundle.sha256, bundle.size, "42", {}
+        )
+        assert result.observed_state and result.observed_state["refs"]
+        push_args = next(args for args in captured if args[:2] == ["push", "--atomic"])
+        assert any(
+            value.startswith("--force-with-lease=refs/heads/") for value in push_args
+        )
+        assert identities == ["org/repo", "org/repo"]
+        with pytest.raises(GiteaBundleError, match="expected state"):
+            pusher.push_wiki_bundle(
+                "org/repo", bundle.member, bundle.sha256, bundle.size, "42", {}
+            )
+
+
+def test_source_mirror_post_yield_drift_removes_exported_bundle_and_clone(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _, remote, refs = _remote_source(tmp_path)
+    drift = {**refs, "refs/heads/drift": "0" * 40}
+    with _export_pusher(tmp_path) as pusher:
+        monkeypatch.setattr(pusher, "_repository_url", lambda _: str(remote))
+        monkeypatch.setattr(pusher, "_verify_repository_id", lambda *_: None)
+        reads = iter([refs, refs, drift])
+        monkeypatch.setattr(pusher, "_git_remote", lambda *_: next(reads))
+        with pytest.raises(GiteaBundleError, match="refs changed"):
+            pusher.export_bundle("org/repo", member="repo.bundle", expected_repository_id="42")
+        assert not (tmp_path / "package-export/repo.bundle").exists()
+        assert not list(pusher.work_root.rglob("gitferry-source-*"))
+
+
+def test_source_mirror_consumer_failure_cleans_clone(tmp_path: Path, monkeypatch) -> None:
+    _, remote, refs = _remote_source(tmp_path)
+    with _export_pusher(tmp_path) as pusher:
+        monkeypatch.setattr(pusher, "_repository_url", lambda _: str(remote))
+        monkeypatch.setattr(pusher, "_verify_repository_id", lambda *_: None)
+        monkeypatch.setattr(pusher, "_git_remote", lambda *_: refs)
+        with pytest.raises(RuntimeError, match="consumer failure"):
+            with pusher.source_mirror("org/repo", "42") as mirror:
+                assert mirror is not None and mirror.exists()
+                mirror_path = mirror
+                raise RuntimeError("consumer failure")
+        assert not mirror_path.exists()
+
+
+def test_push_wiki_bundle_rejects_disappearing_ref_and_rechecks_identity(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _, bundle = _source(tmp_path)
+    pusher = GiteaBundlePusher(
+        tmp_path / "package", tmp_path / "work", "https://target.invalid", "actor", "synthetic"
+    )
+    imported = pusher.preflight(bundle)
+    expected = pusher._local_refs(imported.destination)
+    monkeypatch.setattr(pusher, "_wiki_url", lambda _: "https://target.invalid/org/repo.wiki.git")
+    identities: list[str] = []
+    monkeypatch.setattr(
+        pusher, "_verify_repository_id", lambda repository, _: identities.append(repository)
+    )
+    reads = iter([expected, {}])
+    monkeypatch.setattr(pusher, "_git_remote", lambda *_: next(reads))
+    monkeypatch.setattr(pusher, "_local_refs", lambda _: expected)
+    monkeypatch.setattr(pusher, "_run_git", lambda *_args, **_kwargs: None)
+    with pytest.raises(GiteaBundleError, match="after push"):
+        pusher.push_wiki_bundle(
+            "org/repo", bundle.member, bundle.sha256, bundle.size, "42", expected
+        )
+    assert identities == ["org/repo"]
