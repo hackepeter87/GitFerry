@@ -125,7 +125,7 @@ def complete_probe_report() -> dict[str, object]:
                 "application_return_blocked": True,
                 "files": {
                     "lfs": {"oid": "c" * 64, "size": 128},
-                    "refs": {"refs/heads/main": "d" * 40},
+                    "refs": {"refs/heads/main": "b" * 40},
                 },
             },
             "return_import": {
@@ -138,7 +138,9 @@ def complete_probe_report() -> dict[str, object]:
                 "a_baseline": {"refs/heads/main": "a" * 40},
                 "returned_refs": {"refs/heads/main": "b" * 40},
                 "drift_preserved": {"refs/heads/main": "e" * 40},
-                "confirmation": {"refs": {"refs/heads/main": "b" * 40}},
+                "confirmation": report_contract()._native_confirmation(
+                    {"refs/heads/main": "b" * 40}
+                ),
             },
         },
         "directory": {
@@ -1140,6 +1142,50 @@ def test_native_payload_subevidence_cannot_be_omitted_or_downgraded(
         native["return_export"]["files"].pop("lfs")
     else:
         native["return_import"]["application_return_implemented"] = True
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "native_payload_capture_and_restart_safety"
+    )
+    assert entry["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "empty_confirmation",
+        "invalid_baseline",
+        "invalid_returned",
+        "invalid_drift",
+        "wrong_digest",
+        "wrong_count",
+        "different_export_refs",
+        "different_lfs",
+        "unchanged_return",
+    ],
+)
+def test_native_return_evidence_requires_valid_and_related_facts(mutation: str) -> None:
+    report = complete_probe_report()
+    native = report["native_payloads"]
+    returned = native["return_import"]
+    if mutation == "empty_confirmation":
+        returned["confirmation"] = {}
+    elif mutation == "invalid_baseline":
+        returned["a_baseline"] = {"not-a-ref": "not-a-sha"}
+    elif mutation == "invalid_returned":
+        returned["returned_refs"] = {"refs/heads/main": 1}
+    elif mutation == "invalid_drift":
+        returned["drift_preserved"] = {"refs/heads/main": 2}
+    elif mutation == "wrong_digest":
+        returned["confirmation"]["refs_sha256"] = "0" * 64
+    elif mutation == "wrong_count":
+        returned["confirmation"]["ref_count"] = 2
+    elif mutation == "different_export_refs":
+        native["return_export"]["files"]["refs"] = {"refs/heads/main": "c" * 40}
+    elif mutation == "different_lfs":
+        native["return_export"]["files"]["lfs"]["oid"] = "d" * 64
+    else:
+        returned["a_baseline"] = returned["returned_refs"]
     entry = next(
         item
         for item in report_contract().evidence_catalog(report, True)

@@ -1,6 +1,6 @@
 # ADR 0025: Native LFS and wiki payloads in the existing application plan
 
-Status: Proposed — implementation and real-instance qualification in issue #18.
+Status: Accepted — bounded native payload contract; qualification and limitations in issue #18.
 
 ## Decision
 
@@ -86,3 +86,10 @@ confirmation/reconciliation record below its evidence bound even for 10,000 refs
 Repackaging may reuse operations only when the complete native intent is unchanged,
 including bundle path, size and digest. A different bundle encoding requires an
 explicit conflict decision even if its refs match; it cannot inherit an old success.
+
+LFS upload copies through a no-follow, unique regular source descriptor into a
+private anonymous temporary file on the payload volume, verifies the complete
+size/digest, then streams that same snapshot. A remote batch response cannot make
+the uploader reopen a changed path or send later in-place modifications. The
+snapshot costs up to one additional object's disk size and is closed/unlinked on
+completion or failure; bytes are never buffered as a whole in memory.

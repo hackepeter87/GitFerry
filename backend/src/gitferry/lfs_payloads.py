@@ -6,8 +6,11 @@ import hashlib
 import os
 import stat
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 from .packages import UnsafePackagePath, resolve_package_member
 
@@ -115,6 +118,29 @@ def verify_lfs_object(
     if size != pointer.size or digest != pointer.oid:
         raise LFSPayloadError("LFS object does not match its pointer")
     return size, digest
+
+
+@contextmanager
+def verified_lfs_snapshot(path: Path, pointer: LFSPointer, *, max_bytes: int) -> Iterator[BinaryIO]:
+    """Hold a private verified copy so remote latency cannot reopen a changed path."""
+    if type(max_bytes) is not int or max_bytes <= 0 or pointer.size > max_bytes:
+        raise LFSPayloadError("LFS object exceeds snapshot bound")
+    # An anonymous temporary file on the same owned payload volume keeps bytes out
+    # of RAM and disappears on close/crash. It is never a published package member.
+    with tempfile.TemporaryFile(mode="w+b", dir=path.parent) as snapshot:
+        descriptor = _open_unique_file(path, "LFS source object")
+        digest, size = hashlib.sha256(), 0
+        with os.fdopen(descriptor, "rb") as source:
+            while chunk := source.read(_CHUNK):
+                size += len(chunk)
+                if size > pointer.size or size > max_bytes:
+                    raise LFSPayloadError("LFS source exceeds its intended size")
+                digest.update(chunk)
+                snapshot.write(chunk)
+        if size != pointer.size or digest.hexdigest() != pointer.oid:
+            raise LFSPayloadError("LFS snapshot differs from intended bytes")
+        snapshot.seek(0)
+        yield snapshot
 
 
 def _reject_symlink_components(root: Path, member: str) -> None:

@@ -136,6 +136,32 @@ def _inventory_evidence(report: dict[str, Any]) -> bool:
     )
 
 
+def _native_refs(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and 0 < len(value) <= 10000
+        and all(
+            isinstance(ref, str)
+            and ref.startswith("refs/")
+            and not ref.endswith(("/", "."))
+            and not any(mark in ref for mark in ("..", "@{", "//"))
+            and not any(ord(c) <= 32 or ord(c) == 127 or c in "~^:?*[\\" for c in ref)
+            and all(
+                part and not part.startswith(".") and not part.endswith(".lock")
+                for part in ref.split("/")
+            )
+            and isinstance(sha, str)
+            and re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", sha)
+            for ref, sha in value.items()
+        )
+    )
+
+
+def _native_confirmation(refs: dict[str, str]) -> dict[str, Any]:
+    raw = json.dumps(refs, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    return {"ref_count": len(refs), "refs_sha256": hashlib.sha256(raw).hexdigest()}
+
+
 def _native_payload_evidence(report: dict[str, Any]) -> bool:
     """Require the live native payload probe's complete, bounded result shape."""
 
@@ -200,8 +226,7 @@ def _native_payload_evidence(report: dict[str, Any]) -> bool:
         and re.fullmatch(r"[0-9a-f]{64}", return_export["files"]["lfs"]["oid"])
         and type(return_export["files"]["lfs"].get("size")) is int
         and return_export["files"]["lfs"]["size"] > 0
-        and isinstance(return_export["files"].get("refs"), dict)
-        and return_export["files"]["refs"]
+        and _native_refs(return_export["files"].get("refs"))
         and isinstance(return_import, dict)
         and return_import.get("status") == "passed"
         and return_import.get("scope") == "native adapter feasibility only"
@@ -210,11 +235,16 @@ def _native_payload_evidence(report: dict[str, Any]) -> bool:
         and return_import.get("control_refs_unchanged") is True
         and isinstance(return_import.get("lfs_sha256"), str)
         and re.fullmatch(r"[0-9a-f]{64}", return_import["lfs_sha256"])
-        and isinstance(return_import.get("a_baseline"), dict)
-        and isinstance(return_import.get("returned_refs"), dict)
-        and isinstance(return_import.get("drift_preserved"), dict)
+        and _native_refs(return_import.get("a_baseline"))
+        and _native_refs(return_import.get("returned_refs"))
+        and _native_refs(return_import.get("drift_preserved"))
+        and return_import["a_baseline"] != return_import["returned_refs"]
+        and return_export["files"]["refs"] == return_import["returned_refs"]
+        and return_export["files"]["lfs"]["oid"] == return_import["lfs_sha256"]
         and return_import["returned_refs"] != return_import["drift_preserved"]
         and isinstance(return_import.get("confirmation"), dict)
+        and type(return_import["confirmation"].get("ref_count")) is int
+        and return_import["confirmation"] == _native_confirmation(return_import["returned_refs"])
     ):
         return False
     cases = evidence.get("cases")

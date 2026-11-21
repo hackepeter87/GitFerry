@@ -8,9 +8,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from gitferry.gitea_bundles import GiteaBundleError
 from gitferry.gitea_lfs import GiteaLFSError
 from gitferry.gitea_plan_adapter import GiteaPlanAdapter
 from gitferry.gitea_provisioning import ProvisioningTargetConflict
+from gitferry.gitea_wiki import GiteaWikiError
 from gitferry.operations import ExecutorBusy
 from gitferry.plan_application import prepare_transfer_plan
 from gitferry.plan_runner import PlanRunner
@@ -132,12 +134,13 @@ def execute(args: argparse.Namespace) -> int:
         ExecutorBusy,
         ProvisioningTargetConflict,
         GiteaLFSError,
+        GiteaBundleError,
     ) as exc:
         message = (
             "Transfer plan selection is invalid or unavailable"
             if isinstance(exc, (ValueError, PlanConflict, OperationBlocked))
             else "Native target verification failed; operation remains unresolved"
-            if isinstance(exc, GiteaLFSError)
+            if isinstance(exc, (GiteaLFSError, GiteaBundleError, GiteaWikiError))
             else "Local plan state unavailable"
         )
         print(json.dumps({"status": "failed", "error": message}, sort_keys=True))

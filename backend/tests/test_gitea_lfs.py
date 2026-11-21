@@ -165,3 +165,40 @@ def test_redirect_and_oversized_json_never_follow_or_parse():
         with client(handler) as adapter, pytest.raises(GiteaLFSError):
             adapter.inspect(POINTER)
         assert len(requests) == 1
+
+
+@pytest.mark.parametrize("replacement", ["symlink", "in-place"])
+def test_upload_uses_verified_snapshot_when_path_is_replaced_after_batch(tmp_path, replacement):
+    source = tmp_path / "source"
+    source.write_bytes(DATA)
+    private = tmp_path / "unrelated-private-file"
+    private.write_bytes(b"x" * len(DATA))
+    handler, requests = handler_for()
+
+    def replacing_handler(request):
+        response = handler(request)
+        if (
+            request.url.path.endswith("/batch")
+            and json.loads(request.content)["operation"] == "upload"
+        ):
+            if replacement == "symlink":
+                source.unlink()
+                source.symlink_to(private)
+            else:
+                source.write_bytes(private.read_bytes())
+        return response
+
+    with client(replacing_handler) as adapter:
+        adapter.upload(POINTER, source, max_bytes=10000)
+    assert [request.content for request in requests if request.method == "PUT"] == [DATA]
+
+
+def test_corrupt_upload_snapshot_is_rejected_before_batch(tmp_path):
+    from gitferry.lfs_payloads import LFSPayloadError
+
+    source = tmp_path / "source"
+    source.write_bytes(b"x" * len(DATA))
+    handler, requests = handler_for()
+    with client(handler) as adapter, pytest.raises(LFSPayloadError):
+        adapter.upload(POINTER, source, max_bytes=10000)
+    assert requests == []

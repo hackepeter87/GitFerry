@@ -14,7 +14,7 @@ import httpx
 
 from .connection_profiles import normalize_url
 from .gitea_provisioning import _repository_segments
-from .lfs_payloads import LFSPointer, publish_lfs_object, verify_lfs_object
+from .lfs_payloads import LFSPointer, publish_lfs_object, verified_lfs_snapshot
 
 _MEDIA = "application/vnd.git-lfs+json"
 _JSON_LIMIT = 64 * 1024
@@ -203,36 +203,35 @@ class GiteaLFSClient:
 
     def upload(self, pointer: LFSPointer, path: Path, *, max_bytes: int) -> None:
         """Upload once and verify; the caller journals and controls unknown outcomes."""
-        verify_lfs_object(path, pointer, max_bytes=max_bytes)
-        actions = self._batch("upload", pointer)
-        if "upload" in actions:
-            url, headers = self._action(actions, "upload", pointer)
-            try:
-                with (
-                    path.open("rb") as source,
-                    self.client.stream(
-                        "PUT",
-                        url,
-                        content=source,
-                        headers={**headers, "Content-Length": str(pointer.size)},
-                        auth=None if "Authorization" in headers else self.client.auth,
-                    ) as response,
-                ):
-                    if response.status_code not in (200, 201, 204):
-                        raise GiteaLFSError("LFS upload was rejected; reconciliation required")
-            except (httpx.HTTPError, OSError):
-                raise GiteaLFSError("LFS upload outcome is unknown") from None
-        if "verify" in actions:
-            url, headers = self._action(actions, "verify", pointer)
-            # Verification is also never retried by this adapter.
-            self._json(
-                "POST",
-                url,
-                headers={**headers, "Content-Type": _MEDIA},
-                auth=None if "Authorization" in headers else self.client.auth,
-                json={"oid": pointer.oid, "size": pointer.size},
-            )
-        self.verify_remote(pointer, max_bytes=max_bytes)
+        with verified_lfs_snapshot(path, pointer, max_bytes=max_bytes) as source:
+            actions = self._batch("upload", pointer)
+            if "upload" in actions:
+                url, headers = self._action(actions, "upload", pointer)
+                try:
+                    with (
+                        self.client.stream(
+                            "PUT",
+                            url,
+                            content=source,
+                            headers={**headers, "Content-Length": str(pointer.size)},
+                            auth=None if "Authorization" in headers else self.client.auth,
+                        ) as response,
+                    ):
+                        if response.status_code not in (200, 201, 204):
+                            raise GiteaLFSError("LFS upload was rejected; reconciliation required")
+                except (httpx.HTTPError, OSError):
+                    raise GiteaLFSError("LFS upload outcome is unknown") from None
+            if "verify" in actions:
+                url, headers = self._action(actions, "verify", pointer)
+                # Verification is also never retried by this adapter.
+                self._json(
+                    "POST",
+                    url,
+                    headers={**headers, "Content-Type": _MEDIA},
+                    auth=None if "Authorization" in headers else self.client.auth,
+                    json={"oid": pointer.oid, "size": pointer.size},
+                )
+            self.verify_remote(pointer, max_bytes=max_bytes)
 
 
 def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
