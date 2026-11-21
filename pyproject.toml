@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gitferry"
-version = "0.1.0.dev0"
+version = "0.2.0rc1"
 description = "Verified foundation for controlled Gitea-to-Gitea transfers"
 readme = "README.md"
 requires-python = ">=3.11"

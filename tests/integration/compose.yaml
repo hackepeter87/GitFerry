@@ -62,7 +62,7 @@ services:
       context: ../..
       dockerfile: containers/gitferry.Dockerfile
       args:
-        GITFERRY_VERSION: ${GITFERRY_VERSION:-0.1.0.dev0}
+        GITFERRY_VERSION: ${GITFERRY_VERSION:-0.2.0rc1}
         GITFERRY_SOURCE_REVISION: ${GITFERRY_SOURCE_REVISION:-unknown}
     image: ${GITFERRY_IT_RUNTIME_IMAGE:-gitferry-it-runtime:dev}
     user: "0:0"
@@ -90,7 +90,7 @@ services:
       context: ../..
       dockerfile: containers/gitferry.Dockerfile
       args:
-        GITFERRY_VERSION: ${GITFERRY_VERSION:-0.1.0.dev0}
+        GITFERRY_VERSION: ${GITFERRY_VERSION:-0.2.0rc1}
         GITFERRY_SOURCE_REVISION: ${GITFERRY_SOURCE_REVISION:-unknown}
     image: ${GITFERRY_IT_RUNTIME_IMAGE:-gitferry-it-runtime:dev}
     user: "0:0"
