@@ -43,9 +43,10 @@ editing and preserve confirmed progress across browser and process restart.
 
 Owning issues: [#6](https://github.com/hackepeter87/GitFerry/issues/6)–[#11](https://github.com/hackepeter87/GitFerry/issues/11).
 
-Issue #9 remains in progress in draft PR #50. The bounded persisted-plan Gitea execution and
-API/CLI paths are locally and hosted-CI verified. The plan UI and browser disconnect flow are
-locally verified; current-head review, CI and integration remain.
+Issue #9 is accepted through PR #50, integrated as `1b0bed5` and verified by hosted-main
+run `44851149501`. The persisted-plan Gitea execution, API/CLI paths, plan UI and browser
+disconnect flow are covered by their documented real and simulated evidence. Issue #10 is
+now active for the source-selection and complete first-import workflow.
 The [plan guide](transfer-plans.md) describes the current boundary without claiming a complete
 first-import wizard.
 

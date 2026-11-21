@@ -1,4 +1,4 @@
-# Durable transfer plans (Issue #9, work in progress)
+# Durable transfer plans
 
 The local application planner composes the existing organization, repository, team, Git-bundle,
 issue and normal-comment operations. It does not introduce another mapping store or journal.

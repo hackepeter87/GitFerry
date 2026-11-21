@@ -47,7 +47,7 @@ Hosted CI run `44840084900` passed for initial commit `0f7c92a`; current correct
 are tracked on [PR #49](https://github.com/hackepeter87/GitFerry/pull/49). Evidence for the initial
 commit does not approve a later correction or merge commit.
 
-## Issue #9: application-plan work in progress
+## Issue #9: accepted bounded application-plan execution
 
 The plan core now connects to the fixed Gitea adapter and protected API/local CLI. Local tests
 cover immutable plans, atomic publication, original baseline preservation, writer exclusion,
@@ -94,7 +94,11 @@ The lost-response case remains blocked. This is controlled reconciliation, not a
 inference. The report records a dirty workspace at parent `380e33c`; final-commit hosted evidence
 is required separately. The follow-up quality gate passed 281 backend tests, lint, formatting,
 MyPy and frontend build. Closed diagnostic categories are tested for secret redaction.
-Issue #9 remains open for final requirement review and integration. The bounded
+Final exact-head AI review accepted source `f28f593`; hosted PR run `44850635166` passed.
+PR #50 merged as `1b0bed567de73379d225cd0b1da99a9d6eb936bf`. Integrated-main run
+`44851149501` passed both jobs. Its inspected report binds that clean merge commit, all
+22 required checks, 16 application assertions and successful cleanup on Linux/x86_64,
+Docker Linux/amd64, without emulation. Issue #9 is closed. The bounded
 selection probe is not proof of a complete inventory or guided source-to-target import wizard.
 See [the operator boundary](transfer-plans.md) and [ADR 0012](decisions/0012-durable-transfer-plans.md).
 
