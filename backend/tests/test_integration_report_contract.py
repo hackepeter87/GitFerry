@@ -38,6 +38,90 @@ def complete_probe_report() -> dict[str, object]:
         "control_repository_change_preserved": True,
     }
     report: dict[str, object] = {
+        "source_exports": {
+            "status": "passed",
+            "image_id": "sha256:" + "a" * 64,
+            "assertions": dict.fromkeys(
+                (
+                    "source_capture_confirmed",
+                    "actual_git_bundle_captured",
+                    "organization_and_team_captured",
+                    "issue_comment_distinct_author_claims",
+                    "manifest_v2_unchanged",
+                    "byte_archive_exact",
+                    "source_context_cannot_target_or_external",
+                    "capture_has_no_api_writes",
+                    "offline_replay_exact",
+                    "target_only_archive_verified",
+                    "source_and_target_databases_independent",
+                    "package_admission_apply_confirmed",
+                    "native_authors_parent_and_git_refs",
+                    "target_only_archive_and_external_unreachable",
+                    "package_admission_database_independent",
+                    "no_user_preparation_blocks_metadata",
+                    "package_replay_process_restart_no_extra_posts_or_objects",
+                    "api_queue_background_download",
+                    "api_restart_replay_no_source_access",
+                    "target_upload_files_only_before_local_setup",
+                    "target_upload_replay_persistent_identity",
+                    "guided_browser_first_import",
+                    "guided_browser_source_export",
+                    "guided_browser_target_collision",
+                    "guided_browser_preview_no_remote_write",
+                    "guided_browser_production_runtime",
+                    "guided_selected_set_and_control",
+                    "guided_browser_restart_read_only",
+                ),
+                True,
+            ),
+        },
+        "application_plans": {
+            "status": "passed",
+            "assertions": dict.fromkeys(
+                (
+                    "confirmed_restart_no_duplicates",
+                    "control_repository_unchanged",
+                    "crash_no_second_post",
+                    "crash_remote_post_accepted",
+                    "crash_restart_outcome_unknown",
+                    "credentials_absent_from_state_and_report",
+                    "distinct_native_authors",
+                    "lost_no_second_post",
+                    "lost_remote_post_accepted",
+                    "lost_restart_outcome_unknown",
+                    "new_packaging_cannot_bypass_unknown",
+                    "explicit_resolution_rejects_wrong_parent_author_and_content",
+                    "explicit_resolution_then_restart_confirms_without_post",
+                    "source_catalog_lists_real_organization_and_repository_without_writes",
+                    "application_package_bundle_received_and_used",
+                    "parent_mapping_confirmed",
+                    "structure_bundle_and_metadata_confirmed",
+                    "target_only_context",
+                ),
+                True,
+            ),
+        },
+        "connection_profiles": {
+            "status": "passed",
+            "assertions": dict.fromkeys(
+                (
+                    "real_gitea_version_and_account",
+                    "check_did_not_approve",
+                    "explicit_local_approval",
+                    "read_only_connection_check",
+                    "untrusted_ca_rejected",
+                    "wrong_ca_rejected",
+                    "hostname_mismatch_rejected",
+                    "expired_certificate_rejected",
+                    "credentials_absent_from_state_and_exports",
+                    "api_probe_and_local_approval",
+                    "cli_restart_preserves_approved_evidence",
+                    "credentials_absent_from_boundaries_and_logs",
+                    "system_trust_store_without_ca_reference",
+                ),
+                True,
+            ),
+        },
         "gitea": {"source": "1.27.2", "target": "1.27.2"},
         "comment_transport_roundtrip": {"assertions": comment_assertions},
         "portable_transport_roundtrip": {
@@ -66,6 +150,7 @@ def complete_probe_report() -> dict[str, object]:
         },
         "oci_runtime": {
             "status": "passed",
+            "image_id": "sha256:" + "a" * 64,
             "assertions": {
                 "non_root_user": True,
                 "version_label": True,
@@ -75,6 +160,8 @@ def complete_probe_report() -> dict[str, object]:
                 "graceful_stop_signal": True,
                 "fresh_volume_initialized": True,
                 "packaged_frontend_served": True,
+                "installed_admin_security": True,
+                "runtime_hardening": True,
                 "container_replacement_preserved_state": True,
                 "identity_binding_preserved": True,
                 "object_mapping_preserved": True,
@@ -89,6 +176,15 @@ def complete_probe_report() -> dict[str, object]:
                 "corrupt_database_failed_closed": True,
                 "read_only_directory_failed_closed": True,
                 "symlink_path_failed_closed": True,
+                "documented_compose_installation": True,
+            },
+            "reference_compose": {
+                "image_id": "sha256:" + "a" * 64,
+                "exact_image": True,
+                "healthy": True,
+                "non_root": True,
+                "aliases_readable": True,
+                "installed_admin_security": True,
             },
         },
     }
@@ -243,6 +339,26 @@ def test_probe_contract_requires_every_top_level_probe(tmp_path: Path) -> None:
     assert not module.probe_contract_is_complete(results)
 
 
+@pytest.mark.parametrize("mutation", ["missing", "false"])
+def test_connection_assertion_cannot_be_omitted_or_failed(tmp_path: Path, mutation: str) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    assertions = report["connection_profiles"]["assertions"]
+    if mutation == "missing":
+        del assertions["real_gitea_version_and_account"]
+    else:
+        assertions["real_gitea_version_and_account"] = False
+    results = prepare_results(tmp_path, report)
+    assert not module.probe_contract_is_complete(results)
+    assert not module.finalize(
+        results,
+        run_status=0,
+        cleanup_status=0,
+        phase="probe-complete",
+        diagnostics_captured=False,
+    )
+
+
 def test_finalize_rejects_incomplete_run_metadata(tmp_path: Path) -> None:
     module = report_contract()
     results = prepare_results(tmp_path, complete_probe_report())
@@ -392,3 +508,99 @@ def test_workflow_cleanup_failure_keeps_report_failed(tmp_path: Path) -> None:
     assert execution["status"] == "failed"
     assert execution["workflow_cleanup"]["exit_code"] == 7
     assert "workflow_scoped_cleanup" in execution["failed_or_not_executed_checks"]
+
+
+@pytest.mark.parametrize(
+    "assertion",
+    [
+        "crash_no_second_post",
+        "lost_restart_outcome_unknown",
+        "explicit_resolution_rejects_wrong_parent_author_and_content",
+        "explicit_resolution_then_restart_confirms_without_post",
+        "source_catalog_lists_real_organization_and_repository_without_writes",
+        "application_package_bundle_received_and_used",
+        "structure_bundle_and_metadata_confirmed",
+    ],
+)
+def test_application_plan_assertion_is_required(tmp_path: Path, assertion: str) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    del report["application_plans"]["assertions"][assertion]
+    results = prepare_results(tmp_path, report)
+    assert not module.probe_contract_is_complete(results)
+
+
+@pytest.mark.parametrize(
+    "assertion",
+    [
+        "source_capture_confirmed",
+        "actual_git_bundle_captured",
+        "organization_and_team_captured",
+        "issue_comment_distinct_author_claims",
+        "manifest_v2_unchanged",
+        "byte_archive_exact",
+        "source_context_cannot_target_or_external",
+        "capture_has_no_api_writes",
+        "offline_replay_exact",
+        "target_only_archive_verified",
+        "source_and_target_databases_independent",
+        "package_admission_apply_confirmed",
+        "native_authors_parent_and_git_refs",
+        "target_only_archive_and_external_unreachable",
+        "package_admission_database_independent",
+        "no_user_preparation_blocks_metadata",
+        "package_replay_process_restart_no_extra_posts_or_objects",
+        "api_queue_background_download",
+        "api_restart_replay_no_source_access",
+        "target_upload_files_only_before_local_setup",
+        "target_upload_replay_persistent_identity",
+        "guided_browser_first_import",
+        "guided_browser_source_export",
+        "guided_browser_target_collision",
+        "guided_browser_preview_no_remote_write",
+        "guided_browser_production_runtime",
+        "guided_selected_set_and_control",
+        "guided_browser_restart_read_only",
+    ],
+)
+def test_source_capture_assertion_is_required(tmp_path: Path, assertion: str) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    del report["source_exports"]["assertions"][assertion]
+    assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize("image_id", [None, "sha256:" + "b" * 64])
+def test_browser_and_runtime_must_use_the_same_image(tmp_path: Path, image_id) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    report["source_exports"]["image_id"] = image_id
+    assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize("assertion", ["installed_admin_security", "runtime_hardening"])
+def test_installed_application_security_is_required(tmp_path: Path, assertion: str) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    del report["oci_runtime"]["assertions"][assertion]
+    assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize(
+    "key", ["exact_image", "healthy", "non_root", "aliases_readable", "installed_admin_security"]
+)
+def test_documented_compose_installation_requires_each_fact(tmp_path: Path, key: str) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    del report["oci_runtime"]["reference_compose"][key]
+    assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize("image_id", [None, "sha256:" + "b" * 64])
+def test_documented_compose_installation_must_use_runtime_image(
+    tmp_path: Path, image_id: str | None
+) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    report["oci_runtime"]["reference_compose"]["image_id"] = image_id
+    assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))

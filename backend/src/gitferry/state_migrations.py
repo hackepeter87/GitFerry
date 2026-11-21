@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 12
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -378,5 +378,139 @@ CREATE TABLE auth_events (
 );
 
 CREATE INDEX auth_events_created_at ON auth_events(created_at);
+""",
+    6: """
+CREATE TABLE connection_profiles (
+    instance_key TEXT PRIMARY KEY REFERENCES instances(instance_key),
+    display_name TEXT NOT NULL CHECK (length(display_name) BETWEEN 1 AND 120),
+    base_url TEXT NOT NULL,
+    credential_ref TEXT NOT NULL CHECK (length(credential_ref) BETWEEN 1 AND 64),
+    ca_ref TEXT,
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+    locally_approved INTEGER NOT NULL CHECK (locally_approved IN (0, 1))
+);
+CREATE UNIQUE INDEX connection_profiles_active_url
+    ON connection_profiles(base_url) WHERE enabled = 1;
+CREATE TABLE connection_profile_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_key TEXT NOT NULL REFERENCES instances(instance_key),
+    revision INTEGER NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('create', 'update', 'retire', 'approve')),
+    occurred_at TEXT NOT NULL
+);
+CREATE TABLE connection_checks (
+    instance_key TEXT PRIMARY KEY REFERENCES connection_profiles(instance_key),
+    profile_revision INTEGER NOT NULL,
+    observed_identity TEXT NOT NULL,
+    approved_identity TEXT,
+    checked_at TEXT NOT NULL
+);
+""",
+    7: """
+CREATE TABLE transfer_plans (
+    plan_id TEXT PRIMARY KEY,
+    digest TEXT NOT NULL UNIQUE CHECK (length(digest) = 64),
+    target_instance_key TEXT NOT NULL REFERENCES instances(instance_key),
+    profile_revision INTEGER NOT NULL CHECK (profile_revision >= 1),
+    evidence_digest TEXT NOT NULL CHECK (length(evidence_digest) = 64),
+    round_key TEXT NOT NULL,
+    document_json TEXT NOT NULL,
+    cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancel_requested IN (0, 1)),
+    status TEXT NOT NULL CHECK (status IN (
+        'draft','queued','preflighting','running','confirmed','blocked','failed','cancelled'
+    )),
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE plan_steps (
+    plan_id TEXT NOT NULL REFERENCES transfer_plans(plan_id) ON DELETE CASCADE,
+    step_index INTEGER NOT NULL CHECK (step_index >= 0),
+    operation_id TEXT NOT NULL REFERENCES operations(operation_id),
+    snapshot_json TEXT NOT NULL,
+    PRIMARY KEY (plan_id, step_index),
+    UNIQUE (plan_id, operation_id)
+);
+CREATE TABLE plan_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id TEXT NOT NULL REFERENCES transfer_plans(plan_id) ON DELETE CASCADE,
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    reason TEXT,
+    evidence_json TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX transfer_plans_status ON transfer_plans(status, updated_at);
+""",
+    8: """
+CREATE TABLE source_exports (
+    export_id TEXT PRIMARY KEY,
+    request_hash TEXT NOT NULL,
+    request_json TEXT NOT NULL,
+    source_identity_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('prepared', 'capturing', 'captured', 'failed')),
+    candidate_digest TEXT,
+    package_digest TEXT,
+    error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK ((status = 'captured') = (package_digest IS NOT NULL))
+);
+""",
+    9: """
+CREATE TABLE package_receipts (
+    package_id TEXT PRIMARY KEY,
+    digest_sha256 TEXT NOT NULL CHECK (length(digest_sha256) = 64),
+    target_instance_key TEXT NOT NULL REFERENCES instances(instance_key),
+    package_ref TEXT NOT NULL UNIQUE,
+    document_json TEXT NOT NULL,
+    received_at TEXT NOT NULL
+);
+""",
+    10: """
+CREATE TABLE source_export_deliveries (
+    export_id TEXT PRIMARY KEY REFERENCES source_exports(export_id),
+    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'ready', 'failed')),
+    candidate_digest TEXT CHECK (candidate_digest IS NULL OR length(candidate_digest) = 64),
+    archive_sha256 TEXT CHECK (archive_sha256 IS NULL OR length(archive_sha256) = 64),
+    archive_size INTEGER CHECK (archive_size >= 0),
+    error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK ((status = 'ready') = (archive_sha256 IS NOT NULL)),
+    CHECK (status != 'ready' OR archive_size IS NOT NULL)
+);
+""",
+    11: """
+CREATE TABLE package_uploads (
+    upload_id TEXT PRIMARY KEY,
+    archive_size INTEGER NOT NULL CHECK (archive_size > 0),
+    status TEXT NOT NULL CHECK (status IN ('receiving','validating','ready','failed')),
+    archive_sha256 TEXT CHECK (archive_sha256 IS NULL OR length(archive_sha256) = 64),
+    package_digest TEXT CHECK (package_digest IS NULL OR length(package_digest) = 64),
+    summary_json TEXT,
+    error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (status != 'ready' OR (archive_sha256 IS NOT NULL AND package_digest IS NOT NULL
+                               AND summary_json IS NOT NULL))
+);
+""",
+    12: """
+CREATE TABLE plan_previews (
+    plan_id TEXT NOT NULL REFERENCES transfer_plans(plan_id),
+    generation INTEGER NOT NULL CHECK (generation > 0),
+    plan_digest TEXT NOT NULL CHECK (length(plan_digest) = 64),
+    status TEXT NOT NULL CHECK (status IN ('queued','checking','passed','blocked','failed')),
+    reason TEXT,
+    scope TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (plan_id, generation),
+    CHECK ((status IN ('blocked','failed')) = (reason IS NOT NULL))
+);
+CREATE UNIQUE INDEX plan_previews_active ON plan_previews(plan_id)
+    WHERE status IN ('queued','checking');
 """,
 }

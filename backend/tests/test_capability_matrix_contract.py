@@ -45,6 +45,7 @@ REQUIRED_IDS = {
     "offline-isolation",
     "manifest-integrity",
     "package-storage",
+    "application-package-files",
     "backup-restore-upgrade",
     "ui-first-import",
     "ui-return-conflicts",
@@ -55,6 +56,7 @@ REQUIRED_IDS = {
 }
 EXPLICIT_GAP_OWNERS = {
     "transfer-plan-execution": ("0.2.0", "9"),
+    "application-package-files": ("0.2.0", "10"),
     "auth-source-bootstrap": ("0.3.0", "13"),
     "content-inventory-plan": ("0.4.0", "17"),
 }

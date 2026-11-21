@@ -21,8 +21,20 @@ from gitferry.auth_api import (
     create_auth_router,
 )
 from gitferry.blueprints import MAX_BLUEPRINT_BYTES, BlueprintValidationError, validate_text
+from gitferry.connection_profiles import ProfileConflict, ProfileValidationError
+from gitferry.gitea_plan_adapter import GiteaPlanAdapter
+from gitferry.package_api import create_package_admission_router
+from gitferry.package_decision_api import create_package_decision_router
+from gitferry.package_upload_api import create_package_upload_router
+from gitferry.package_uploads import PackageUploads
+from gitferry.plan_api import create_plan_router
+from gitferry.plan_runner import BackgroundPlanWorker, PlanRunner
+from gitferry.profile_api import create_profile_router, profile_error
 from gitferry.runtime import RuntimeStatus, initialize_runtime
+from gitferry.source_export_api import create_source_export_router
+from gitferry.source_export_jobs import SourceExportJobs
 from gitferry.state_migrations import SCHEMA_VERSION
+from gitferry.transfer_plans import PlanService
 
 # Uvicorn configures ``uvicorn.error`` for production output.  A child logger
 # keeps the allowlisted request record visible while the raw access logger is
@@ -48,6 +60,23 @@ def create_app(
                 application.state.runtime = initialize_runtime()
                 if auth_service is None:
                     application.state.auth = AuthService(application.state.runtime.store)
+                service = PlanService(application.state.runtime.store)
+                runner = PlanRunner(
+                    service,
+                    lambda _plan: GiteaPlanAdapter(
+                        application.state.runtime.store, application.state.runtime.paths
+                    ),
+                )
+                application.state.export_jobs = SourceExportJobs(
+                    application.state.runtime.store, application.state.runtime.paths
+                )
+                application.state.package_uploads = PackageUploads(
+                    application.state.runtime.store, application.state.runtime.paths
+                )
+                application.state.plan_worker = BackgroundPlanWorker(
+                    runner, run_export=application.state.export_jobs.run_next
+                )
+                application.state.plan_worker.start()
             except Exception as exc:
                 readiness.failed(exc)
                 raise
@@ -57,6 +86,9 @@ def create_app(
         try:
             yield
         finally:
+            worker = getattr(application.state, "plan_worker", None)
+            if worker is not None:
+                worker.stop()
             readiness.stopping()
 
     application = FastAPI(
@@ -74,6 +106,13 @@ def create_app(
     async def auth_error_handler(_: Request, exc: AuthBoundaryError) -> JSONResponse:
         return auth_error_response(exc)
 
+    @application.exception_handler(ProfileConflict)
+    @application.exception_handler(ProfileValidationError)
+    async def profile_error_handler(
+        _: Request, exc: ProfileConflict | ProfileValidationError
+    ) -> JSONResponse:
+        return auth_error_response(profile_error(exc))
+
     @application.middleware("http")
     async def security_headers(
         request: Request,
@@ -89,7 +128,7 @@ def create_app(
         response.headers["X-XSS-Protection"] = "0"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        if request.url.path.startswith("/api/v1/auth/"):
+        if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         route = request.scope.get("route")
         route_template = getattr(route, "path", "<unmatched>")
@@ -107,12 +146,24 @@ def create_app(
 
     @application.get("/readyz")
     def ready() -> JSONResponse:
+        content = readiness.snapshot()
+        worker = getattr(application.state, "plan_worker", None)
+        if content.get("mode") == "managed" and content["status"] == "ready":
+            if worker is None or not worker.thread.is_alive():
+                content.update(status="failed", workerError="worker_unavailable")
+            elif worker.last_error is not None:
+                content.update(status="failed", workerError=worker.last_error)
         return JSONResponse(
-            status_code=200 if readiness.is_ready else 503,
-            content=readiness.snapshot(),
+            status_code=200 if content["status"] == "ready" else 503, content=content
         )
 
     application.include_router(create_auth_router(cookie_settings))
+    application.include_router(create_profile_router(cookie_settings))
+    application.include_router(create_plan_router(cookie_settings))
+    application.include_router(create_package_admission_router(cookie_settings))
+    application.include_router(create_package_decision_router(cookie_settings))
+    application.include_router(create_source_export_router(cookie_settings))
+    application.include_router(create_package_upload_router(cookie_settings))
     application.post(
         "/api/v1/blueprints/validate",
         dependencies=[Depends(admin_csrf_dependency(cookie_settings))],

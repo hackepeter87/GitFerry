@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 import time
+from pathlib import Path
 from typing import Any
 
 from support import COMPOSE_PROJECT, ROOT, ProbeFailure, run
@@ -69,6 +71,13 @@ def start_runtime(name: str, volume: str, containers: list[str]) -> str:
             f"gitferry.integration.project={COMPOSE_PROJECT}",
             "--network",
             "none",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1700,uid=10001,gid=10001",
             "-v",
             f"{volume}:/var/lib/gitferry",
             "-v",
@@ -86,6 +95,152 @@ def exec_worker(container: str, mode: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ProbeFailure("OCI runtime worker did not return an object")
     return value
+
+
+def reference_compose_smoke(containers: list[str], volumes: list[str]) -> dict[str, Any]:
+    """Run the shipped Compose deployment with disposable synthetic references."""
+    project = f"{COMPOSE_PROJECT}-install"
+    container = f"{project}-gitferry"
+    volume = f"{project}-data"
+    compose_file = ROOT / "deploy" / "compose.yaml"
+    with tempfile.TemporaryDirectory(prefix="gitferry-compose-", dir="/tmp") as temporary:
+        fixture = Path(temporary)
+        credentials = fixture / "credentials"
+        ca_directory = fixture / "ca"
+        credentials.mkdir(mode=0o700)
+        ca_directory.mkdir(mode=0o755)
+        for alias, value in (
+            ("source_api_token", "synthetic-source-token"),
+            ("target_api_token", "synthetic-target-token"),
+            ("comment-author", "synthetic-comment-token"),
+        ):
+            (credentials / alias).write_text(value + "\n", encoding="ascii")
+        credentials.chmod(0o755)
+        docker(
+            [
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--label",
+                f"gitferry.integration.project={COMPOSE_PROJECT}",
+                "--user",
+                "0:0",
+                "-v",
+                f"{fixture}:/fixture",
+                IMAGE,
+                "python",
+                "-c",
+                "from pathlib import Path; import os; root=Path('/fixture/credentials'); "
+                "[(os.chown(p,10001,10001), p.chmod(0o600)) for p in root.iterdir()]",
+            ],
+            timeout=60,
+        )
+        override = fixture / "compose.override.yaml"
+        override.write_text(
+            "services:\n"
+            "  gitferry:\n"
+            f"    container_name: {container}\n"
+            "    network_mode: none\n"
+            "    ports: !reset []\n"
+            "    labels:\n"
+            f"      gitferry.integration.project: {COMPOSE_PROJECT}\n"
+            "    volumes:\n"
+            "      - gitferry-data:/var/lib/gitferry\n"
+            f"      - type: bind\n        source: {credentials}\n"
+            "        target: /run/secrets\n        read_only: true\n"
+            f"      - type: bind\n        source: {ca_directory}\n"
+            "        target: /etc/gitferry/ca\n        read_only: true\n"
+            f"      - type: bind\n        source: {WORKER}\n"
+            "        target: /probe/oci_runtime_worker.py\n        read_only: true\n"
+            "volumes:\n"
+            "  gitferry-data:\n"
+            "    external: true\n"
+            f"    name: {volume}\n",
+            encoding="utf-8",
+        )
+        env_file = fixture / "compose.env"
+        env_file.write_text(
+            f"GITFERRY_IMAGE={IMAGE}\n"
+            f"GITFERRY_CREDENTIAL_DIR={credentials}\n"
+            f"GITFERRY_CA_DIR={ca_directory}\n"
+            f"GITFERRY_SOURCE_TOKEN_FILE={credentials / 'source_api_token'}\n"
+            f"GITFERRY_TARGET_TOKEN_FILE={credentials / 'target_api_token'}\n",
+            encoding="utf-8",
+        )
+        create_volume(volume, volumes)
+        compose = [
+            "compose",
+            "--env-file",
+            str(env_file),
+            "-p",
+            project,
+            "-f",
+            str(compose_file),
+            "-f",
+            str(override),
+        ]
+        try:
+            containers.append(container)
+            docker(compose + ["up", "-d", "--wait"], timeout=120)
+            compose_id = docker(compose + ["ps", "-q", "gitferry"])
+            inspected = json.loads(docker(["inspect", compose_id]))[0]
+            image_id = inspected["Image"]
+            expected_image_id = json.loads(docker(["image", "inspect", IMAGE]))[0]["Id"]
+            installed_references = docker(
+                compose
+                + [
+                    "exec",
+                    "-T",
+                    "gitferry",
+                    "python",
+                    "-c",
+                    "import json; from gitferry.connection_probe import LocalReferences; "
+                    "r=LocalReferences(); print(json.dumps({'source': "
+                    "r.token('source_api_token') == "
+                    "'synthetic-source-token', 'target': r.token('target_api_token') == "
+                    "'synthetic-target-token', 'author': r.token('comment-author') == "
+                    "'synthetic-comment-token'}))",
+                ]
+            )
+            aliases = json.loads(installed_references)
+            security = json.loads(
+                docker(
+                    compose
+                    + [
+                        "exec",
+                        "-T",
+                        "gitferry",
+                        "python",
+                        "/probe/oci_runtime_worker.py",
+                        "security",
+                    ]
+                )
+            )
+            return {
+                "status": "passed",
+                "image_id": image_id,
+                "exact_image": image_id == expected_image_id,
+                "healthy": inspected["State"].get("Health", {}).get("Status") == "healthy",
+                "non_root": inspected["Config"].get("User") == "10001:10001",
+                "aliases_readable": aliases == {"source": True, "target": True, "author": True},
+                "installed_admin_security": set(security)
+                == {
+                    "cli_admin_bootstrap",
+                    "cli_password_not_logged",
+                    "unauthenticated_plans_401",
+                    "secure_session_cookie",
+                    "http_only_session_cookie",
+                    "strict_session_cookie",
+                    "authenticated_session_200",
+                    "missing_csrf_403",
+                    "logout_204",
+                    "revoked_session_401",
+                }
+                and all(security.values()),
+            }
+        finally:
+            docker(compose + ["down", "--remove-orphans"], check=False, timeout=60)
 
 
 def prepare_failure_volume(volume: str, script: str) -> None:
@@ -199,12 +354,22 @@ def run_oci_runtime_probe() -> dict[str, Any]:
         if not all(image_contract.values()):
             raise ProbeFailure(f"runtime image contract mismatch: {image_contract}")
 
+        reference_compose = reference_compose_smoke(containers, volumes)
         create_volume(volume, volumes)
         first_container_id = start_runtime(runtime, volume, containers)
         wait_for_health(runtime)
         packaged_ui = exec_worker(runtime, "ui")
+        security = exec_worker(runtime, "security")
         first_inspect = json.loads(docker(["inspect", runtime]))[0]
-        if first_inspect["HostConfig"].get("Privileged"):
+        host_config = first_inspect["HostConfig"]
+        runtime_hardening = {
+            "read_only_rootfs": host_config.get("ReadonlyRootfs") is True,
+            "all_capabilities_dropped": "ALL" in (host_config.get("CapDrop") or []),
+            "no_new_privileges": "no-new-privileges:true" in (host_config.get("SecurityOpt") or []),
+        }
+        if not all(runtime_hardening.values()):
+            raise ProbeFailure(f"runtime hardening mismatch: {runtime_hardening}")
+        if host_config.get("Privileged"):
             raise ProbeFailure("runtime unexpectedly uses privileged mode")
         if any("docker.sock" in mount.get("Source", "") for mount in first_inspect["Mounts"]):
             raise ProbeFailure("runtime unexpectedly mounts a Docker socket")
@@ -289,6 +454,31 @@ def run_oci_runtime_probe() -> dict[str, Any]:
             **image_contract,
             "fresh_volume_initialized": seeded["integrity_check"] == "ok",
             "packaged_frontend_served": all(packaged_ui.values()),
+            "documented_compose_installation": all(
+                reference_compose.get(name) is True
+                for name in (
+                    "exact_image",
+                    "healthy",
+                    "non_root",
+                    "aliases_readable",
+                    "installed_admin_security",
+                )
+            ),
+            "installed_admin_security": set(security)
+            == {
+                "cli_admin_bootstrap",
+                "cli_password_not_logged",
+                "unauthenticated_plans_401",
+                "secure_session_cookie",
+                "http_only_session_cookie",
+                "strict_session_cookie",
+                "authenticated_session_200",
+                "missing_csrf_403",
+                "logout_204",
+                "revoked_session_401",
+            }
+            and all(security.values()),
+            "runtime_hardening": all(runtime_hardening.values()),
             "container_replacement_preserved_state": after_replacement == seeded,
             "identity_binding_preserved": seeded["binding_id"] == "oci-binding-a-b",
             "object_mapping_preserved": seeded["mapping_target_global_id"] == "12001",
@@ -318,6 +508,9 @@ def run_oci_runtime_probe() -> dict[str, Any]:
             "failure_cases": failures,
             "state": seeded,
             "packaged_frontend": packaged_ui,
+            "admin_security": security,
+            "runtime_hardening": runtime_hardening,
+            "reference_compose": reference_compose,
         }
     finally:
         for container in reversed(containers):

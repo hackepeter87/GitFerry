@@ -20,6 +20,138 @@
 
 Mocks do not replace Gitea integration evidence.
 
+## First-import delivery checks
+
+The common `make test-integration` entry runs the packaged source and target applications in
+their isolated Gitea networks. `frontend/integration/first-import.spec.ts` selects two source
+repositories while excluding a control, creates a durable export, downloads its archive, uploads those exact bytes to the
+target, makes explicit local identity decisions and requests a prerequisite preview before
+execution. The core controls use bounded Tab navigation and visible-focus checks; file inputs
+receive synthetic files through the browser test driver. The desktop viewports (1024×768 and 1440×900) also check the actual plan storage estimate,
+overflow and accessibility. Mobile qualification is not required by the owner; desktop keyboard
+operation, visible focus and readable errors remain mandatory. The target is then inspected for Git refs, native authors and the comment parent.
+The browser and application process are restarted before observing the same confirmed plan and
+checking replay for additional writes or objects. Source/target state remains separate.
+
+`backend/tests/test_plan_previews.py` covers schema migration, competing requests/executors,
+authority changes, closed diagnostics, CSRF, exact-generation queueing and an actual subprocess
+termination while a preview is checking. `frontend/e2e/plans.spec.ts` separately covers blocked
+and stale preview presentation, keyboard start, reload and browser disconnection; simulated
+remote writes in that suite are not real-Gitea evidence.
+
+The report contract rejects a missing source-browser assertion just as it rejects missing
+existing transport, interruption or cleanup evidence. Record the exact tested commit, run,
+review and acceptance outcome in the delivery issue/PR and Actions artifacts. The historical
+records below describe their original scopes; they do not approve later changed code or accept
+the complete 0.2 milestone.
+
+## Connection profile evidence (Issue #8)
+
+Local run `68707345dbc14eeb` passed against the unchanged pinned Gitea 1.27.2 instances
+on a Darwin/arm64 host with Linux/arm64 Docker. The report's `connection_profiles` section
+requires thirteen assertions: real version/account, no implicit approval, explicit local approval,
+read-only checks, unknown/wrong CA rejection, hostname mismatch, expired certificate rejection,
+no token values in profile state/exports, authenticated API check/approval, actual CLI-process
+restart with preserved approval, API/CLI/log/argument secret scans, and the default trust-store
+path without a profile CA reference. Its TLS boundary is a generated localhost HTTPS
+proxy forwarding to the isolated real target. This is not a native Gitea TLS deployment claim.
+The default trust-store fixture uses a synthetic CA through local `SSL_CERT_FILE`; it is not a
+live external public-CA endpoint test. Cleanup passed for that run's resources.
+
+`make test` passed with 229 backend tests, Ruff, formatting, MyPy, TypeScript and frontend build.
+The new tests cover real-process persistence, atomic import rollback, concurrent endpoint claims,
+revision conflicts, schema-5 upgrades, API/CLI parity, reference safety, explicit trust and changed
+account/certificate evidence, stale evidence approval rejection, a shared absolute deadline,
+slow-drip cancellation, and encoded response rejection before decompression. Mandatory profile
+report assertions have explicit missing/false mutation tests.
+`make test-browser` passed nine scenarios including profile create/reload, stale-edit rejection,
+replacement/retirement, successful import, malformed import rejection and keyboard controls,
+alongside the existing authentication scenarios. Certificate evidence rendering uses a clearly
+mocked probe response; the dialog must show both fingerprints before accepting a decision.
+Hosted CI run `44840084900` passed for initial commit `0f7c92a`; current correction review and CI
+are tracked on [PR #49](https://github.com/hackepeter87/GitFerry/pull/49). Evidence for the initial
+commit does not approve a later correction or merge commit.
+
+## Issue #9: accepted bounded application-plan execution
+
+The plan core now connects to the fixed Gitea adapter and protected API/local CLI. Local tests
+cover immutable plans, atomic publication, original baseline preservation, writer exclusion,
+real child-process recovery with a simulated remote, exact author bindings and parent ordering.
+A managed-worker test closes the HTTP client while a simulated write is in progress. The
+Chromium suite now adds a real-backend browser test: queue with the keyboard, wait for the
+simulated remote-write synchronization point, close the page, release the write, reopen and
+observe the same confirmed journal operation. It also prepares a new draft through the UI
+without changing that operation identity. All 14 browser tests passed; mocked API cases cover
+review/queue/cancel, empty state, unknown-parent distinctions and delayed-response selection.
+The browser remote is simulated; the independent Gitea probe below supplies remote evidence.
+
+Local integration run `e5b4cbd772c74829` passed all 21 required report checks. Its new
+`application_plans` section passed 14 assertions in the target-only Linux/arm64 container:
+organization/team/repository plus Git-bundle/issue/comment execution; distinct native authors and
+parent mapping; confirmed replay after process restart; real accepted comment POST followed by
+hard exit before local confirmation; real accepted POST with its HTTP response discarded;
+restart and new-packaging refusal without another POST; unchanged control repository; and
+absence of token values in state and diagnostic evidence. Interrupted operations remain
+`outcome_unknown`, and those plans remain blocked—not successfully imported.
+
+The host was Darwin/arm64, Docker Server Linux/arm64 29.9.3, with no observed emulation. Both
+Gitea instances retained pinned version 1.27.2 and the existing image digest. Run-scoped cleanup
+passed. The first attempt correctly failed because the new test TLS proxy omitted the HTTP
+authentication challenge for Git; diagnostic artifacts and cleanup worked. The proxy now
+forwards that challenge. Existing manifest-v1/v2 and separate-state roundtrip regressions passed.
+
+The initial local quality gate passed 270 backend tests plus lint, formatting, MyPy and frontend
+build. The controlled failure contract and `make test-clean` also passed. Hosted run `44847979869` passed the backend/adapter source commit `79f25db` on Linux x86_64
+with Docker Linux/amd64 28.0.4 and no emulation. Its tested PR merge checkout was `0f069e6`;
+the report records both identities, all 22 mandatory checks including workflow cleanup, and
+all 14 application-plan assertions. Both Gitea containers resolved to image ID
+`sha256:e8be8e1f776fe453b811d88887306b1d7bdf83577789465e5d186924014a57a6`.
+The controlled failure report correctly remains failed with exit 86 and successful cleanup.
+Hosted run `44849763511` also passed the UI source commit `380e33c`.
+
+Independent review then required categorized preflight diagnostics and real explicit-resolution
+evidence. Local follow-up run `a0307e5e64414afc` passed all 21 required checks and 16 application
+assertions on the same Linux/arm64 environment. Wrong-parent, wrong-native-author and wrong-body
+comment candidates were rejected while the operation stayed unknown. Only after the restart and
+new-packaging halt checks did an explicit operator-selected ID resolve the accepted comment;
+resolution and another process restart confirmed the same target without any additional POST.
+The lost-response case remains blocked. This is controlled reconciliation, not automatic identity
+inference. The report records a dirty workspace at parent `380e33c`; final-commit hosted evidence
+is required separately. The follow-up quality gate passed 281 backend tests, lint, formatting,
+MyPy and frontend build. Closed diagnostic categories are tested for secret redaction.
+Final exact-head AI review accepted source `f28f593`; hosted PR run `44850635166` passed.
+PR #50 merged as `1b0bed567de73379d225cd0b1da99a9d6eb936bf`. Integrated-main run
+`44851149501` passed both jobs. Its inspected report binds that clean merge commit, all
+22 required checks, 16 application assertions and successful cleanup on Linux/x86_64,
+Docker Linux/amd64, without emulation. Issue #9 is closed. The bounded
+selection probe is not proof of a complete inventory or guided source-to-target import wizard.
+See [the operator boundary](transfer-plans.md) and [ADR 0012](decisions/0012-durable-transfer-plans.md).
+
+## Issue #10: source selection slice
+
+The shared source-catalog service reads paginated organizations and their repositories through
+locally approved HTTPS profiles. The initial local `make test` passed 295 backend tests, lint, format,
+MyPy and frontend build. All 18 browser tests passed, including four mocked source-selection
+cases: cross-page/organization selection, failures/source changes, session expiry, and explicit
+selection with an in-flight refresh guard. Browser mocks do not replace remote evidence.
+
+Real Gitea integration run `1a1f7621fab547dd` passed all 21 required checks and the mandatory
+`source_catalog_lists_real_organization_and_repository_without_writes` assertion. The existing
+Linux/arm64, pinned Gitea 1.27.2 setup returned the actual organization/repository through the
+approved TLS profile without additional writes. Cleanup passed. This local dirty-workspace run
+is not immutable-head or hosted-CI evidence for the pending Issue #10 PR.
+
+Review required capturing the same credentials/TLS context for check and catalog read.
+The correction adds rotation, approval-revocation and escaped-secret tests. Its local quality
+gate passed 298 tests; real integration run `38372e7558c34a45` again passed all 21 required
+checks and 17 application assertions, with successful cleanup. Current-commit hosted evidence
+remains a separate merge gate.
+
+This slice is namespace browsing, not complete content inventory or a completed first import.
+The UI keeps selection in the current browser view and says that export/import execution is
+not yet available. Remaining package, identity, execution and complete browser acceptance stay
+in Issue #10. See [the current interface contract](first-import.md).
+
 ## Environment
 
 The documented integration entry point is `make test-integration` on both local development and
@@ -314,3 +446,279 @@ and uploaded the failed report. Active ruleset `27751371` requires the exact `qu
 Exact run facts and the requirement-to-test map are in
 [`verification-linux-integration-run.md`](verification-linux-integration-run.md) and the generated
 `integration-results/report.json`.
+
+## Issue #10 application package file boundary
+
+`backend/tests/test_application_package.py` exercises the real schema/parser and archive service,
+including unchanged v1/v2 example bytes, explicit issue-author relationships, large native IDs as
+strings, transfer-direction/scope conflicts, forbidden imported approval/status fields, missing
+or undeclared files and immutable descriptors. A separate Python process verifies received files
+without any source database. `test_package_archive.py` covers traversal/aliases, links, duplicate
+entries, compression, actual/header limits, bounded central-directory allocation, changed source
+bytes, cleanup and concurrent no-overwrite publication. These are file-boundary tests, not a
+claim that complete source inventory or the first-import UI has been accepted.
+
+The existing `application_plan_probe.py` now builds `application-plan.zip`; `plan_worker.py`
+receives it in the target-only Linux context and supplies the validated bundle to the existing
+application plan. Mandatory assertion `application_package_bundle_received_and_used` binds the
+received descriptor digest, opposite-system isolation and confirmed Git push. Structure/metadata
+setup remains the existing synthetic plan fixture. The report-contract deletion test rejects a
+report lacking this assertion; existing interruption, author, parent and control-object evidence
+remains mandatory.
+
+Development run `7aeba64a2bb940ba` passed all 21 local required checks and 18 application-plan
+assertions, with cleanup exit 0, pinned Gitea 1.27.2, Darwin/arm64 host and Linux/arm64 Docker,
+without observed emulation. This was a dirty-worktree development run based on `6014da9`, not an
+immutable-head acceptance. Final local `make doctor` and `make test` passed (343 backend tests, Ruff,
+format, MyPy and frontend build). The focused package/report tests also passed. The independent review reproduced and fixed an embedded
+metadata object whose origin repository was outside the declared selection; a regression now
+rejects it. Additional file-read checks reject a source replaced by a FIFO without blocking, on both
+archive writing and receipt. Receiver-side symlink replacement is also rejected.
+The matrix contract explicitly includes the new file-boundary row without removing any prior
+capability requirement. The controlled-failure contract and scoped cleanup also passed.
+Hosted exact-head and integrated-main evidence belongs to
+[PR #52](https://github.com/hackepeter87/GitFerry/pull/52) and is required before accepting the slice.
+
+## Issue #10 selected source capture
+
+The source-export service, CLI and migration 8 are covered by
+`test_source_exports.py`, `test_source_snapshot.py`, `test_source_export_cli.py`, and the existing
+Git-bundle/transport/state regressions. The child-process test exits after file publication and
+before the SQLite completion transaction, then recovers without a source connection. This is a
+read-only capture interruption, distinct from a possibly executed remote POST and its persistent
+`outcome_unknown` state.
+
+The integration entry now requires `source_export_capture_and_offline_file_receipt`, backed by
+all eleven assertions in `source_exports.assertions`. Every omitted assertion has a report-contract
+negative test. The probe creates an actual source package in the source-only context, copies its
+archive to the target-only context, and checks replay, authors/parent data, Git payload, byte digests,
+network isolation and independent state. Target receipt is file validation, not metadata application.
+Existing remote-write interruption and v1/v2 compatibility requirements remain mandatory.
+
+Local development integration run `0474a5a1c0604986` passed all 22 mandatory checks,
+including all eleven source-export assertions, against the unchanged Gitea 1.27.2 pin. The host
+was Darwin/arm64 and the Docker runtime Linux/arm64; this is a local Linux-container proof,
+not a hosted GitHub Actions run. Scoped cleanup exited 0. The package was 7,077 bytes and had
+SHA-256 `766d8622f179d060c799b9ec3e16a6c5ddd629edc3cc29662c852f76b2bf7ac4`.
+This working-tree run proves the stated selected capture/file receipt, not complete target
+application, the UI wizard, or the later immutable PR/main commits. This slice subsequently passed independent review and hosted-main run `44862775964` on
+`5c7d303425bd593dc89937bb3bc978a4a94c0199`, including all 23 hosted mandatory checks. The
+source-capture evidence does not itself claim the later target-application extension.
+
+The first two development integration attempts rejected source capture because the mapper required
+the aggregate team `permission` to equal the unit permissions. A separate synthetic Gitea 1.27.2
+API contract probe established the actual response: `permission: none` alongside
+`units_map: {repo.code: read, repo.issues: read}` (and `owner` for the Owners team). The exporter
+now uses equal supported code/issue units and excludes ownership. The failed runs retained
+diagnostics and completed scoped cleanup. This correction preserves the existing effective-right
+requirements; it does not weaken the assertion that teams must actually be captured.
+
+## Issue #10 local package admission and plan preparation
+
+`test_package_admission.py` exercises generated source packages received through an archive into
+an independent database. It checks rolled-back review, atomic fact/receipt admission, schema-8
+upgrade, exact-byte aliases, permanent origins/parents, explicit author prerequisites, structure
+without business users, changed profile/selection conflicts, receipt replay in a new Python
+process and preservation of an unknown operation under repackaging. It also replaces an embedded
+manifest after initial inspection: both admission and selection must reject the newly read bytes
+unless they match the descriptor digest. `test_package_api.py` covers the authenticated real
+service path and sanitized conflicts; selection and CLI tests cover the thin application boundaries.
+
+The existing source-export integration probe adds six mandatory assertions. The target imports
+only the source-produced archive into its own state, applies the existing plan runner, checks
+native issue/comment authors and their parent, compares transferred Git refs, then repeats receipt,
+planning and execution in another process. The same durable plan must be recovered without extra
+remote objects or mutation events. Missing bindings block metadata planning before any operation
+is prepared. Target access to the source and external network is checked from the actual importer.
+Each added assertion has a deletion-negative report-contract test; omission is not success.
+
+During development, an attempted copy onto an already read-only mounted helper stopped the first
+integration run. Removing that redundant copy preserved the mount. The subsequent actual import
+and replay succeeded, but the relationship assertion compared different Gitea fields: the
+comment's `issue_url` is the parent's web URL, whereas the issue's `url` is its API URL. Captured
+native responses established this distinction; the assertion now compares `comment.issue_url`
+with `issue.html_url`, in addition to reading the expected issue's comment list and checking native
+author IDs. Failed runs retained diagnostics and completed scoped cleanup; they are not passing
+integration evidence. Bounded comparison facts are retained in
+`integration-results/work/package-admission-evidence.json` before cleanup.
+
+The complete guided browser flow remains unaccepted. These tests do not establish LDAP/AD,
+additional permission units, native historical timestamp restoration, atomic comment PATCH
+preconditions, signed sender provenance, general exactly-once behavior or 30 GB operation.
+
+Local integration run `0135345abcb141ce` passed all 22 required checks and all 17 source/package
+assertions, including the actual target import and same-plan process restart. It used the unchanged
+Gitea 1.27.2 image pin on a Darwin/arm64 host with Linux/arm64 Docker containers and no observed
+emulation. Scoped cleanup exited 0; no required check failed or remained unexecuted. This is a
+working-tree local Linux-container result, not an exact-commit hosted result. `make doctor` and
+`make test` also passed (419 backend tests, Ruff/format, MyPy over 51 source files, frontend build).
+Exact-head review, hosted CI and integrated-main verification remain required before integration.
+
+The controlled failure contract also passed: its deliberately failed run retained diagnostics and
+completed scoped cleanup. It is not counted as a successful migration.
+
+The first PR #54 hosted run (`44865912507`) failed at the immediate branch API read after
+target application. Preserved Gitea 1.27.2 logs show a nil-repository panic in `repo.GetBranch`;
+the transferred bundle contains the expected `main` ref. The probe now waits on concrete
+post-receive visibility: `repository.empty == false` and a successful branch GET, then compares
+the returned commit with the bundle. The wait has a 20-second polling deadline and 2-second
+request timeouts; only reads are retried. A persistent error or missing branch still fails.
+Observations are retained in the comparison artifact. Focused tests prove delayed visibility and
+timeout rejection. This addresses a suspected post-receive timing boundary without changing the
+image pin, accepting a missing branch or retrying a remote write. PR run `44866454249` and
+integrated-main run `44866950765` subsequently passed. Downloaded main evidence binds the clean
+source and checkout to `9e6b2f4bb40329b2288d50be379607173ab55759`, with all 23 required checks,
+17 source/package assertions, Linux/x86_64, Gitea 1.27.2 and cleanup exit 0.
+
+## Issue #10 guided source commands and downloads
+
+The source screen queues an immutable command through the protected HTTP API. The existing
+background worker captures and packages it without an open browser. SQLite migration 10 stores
+delivery state separately from the source capture and target operation journal. Module tests in
+`test_source_export_jobs.py` exercise explicit queueing, shared executor exclusion, immutable
+requests, schema-9 upgrade, file integrity, explicit retry and actual child-process recovery after
+archive publication. `test_source_export_api.py` covers authentication, CSRF, worker availability
+before persistence, wake-up and closing the verified download descriptor, including early exit.
+
+`frontend/e2e/source-export.spec.ts` uses mocked API responses to verify exact selected IDs and
+profile revision, keyboard activation, saved status/polling/download links, auth expiry, explicit
+retry, and lost-response retry after reload using the same ID and request. It does not claim
+browser-to-Gitea acceptance. Saved downloads remain accessible without reselecting or contacting
+a source. The connection-export browser assertion now selects the exact configuration Export
+button, because the page also offers source-export actions; its download and keyboard checks
+remain intact.
+
+The existing real source-export probe now runs the actual managed application lifespan, admin
+API and background worker against the isolated Gitea source. It downloads the resulting archive
+through the authenticated streaming endpoint; the independent target imports those files using
+the existing probe. A new process repeats the command and downloads identical bytes while the
+source TLS proxy is stopped. Two additional source assertions are mandatory:
+`api_queue_background_download` and `api_restart_replay_no_source_access`. Each has a
+missing-evidence negative report test. Existing capture/core replay, target-author/parent/Git,
+network-isolation and unknown-write assertions remain required.
+
+During development, run `8edff61f8f3c4137` failed before source capture confirmation. The probe
+mixed a manually injected worker with the OCI image's enabled managed lifespan, which replaces
+that worker. The corrected probe supplies disjoint persistent paths and local references to the
+normal managed startup instead. The failed run retained diagnostics and completed cleanup (exit
+0); it is not passing capability evidence. Source-worker failures now retain exception types and
+code locations without exception messages or credentials.
+
+The corrected local run `de63a7d49b504cb3` passed all 22 mandatory checks and all 19 source/package
+assertions against the unchanged Gitea 1.27.2 pin. The host was Darwin/arm64; the Docker server and
+test containers were Linux/arm64 with no observed emulation. Cleanup exited 0 and no mandatory
+check failed or remained unexecuted. `make doctor`, `make test` (442 backend tests, Ruff/format,
+MyPy over 53 source files, frontend build) and all 23 Chromium browser checks passed. A later
+focused API check additionally covers stale-profile conflict classification. The controlled
+failure contract retained diagnostics and cleaned successfully; `make test-clean` left no
+GitFerry test containers or volumes. These are local working-tree results; exact-commit review,
+hosted checks and integrated-main verification are required separately. The complete target
+intake/identity-prerequisite browser flow and milestone 0.2 acceptance remain open.
+
+## Durable target archive upload (Issue #10)
+
+The prior source-export slice is integrated as PR #55, `de6fcf4`, with exact-main hosted
+[CI run 44870014502](https://github.com/hackepeter87/GitFerry/actions/runs/44870014502) passing
+23 required checks. That evidence is distinct from this target-upload working-tree evidence.
+
+Local run `965a38877500458d` passed all 22 mandatory checks and 21 source/package assertions.
+Both actual Gitea versions were 1.27.2 at the unchanged image digest recorded above; host
+Darwin/arm64, Docker server and containers Linux/arm64, no observed emulation. Cleanup exited
+0 and no required check was failed or unexecuted. The report identifies a dirty working tree
+based on `de6fcf4`, not an exact clean commit or a hosted run.
+
+The existing target-only worker now uses the normal managed application lifespan and
+administrator-authenticated raw ZIP PUT/list/detail/resume API. It admits no origins, bindings,
+receipts or operations during upload. Only after explicit local setup does it invoke the existing
+admission/plan execution and validate Git, issue and comment authors/relationships. A separate
+process uploads the same bytes/ID again and checks the same package digest, no additional
+remote writes/objects and unchanged local admission counts. Existing network-isolation and
+v1/v2 compatibility assertions remain required. Added mandatory assertions are
+`target_upload_files_only_before_local_setup` and `target_upload_replay_persistent_identity`;
+negative report-contract cases reject either missing assertion.
+
+`make doctor` and `make test` passed (457 backend tests, Ruff/format, MyPy over 55 source files,
+frontend type check/build). The subsequently added receive-timeout test passed with the other
+12 upload tests. Those tests also cover actual process exits after archive/package publication,
+new-process recovery, size/content conflicts, unsafe existing destinations and auth/CSRF.
+All 29 Chromium browser cases passed, including six upload cases: raw request contract,
+GET-only reload, explicit resume error, distinct IDs for subsequent files, lost-reply ID reuse
+and stale-detail-response rejection. Browser response fixtures prove UI behavior; the managed
+API integration separately supplies real-Gitea evidence. They do not yet prove the complete
+Issue #10 first-import browser flow.
+
+An initial controlled-failure attempt overlapped the normal integration run and failed to bind
+its fixed localhost ports. It is not accepted failure-contract evidence; these two entry points
+must run sequentially on one host. The failed report was retained before the sequential retry.
+The sequential failure-contract run `failure-20261121053914-93206` passed: deliberate exit 86,
+failed report, retained diagnostics, and run-scoped cleanup exit 0. `make test-clean` then
+reported no remaining GitFerry integration projects. The final focused browser rerun also
+checks keyboard submission and a 390-pixel ready-receipt layout without horizontal overflow.
+
+
+## Guided local decisions and real target browser (Issue #10)
+
+The current slice reuses the existing package admission, exact selection review, identity
+bindings and background plan executor. `test_package_decisions.py` covers explicit registration,
+qualified selectors, non-admin native account checks, IDs beyond JavaScript's safe integer,
+changed authority, immutable binding conflicts, transaction rollback and admin/CSRF boundaries.
+No database migration or transport-format change is needed.
+
+Local gates on 2026-11-21 passed: `make doctor`, `make test` (474 backend tests, Ruff, format,
+MyPy and production frontend build), the existing 32-case browser suite, and the subsequently
+expanded seven-case intake suite. Intake cases additionally cover missing bindings, author
+credential aliases, structure/Git-only exclusion, OU-distinct forms, stale responses and focus
+transfer to the saved draft. Axe 4.14.0 scans the intake/review page at 1280 and 390 pixels with
+no excluded rules; the narrow-width check also rejects horizontal overflow. Axe is a development
+only dependency following the [official Playwright integration](https://playwright.dev/docs/accessibility-testing).
+These scans do not replace manual keyboard or complete accessibility acceptance.
+
+Real local integration run `2e007e9bfabe4733` passed all 22 local mandatory checks and all 23
+`source_exports.assertions`. Environment: Darwin/arm64 host, Linux/arm64 Docker 29.9.3, no
+observed emulation, Gitea 1.27.2 on both sides with the existing image digest unchanged.
+The report records the dirty source snapshot hash; it is not an exact-commit hosted result.
+The final focus/style adjustment is covered by the focused browser tests and still requires
+exact-commit hosted execution with the final image.
+
+`frontend/integration/first-import.spec.ts` uses the actual built frontend and managed backend,
+without mocked API routes. The harness supplies synthetic bootstrap credentials, mounted token
+references and a target-only TLS adapter, but no sender/realm/binding/receipt/plan facts. The
+browser imports a non-secret connection profile through the normal configuration UI, explicitly
+approves it, uploads the source-generated ZIP, confirms local decisions and starts its reviewed
+plan. Native issue author 21 and comment author 20 match their distinct local target accounts;
+the comment is attached to the imported issue and the Git ref matches the bundle. A new app
+process and fresh browser observe the confirmed plan without mutation requests. A separate
+replay verifies the same plan ID, no new objects and no additional remote write events.
+
+A loopback-only test tunnel uses Docker exec to forward browser TCP streams exclusively to
+`localhost:8080` inside `gitferry-b`. No importer network is added or made non-internal; the
+actual target context still proves that source Gitea and external hosts are unreachable. There
+is no fixed Docker socket or platform-specific host path. Each tunnel connection and subprocess
+has bounded lifetime. Browser network traces are disabled for this real-session probe so session
+cookies cannot enter publishable traces. Screenshots, assertion logs, sanitized server logs and
+credential-free result summaries remain available in `integration-results/work/browser-*` and
+`package-admission-evidence.json` before normal scoped cleanup.
+
+Two preceding failed runs were retained as diagnostic evidence: `73d166d01ad643b0` detected that
+a host-published port was unavailable on the internal Docker network; `4541035edaec49e3` detected
+the missing accessible label on the configuration file input. Both ended failed and cleaned up
+with exit code 0. The ingress tunnel and input label correct those causes; no assertion was
+removed to obtain success. Cleanup of the successful run also returned 0.
+
+This proves the bounded target intake flow, not full 0.2 acceptance: source-side complete browser
+acceptance, pre-execution target collision presentation and remaining Issue #10 user-flow checks
+stay open. No real LDAP/AD, 30 GB, historical native timestamp restoration, general exactly-once
+or atomic comment precheck/PATCH claim follows from this run.
+
+The sequential failure contract `failure-20261121063107-99769` passed: the injected failure kept exit
+code 86, captured diagnostics and completed scoped cleanup with exit code 0.
+`make test-clean` then completed successfully. Hosted verification of this slice remains pending.
+
+Hosted PR run `44876141315` subsequently passed both jobs for source `785f6d3`, using clean
+merge checkout `7117cf5`. Its success report has all 23 hosted mandatory checks; the deliberate
+failure report retains exit 86 and diagnostics. Both cleanup results are 0. Independent review
+then required stronger browser-upload identity linkage and stale target/package UI corrections.
+Those corrections add exact observed upload-ID equality, clear checked account/credential/message
+state on target changes, and preserve connection-profile refresh on package changes. The expanded
+eight-case intake suite and frontend build passed locally after these changes; the earlier hosted
+result must not be reused as approval for the corrected commit.

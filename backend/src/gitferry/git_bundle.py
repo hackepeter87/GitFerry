@@ -106,6 +106,7 @@ def create_git_bundle(
             check=True,
             capture_output=True,
             text=True,
+            timeout=60,
         )
         _regular_file(temporary_path, "created bundle")
         size, sha256 = _digest_and_size(temporary_path, max_bytes)
@@ -115,6 +116,7 @@ def create_git_bundle(
             check=True,
             capture_output=True,
             text=True,
+            timeout=60,
         )
         try:
             # A hard link is an atomic same-filesystem create and fails if a
@@ -127,7 +129,7 @@ def create_git_bundle(
         temporary_path.unlink()
         temporary_path = None
         return GitBundleResult(member=member, path=target, size=size, sha256=sha256)
-    except subprocess.CalledProcessError as exc:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise GitBundleError("git bundle operation failed") from exc
     finally:
         if temporary_path is not None:

@@ -12,7 +12,9 @@ scope. Never claim a migration capability unless a real Gitea integration test s
 - Before implementation, ensure a public issue defines the problem, result, scope, exclusions,
   acceptance criteria, tests, documentation impact, dependencies, and release milestone. Keep
   private operating detail out of public artifacts.
-- Use a dedicated branch and pull request for each delivery slice. A current-commit AI review,
+- Use one branch and pull request for a coherent user outcome, with small testable commits;
+  keep related implementation layers together. Reuse the existing delivery branch/PR.
+  A current-commit AI review,
   required CI, documentation, compatibility evidence, and integrated-main verification are
   mandatory before closing the issue.
 - Commits, pushes, pull requests, and regular merges are authorized for the owner-approved
@@ -47,6 +49,17 @@ scope. Never claim a migration capability unless a real Gitea integration test s
   parallel work for the same acceptance criteria.
 - Keep work resumable in GitHub: update issue/PR state, concrete blockers, current review findings,
   and next safe action before a natural execution boundary.
+- Maintain one current issue checkpoint: branch/commit, open acceptance criteria, latest relevant
+  tests/review, next action, and actual blocker. Do not repeat a full repository analysis on resume.
+- Keep product requirements, architecture, usage, capabilities and limits in repository docs;
+  keep commit/run IDs, review findings and acceptance evidence in the issue/PR and Actions artifacts.
+  Never open a follow-up documentation PR solely to record post-merge run IDs.
+- Set an elapsed-time execution boundary before each coherent delivery, including CI waits.
+  At a budget boundary preserve work, record usable results/gaps and stop resource-intensive work;
+  do not silently start another timebox. After two failed repairs, reassess and change the approach.
+- During implementation run affected tests and exercise the full user flow early. At delivery run
+  all applicable gates, current-commit review and integrated-main verification. Reuse a valid
+  automatic CI run; do not dispatch a duplicate for the same relevant commit/configuration.
 - Review the actual current diff, requirements, and test evidence. A summary or stale review tied to
   an earlier commit is not approval.
 - Prefer squash merge after required checks and review pass. Verify the resulting `main` commit;

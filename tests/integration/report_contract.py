@@ -29,6 +29,8 @@ OCI_RUNTIME_ASSERTION_NAMES = frozenset(
         "graceful_stop_signal",
         "fresh_volume_initialized",
         "packaged_frontend_served",
+        "installed_admin_security",
+        "runtime_hardening",
         "container_replacement_preserved_state",
         "identity_binding_preserved",
         "object_mapping_preserved",
@@ -43,7 +45,12 @@ OCI_RUNTIME_ASSERTION_NAMES = frozenset(
         "corrupt_database_failed_closed",
         "read_only_directory_failed_closed",
         "symlink_path_failed_closed",
+        "documented_compose_installation",
     }
+)
+
+REFERENCE_COMPOSE_ASSERTION_NAMES = frozenset(
+    {"exact_image", "healthy", "non_root", "aliases_readable", "installed_admin_security"}
 )
 
 
@@ -298,6 +305,9 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
     """Map every requested regression to an executed assertion or focused unit test."""
 
     mandatory_sections = (
+        "connection_profiles",
+        "application_plans",
+        "source_exports",
         "git_bundle",
         "metadata",
         "identity_and_permissions",
@@ -315,6 +325,106 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         and all(_value(report, f"{section}.status") == "passed" for section in mandatory_sections)
     )
     entries = [
+        (
+            "source_export_capture_and_offline_file_receipt",
+            _all_required_true(
+                report,
+                "source_exports.assertions",
+                frozenset(
+                    {
+                        "source_capture_confirmed",
+                        "actual_git_bundle_captured",
+                        "organization_and_team_captured",
+                        "issue_comment_distinct_author_claims",
+                        "manifest_v2_unchanged",
+                        "byte_archive_exact",
+                        "source_context_cannot_target_or_external",
+                        "capture_has_no_api_writes",
+                        "offline_replay_exact",
+                        "target_only_archive_verified",
+                        "source_and_target_databases_independent",
+                        "package_admission_apply_confirmed",
+                        "native_authors_parent_and_git_refs",
+                        "target_only_archive_and_external_unreachable",
+                        "package_admission_database_independent",
+                        "no_user_preparation_blocks_metadata",
+                        "package_replay_process_restart_no_extra_posts_or_objects",
+                        "api_queue_background_download",
+                        "api_restart_replay_no_source_access",
+                        "target_upload_files_only_before_local_setup",
+                        "target_upload_replay_persistent_identity",
+                        "guided_browser_first_import",
+                        "guided_browser_source_export",
+                        "guided_browser_target_collision",
+                        "guided_browser_preview_no_remote_write",
+                        "guided_browser_production_runtime",
+                        "guided_selected_set_and_control",
+                        "guided_browser_restart_read_only",
+                    }
+                ),
+            )
+            and bool(_value(report, "source_exports.image_id"))
+            and _value(report, "source_exports.image_id") == _value(report, "oci_runtime.image_id"),
+            "tests/integration/source_export_probe.py",
+            "source_exports.assertions",
+        ),
+        (
+            "durable_application_plan_and_remote_interruptions",
+            _all_required_true(
+                report,
+                "application_plans.assertions",
+                frozenset(
+                    {
+                        "structure_bundle_and_metadata_confirmed",
+                        "distinct_native_authors",
+                        "parent_mapping_confirmed",
+                        "target_only_context",
+                        "confirmed_restart_no_duplicates",
+                        "crash_remote_post_accepted",
+                        "crash_restart_outcome_unknown",
+                        "crash_no_second_post",
+                        "lost_remote_post_accepted",
+                        "lost_restart_outcome_unknown",
+                        "lost_no_second_post",
+                        "new_packaging_cannot_bypass_unknown",
+                        "explicit_resolution_rejects_wrong_parent_author_and_content",
+                        "explicit_resolution_then_restart_confirms_without_post",
+                        "source_catalog_lists_real_organization_and_repository_without_writes",
+                        "application_package_bundle_received_and_used",
+                        "control_repository_unchanged",
+                        "credentials_absent_from_state_and_report",
+                    }
+                ),
+            ),
+            "tests/integration/application_plan_probe.py",
+            "application_plans.assertions",
+        ),
+        (
+            "connection_profiles_strict_tls_and_local_authority",
+            _all_required_true(
+                report,
+                "connection_profiles.assertions",
+                frozenset(
+                    {
+                        "real_gitea_version_and_account",
+                        "check_did_not_approve",
+                        "explicit_local_approval",
+                        "read_only_connection_check",
+                        "untrusted_ca_rejected",
+                        "wrong_ca_rejected",
+                        "hostname_mismatch_rejected",
+                        "expired_certificate_rejected",
+                        "credentials_absent_from_state_and_exports",
+                        "api_probe_and_local_approval",
+                        "cli_restart_preserves_approved_evidence",
+                        "credentials_absent_from_boundaries_and_logs",
+                        "system_trust_store_without_ca_reference",
+                    }
+                ),
+            ),
+            "tests/integration/connection_profile_probe.py",
+            "connection_profiles.assertions",
+        ),
         (
             "all_required_probe_sections_completed",
             mandatory_sections_passed,
@@ -336,9 +446,22 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         ),
         (
             "persistent_non_root_oci_runtime",
-            _all_required_true(report, "oci_runtime.assertions", OCI_RUNTIME_ASSERTION_NAMES),
+            _all_required_true(report, "oci_runtime.assertions", OCI_RUNTIME_ASSERTION_NAMES)
+            and _all_required_true(
+                report, "oci_runtime.reference_compose", REFERENCE_COMPOSE_ASSERTION_NAMES
+            )
+            and isinstance(_value(report, "oci_runtime.reference_compose.image_id"), str)
+            and (
+                re.fullmatch(
+                    r"sha256:[0-9a-f]{64}",
+                    _value(report, "oci_runtime.reference_compose.image_id"),
+                )
+                is not None
+                and _value(report, "oci_runtime.reference_compose.image_id")
+                == _value(report, "oci_runtime.image_id")
+            ),
             "tests/integration/oci_runtime_probe.py",
-            "oci_runtime.assertions",
+            "oci_runtime.assertions and oci_runtime.reference_compose",
         ),
         (
             "provisioning_crash_and_lost_response_halt_replay",

@@ -483,6 +483,87 @@ def _record_target_verification_conflict(
     )
 
 
+def prepare_provisioning_operations(
+    state: StateStore, plan: ProvisioningPlan
+) -> tuple[tuple[OperationRecord, ...], dict[str, list[str]]]:
+    """Expose the existing journal intents and dependencies to the application planner."""
+    _preflight_origins(state, plan)
+    prepared = _prepare_plan(state, plan, _local_bindings(state, plan))
+    dependencies = prepared.dependencies()
+    operations = (prepared.organization,) + tuple(operation for operation, _ in dependencies)
+    creators = {
+        operation.origin_id: operation.operation_id
+        for operation in operations
+        if operation.operation_type in ("create_organization", "create_repository", "create_team")
+    }
+    return operations, {
+        operation.operation_id: [creators[parent] for parent in parents]
+        for operation, parents in dependencies
+    }
+
+
+def preflight_provisioning_operations(
+    state: StateStore, client: ProvisioningClient, plan: ProvisioningPlan
+) -> None:
+    """Check every selected structure before any write; recheck at the write boundary too."""
+    _preflight_origins(state, plan)
+    bindings = _local_bindings(state, plan)
+    prepared = _prepare_plan(state, plan, bindings)
+    administrator_id = verify_technical_administrator(
+        client.get_authenticated_user(), client.authenticated_login
+    )
+    _verify_remote_bindings(client, bindings, administrator_id)
+    organization = client.find_organization(plan.organization)
+    try:
+        _verify_or_reject_target(
+            state,
+            prepared.organization,
+            kind="organization",
+            name=plan.organization,
+            lookup=lambda: organization,
+            verify=lambda value: verify_organization(value, plan.organization),
+        )
+        _verify_or_reject_target(
+            state,
+            prepared.repository,
+            kind="repository",
+            name=plan.repository,
+            lookup=lambda: client.find_repository(plan.repository),
+            verify=lambda value: verify_repository(value, plan.repository, True),
+        )
+        for team in prepared.teams:
+
+            def lookup_team(current: ProvisioningTeam = team.plan) -> Mapping[str, Any] | None:
+                return (
+                    client.find_team(plan.organization, current.name)
+                    if organization is not None
+                    else None
+                )
+
+            def verify_current_team(
+                value: Mapping[str, Any], current: ProvisioningTeam = team.plan
+            ) -> str:
+                return verify_team(value, current.name, current.permission)
+
+            _verify_or_reject_target(
+                state,
+                team.create,
+                kind="team",
+                name=f"{plan.organization}/{team.plan.name}",
+                lookup=lookup_team,
+                verify=verify_current_team,
+            )
+        for operation, _ in prepared.dependencies():
+            if state.get_operation(operation.operation_id).status in (
+                "outcome_unknown",
+                "conflict",
+            ):
+                raise OperationBlocked("selected operation requires reconciliation")
+    except OperationBlocked:
+        _block_unready_dependencies(state, prepared)
+        raise
+
+
 def provision_selected_repository(
     state: StateStore,
     executor: OperationExecutor,
@@ -497,6 +578,7 @@ def provision_selected_repository(
         raise OperationBlocked("a separate technical provisioning administrator is required")
     if plan.bundle is not None and bundle_pusher is None:
         raise OperationBlocked("bundle content was planned but no bundle pusher was provided")
+    preflight_provisioning_operations(state, client, plan)
     _preflight_origins(state, plan)
     bindings = _local_bindings(state, plan)
     prepared = _prepare_plan(state, plan, bindings)

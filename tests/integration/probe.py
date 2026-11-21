@@ -10,13 +10,16 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from application_plan_probe import run_application_plan_probe
 from comment_transport_roundtrip_probe import run_comment_transport_roundtrip_probe
+from connection_profile_probe import run_connection_profile_probe
 from metadata_roundtrip_probe import run_metadata_roundtrip_probe
 from oci_runtime_probe import run_oci_runtime_probe
 from openapi_migration_probe import run_openapi_migration_probe
 from permissions_probe import run_permissions_probe
 from persistent_state_probe import run_persistent_state_probe
 from provisioning_probe import run_provisioning_probe
+from source_export_probe import run_source_export_probe
 from support import (
     ADMIN,
     PACKAGE,
@@ -304,6 +307,9 @@ def main() -> None:
 
     report = {
         "gitea": {"source": source_version, "target": target_version},
+        "connection_profiles": run_connection_profile_probe(),
+        "application_plans": run_application_plan_probe(),
+        "source_exports": run_source_export_probe(),
         "git_bundle": git_bundle_probe(),
         "metadata": metadata_probe(source_users, target_users),
         "identity_and_permissions": permissions,

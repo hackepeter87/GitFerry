@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitferry.invalid/schemas/v1/connection-profiles.schema.json",
+  "title": "GitFerry local connection configuration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "profiles"
+  ],
+  "properties": {
+    "format": {
+      "const": "gitferry-connections"
+    },
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "profiles": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "instance_key",
+          "display_name",
+          "base_url",
+          "installation_marker",
+          "credential_ref",
+          "ca_ref"
+        ],
+        "properties": {
+          "instance_key": {
+            "$ref": "#/$defs/reference"
+          },
+          "display_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "base_url": {
+            "type": "string",
+            "maxLength": 2048,
+            "pattern": "^https://"
+          },
+          "installation_marker": {
+            "$ref": "#/$defs/reference"
+          },
+          "credential_ref": {
+            "$ref": "#/$defs/reference"
+          },
+          "ca_ref": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/reference"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
+    }
+  }
+}

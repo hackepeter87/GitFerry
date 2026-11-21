@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ssl
 from collections.abc import Mapping
 from typing import Any
 
@@ -22,16 +23,24 @@ class GiteaCommentClient:
         base_url: str,
         *,
         username: str,
-        password: str,
-        verify: bool | str = True,
+        password: str | None = None,
+        token: str | None = None,
+        verify: bool | str | ssl.SSLContext = True,
         timeout: float = 20.0,
+        transport: httpx.BaseTransport | None = None,
     ):
+        if (password is None) == (token is None):
+            raise ValueError("supply one local credential mechanism")
         self.authenticated_login = username
         self._client = httpx.Client(
             base_url=base_url.rstrip("/") + "/api/v1",
-            auth=(username, password),
+            auth=(username, password) if password is not None else None,
+            headers={"Authorization": "token " + token} if token is not None else None,
             verify=verify,
             timeout=timeout,
+            transport=transport,
+            follow_redirects=False,
+            trust_env=False,
         )
 
     def close(self) -> None:
@@ -126,6 +135,8 @@ def verify_comment_facts(
     issue_index: int,
     expected_body: str,
     expected_author_login: str,
+    expected_author_id: int | None = None,
+    expected_created_at: str | None = None,
 ) -> None:
     if not GiteaCommentClient._belongs_to_issue(comment, issue_index):
         raise CommentTargetConflict("comment belongs to another parent issue")
@@ -133,5 +144,11 @@ def verify_comment_facts(
     actual_login = user.get("login") if isinstance(user, Mapping) else None
     if actual_login != expected_author_login:
         raise CommentTargetConflict("native comment author does not match identity binding")
+    if expected_author_id is not None and (
+        not isinstance(user, Mapping) or str(user.get("id")) != str(expected_author_id)
+    ):
+        raise CommentTargetConflict("native comment author ID does not match identity binding")
+    if expected_created_at is not None and comment.get("created_at") != expected_created_at:
+        raise CommentTargetConflict("native comment creation time changed")
     if comment.get("body") != expected_body:
         raise CommentTargetConflict("comment body does not match the expected content")
