@@ -266,7 +266,9 @@ def test_preview_api_persists_commands_and_never_accepts_success_overrides(tmp_p
         assert stale.status_code == 409
         assert stale.json()["error"] == {
             "code": "plan_conflict",
-            "message": "Transfer plan cannot be queued. Refresh and review the plan and prerequisites.",
+            "message": (
+                "Transfer plan cannot be queued. Refresh and review the plan and prerequisites."
+            ),
         }
         assert client.get(path).json()["status"] == "draft"
         assert store.get_operation("op-1").status == "prepared"
