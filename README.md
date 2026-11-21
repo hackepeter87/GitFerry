@@ -29,7 +29,7 @@ For an OCI installation, administrator bootstrap and mounted credential prerequi
 [the deployment guide](deploy/README.md), then [guided first import](docs/first-import.md).
 The commands below prepare the development/test environment.
 
-Prerequisites: Git, Python 3.11+, Node.js 24+, Docker Desktop/Engine with Compose v2+, and enough local disk space for the test volumes.
+Prerequisites: Git, Python 3.11+ (the declared and tested minimum), Node.js 24+, Docker Desktop/Engine with Compose v2+, and enough local disk space for the test volumes.
 
 ```bash
 make doctor
@@ -38,6 +38,11 @@ make test
 make test-integration
 make test-clean
 ```
+
+If the default `python3` is older, select an installed supported interpreter with
+`make setup PYTHON_BOOTSTRAP=/path/to/python3.11`. Setup rejects unsupported interpreters
+before modifying `.venv`. OCI and the primary CI use Python 3.13.9; the quality gate also
+installs and tests the backend on Python 3.11. See [the Python contract](docs/decisions/0020-python-support-contract.md).
 
 The integration environment binds source and target HTTP ports to `127.0.0.1` only. All identities and credentials are synthetic and test-only.
 

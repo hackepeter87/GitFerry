@@ -1,3 +1,4 @@
+PYTHON_BOOTSTRAP ?= python3
 PYTHON := .venv/bin/python
 PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
@@ -8,10 +9,11 @@ GITFERRY_SOURCE_REVISION := $(shell git rev-parse HEAD)
 .PHONY: doctor setup test test-browser test-integration test-integration-diagnostics test-integration-failure-contract test-clean container-build
 
 doctor:
-	./scripts/doctor.sh
+	PYTHON_BOOTSTRAP=$(PYTHON_BOOTSTRAP) ./scripts/doctor.sh
 
 setup:
-	python3 -m venv .venv
+	$(PYTHON_BOOTSTRAP) scripts/check_python.py
+	$(PYTHON_BOOTSTRAP) -m venv .venv
 	.venv/bin/pip install --disable-pip-version-check '.[dev]'
 	cd frontend && npm ci --ignore-scripts
 

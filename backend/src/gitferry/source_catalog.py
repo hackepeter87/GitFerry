@@ -163,13 +163,7 @@ def browse_source(
                 entries.append(
                     {"id": str(native_id), "repository": repository, "private": value["private"]}
                 )
-    except (
-        httpx.HTTPError,
-        asyncio.TimeoutError,
-        ValueError,
-        RecursionError,
-        ProvisioningTargetConflict,
-    ):
+    except (TimeoutError, httpx.HTTPError, ValueError, RecursionError, ProvisioningTargetConflict):
         raise ConnectionUnavailable(
             "Source listing failed; verify source access and retry this page. "
             "No complete inventory was recorded."

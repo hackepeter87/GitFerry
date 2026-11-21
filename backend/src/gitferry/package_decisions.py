@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import sqlite3
 from dataclasses import asdict
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 from urllib.parse import quote
 
 import httpx
@@ -64,7 +64,7 @@ class Selector(BaseModel):
 
 class AccountRequest(DecisionRequest):
     target_login: Annotated[str, Field(min_length=1, max_length=100)]
-    credential_ref: Optional[Reference] = None  # noqa: UP045 -- Pydantic on Python 3.9
+    credential_ref: Reference | None = None
 
 
 class BindingRequest(AccountRequest):
@@ -254,7 +254,7 @@ class PackageDecisions:
 
         try:
             account = asyncio.run(bounded())
-        except (httpx.HTTPError, asyncio.TimeoutError) as error:
+        except (TimeoutError, httpx.HTTPError) as error:
             raise ConnectionUnavailable("target account check failed") from error
         identifier = account.get("id")
         if type(identifier) is not int or not 0 < identifier <= 2**63 - 1:

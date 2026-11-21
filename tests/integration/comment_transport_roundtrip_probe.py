@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
@@ -80,7 +80,7 @@ def openapi_update_contract() -> dict[str, Any]:
 def wait_past_native_timestamp(value: str, timeout_seconds: float = 5) -> None:
     target = datetime.fromisoformat(value.replace("Z", "+00:00"))
     deadline = monotonic() + timeout_seconds
-    while datetime.now(timezone.utc) <= target:
+    while datetime.now(UTC) <= target:
         if monotonic() >= deadline:
             raise ProbeFailure(
                 f"clock did not advance past native timestamp within {timeout_seconds}s"

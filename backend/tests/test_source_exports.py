@@ -455,7 +455,7 @@ def test_known_structure_copies_keep_permanent_origins_and_source_replicas(
     service.run(job["export_id"])
     with state.read_connection() as connection:
         assert connection.execute("SELECT count(*) FROM object_origins").fetchone()[0] == 5
-        for identifier, (_, scope, _, local_id) in zip(identifiers, structures):
+        for identifier, (_, scope, _, local_id) in zip(identifiers, structures, strict=False):
             row = connection.execute(
                 "SELECT target_repository_scope,target_global_id FROM object_mappings "
                 "WHERE origin_id=? AND target_instance_key='a'",

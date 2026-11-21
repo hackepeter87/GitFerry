@@ -53,7 +53,7 @@ class RepositoryInput(_Input):
     repository_origin_id: Text
     repository: Text
     teams: list[TeamInput] = Field(default_factory=list, max_length=1000)
-    bundle: Optional[BundleInput] = None  # noqa: UP045 -- Pydantic evaluates on Python 3.9
+    bundle: BundleInput | None = None
 
     def provisioning(self, target: str) -> ProvisioningPlan:
         return ProvisioningPlan(
@@ -90,14 +90,14 @@ class MetadataInput(_Input):
     repository: Text
     author: AuthorInput
     values: dict[str, Any]
-    baseline_id: Optional[Text] = None  # noqa: UP045 -- Pydantic evaluates on Python 3.9
+    baseline_id: Text | None = None
 
 
 class PlanRequest(_Input):
     version: Literal[1]
     target_instance_key: Reference
     round_key: Text
-    package_ref: Optional[Reference] = None  # noqa: UP045 -- Pydantic evaluates on Python 3.9
+    package_ref: Reference | None = None
     package_digest: Optional[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]] = None  # noqa: UP045
     source_limitations: list[Text] = Field(default_factory=list, max_length=1000)
     repositories: list[RepositoryInput] = Field(default_factory=list, max_length=1000)

@@ -8,7 +8,7 @@ import json
 import os
 import ssl
 import stat
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -180,7 +180,7 @@ def probe_connection(
             raise ConnectionUnavailable(
                 "Gitea check response has invalid version or account identity"
             )
-    except (httpx.HTTPError, asyncio.TimeoutError, ConnectionUnavailable):
+    except (TimeoutError, httpx.HTTPError, ConnectionUnavailable):
         with service.store.transaction() as connection:
             connection.execute(
                 "UPDATE connection_profiles SET locally_approved=0 "
@@ -219,7 +219,7 @@ def probe_connection(
             "ON CONFLICT(instance_key) DO UPDATE SET profile_revision=excluded.profile_revision,"
             "observed_identity=excluded.observed_identity,approved_identity=excluded.approved_identity,"
             "checked_at=excluded.checked_at",
-            (key, expected_revision, observed, approved, datetime.now(timezone.utc).isoformat()),
+            (key, expected_revision, observed, approved, datetime.now(UTC).isoformat()),
         )
     approved_identity = json.loads(approved) if approved else None
     return {

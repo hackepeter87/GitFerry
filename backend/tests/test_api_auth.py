@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -14,7 +14,7 @@ from gitferry.state_store import StateStore
 
 class Clock:
     def __init__(self) -> None:
-        self.value = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)
+        self.value = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
 
     def __call__(self) -> datetime:
         return self.value
@@ -138,7 +138,7 @@ def test_viewer_session_cannot_call_admin_endpoint(tmp_path: Path) -> None:
             "synthetic.viewer",
             "viewer",
             *admin,
-            datetime.now(timezone.utc).isoformat(),
+            datetime.now(UTC).isoformat(),
         ),
     )
     connection.commit()

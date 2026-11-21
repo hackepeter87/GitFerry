@@ -1,7 +1,9 @@
 #!/bin/sh
 set -eu
 
-required="git python3 node npm docker"
+python_command=${PYTHON_BOOTSTRAP:-python3}
+if [ -x .venv/bin/python ]; then python_command=.venv/bin/python; fi
+required="git $python_command node npm docker"
 failed=0
 for command_name in $required; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -15,7 +17,8 @@ if [ "$failed" -ne 0 ]; then
 fi
 
 echo "host_arch=$(uname -m)"
-echo "python=$(python3 --version 2>&1)"
+"$python_command" scripts/check_python.py
+echo "python=$($python_command --version 2>&1)"
 echo "node=$(node --version)"
 echo "git=$(git --version)"
 echo "docker_context=$(docker context show)"

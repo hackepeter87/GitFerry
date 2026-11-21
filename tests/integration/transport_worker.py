@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -192,7 +192,7 @@ def seed_forward(state: StateStore) -> dict[str, Any]:
             "context": "isolated GitFerry B state",
         },
         "mode": "forward",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "deletion_semantics": "absence-does-not-delete",
         "selected_repositories": selection(),
         "identity_claims": [
@@ -343,7 +343,7 @@ def modify_and_return(state: StateStore, manifest_id: str = "portable-return-1")
             "context": "isolated GitFerry A state",
         },
         "mode": "return",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "forward_reference": {
             "manifest_id": forward.document["manifest_id"],
             "digest_sha256": forward.digest_sha256,
@@ -409,7 +409,7 @@ def repackage_return(state: StateStore) -> dict[str, Any]:
     document = {
         **original.document,
         "manifest_id": "portable-return-repackaged",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
     artifact = write_transport(Path("/state/outbox/repackaged"), document)
     report = record_export(state, artifact, local_instance_key=INSTANCE_B)
@@ -425,7 +425,7 @@ def check_return(state: StateStore) -> tuple[bool, dict[str, Any]]:
     artifact = load_transport(RETURN_IN)
     report = admit_transport(state, artifact, local_instance_key=INSTANCE_A)
     drift: list[str] = []
-    for item, identifier in zip(artifact.document["objects"], report.origin_ids):
+    for item, identifier in zip(artifact.document["objects"], report.origin_ids, strict=False):
         baseline = item["comparison"]["original_baseline"]
         if item["origin"]["instance_key"] != INSTANCE_A or baseline is None:
             continue
@@ -456,7 +456,7 @@ def apply_return(state: StateStore) -> tuple[int, dict[str, Any]]:
         return 5, check
     artifact = load_transport(RETURN_IN)
     outcomes: list[dict[str, Any]] = []
-    for item, identifier in zip(artifact.document["objects"], check["origin_ids"]):
+    for item, identifier in zip(artifact.document["objects"], check["origin_ids"], strict=False):
         values = item["comparison"]["current"]
         if item["origin"]["instance_key"] == INSTANCE_A:
             mapping = state.get_object_mapping(identifier, INSTANCE_A)

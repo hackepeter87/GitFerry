@@ -8,7 +8,7 @@ import re
 import sqlite3
 import uuid
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -153,7 +153,7 @@ class ProfileService:
                 profile.instance_key,
                 profile.revision,
                 action,
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
             ),
         )
 
@@ -177,7 +177,7 @@ class ProfileService:
                     profile.display_name,
                     profile.base_url,
                     profile.installation_marker,
-                    datetime.now(timezone.utc).isoformat(),
+                    datetime.now(UTC).isoformat(),
                 ),
             )
         connection.execute(
