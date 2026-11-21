@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -442,5 +442,20 @@ CREATE TABLE plan_events (
     created_at TEXT NOT NULL
 );
 CREATE INDEX transfer_plans_status ON transfer_plans(status, updated_at);
+""",
+    8: """
+CREATE TABLE source_exports (
+    export_id TEXT PRIMARY KEY,
+    request_hash TEXT NOT NULL,
+    request_json TEXT NOT NULL,
+    source_identity_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('prepared', 'capturing', 'captured', 'failed')),
+    candidate_digest TEXT,
+    package_digest TEXT,
+    error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK ((status = 'captured') = (package_digest IS NOT NULL))
+);
 """,
 }

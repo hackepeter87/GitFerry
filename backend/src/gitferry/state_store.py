@@ -509,6 +509,37 @@ class StateStore:
             ),
         )
 
+    def find_origin_for_replica(
+        self, instance_key: str, repository: str, object_type: ObjectType, global_id: str
+    ) -> OriginRecord | None:
+        """Resolve an existing native copy without inventing a new storage-location origin."""
+        with self.read_connection() as connection:
+            rows = connection.execute(
+                "SELECT origin_id, target_repository_scope AS scope FROM object_mappings "
+                "WHERE target_instance_key=? AND target_object_type=? AND target_global_id=?",
+                (instance_key, object_type, global_id),
+            ).fetchall()
+            if rows:
+                if len(rows) != 1 or rows[0]["scope"] != repository:
+                    raise MappingConflict(
+                        "native object has a conflicting or stale repository mapping"
+                    )
+                identifier = rows[0]["origin_id"]
+            else:
+                rows = connection.execute(
+                    "SELECT origin_id, origin_repository_scope AS scope FROM object_origins "
+                    "WHERE origin_instance_key=? AND object_type=? AND origin_global_id=?",
+                    (instance_key, object_type, global_id),
+                ).fetchall()
+                if not rows:
+                    return None
+                if len(rows) != 1 or rows[0]["scope"] != repository:
+                    raise MappingConflict(
+                        "native origin has a conflicting or stale repository scope"
+                    )
+                identifier = rows[0]["origin_id"]
+        return self.get_origin(identifier)
+
     def add_object_mapping(
         self,
         origin_id: str,

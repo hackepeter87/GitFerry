@@ -19,6 +19,7 @@ from openapi_migration_probe import run_openapi_migration_probe
 from permissions_probe import run_permissions_probe
 from persistent_state_probe import run_persistent_state_probe
 from provisioning_probe import run_provisioning_probe
+from source_export_probe import run_source_export_probe
 from support import (
     ADMIN,
     PACKAGE,
@@ -308,6 +309,7 @@ def main() -> None:
         "gitea": {"source": source_version, "target": target_version},
         "connection_profiles": run_connection_profile_probe(),
         "application_plans": run_application_plan_probe(),
+        "source_exports": run_source_export_probe(),
         "git_bundle": git_bundle_probe(),
         "metadata": metadata_probe(source_users, target_users),
         "identity_and_permissions": permissions,

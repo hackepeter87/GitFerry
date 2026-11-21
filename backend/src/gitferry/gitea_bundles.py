@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 import ssl
 import subprocess
 import tempfile
@@ -13,11 +14,16 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Final
 
-import httpx
-
 from .connection_profiles import ProfileValidationError, normalize_url
-from .git_bundle import GitBundleError, GitImportResult, import_git_bundle
+from .git_bundle import (
+    GitBundleError,
+    GitBundleResult,
+    GitImportResult,
+    create_git_bundle,
+    import_git_bundle,
+)
 from .provisioning import BundleIntent
+from .source_snapshot import SourceSnapshotError, read_repository_identity
 from .state_store import TargetConfirmation
 
 
@@ -150,29 +156,85 @@ class GiteaBundlePusher(AbstractContextManager["GiteaBundlePusher"]):
         self.check_remote(repository, bundle=bundle, expected_empty=False)
         return TargetConfirmation(expected_repository_id, None)
 
+    def export_bundle(
+        self,
+        repository: str,
+        *,
+        member: str,
+        expected_repository_id: str,
+        max_bytes: int | None = None,
+    ) -> GitBundleResult | None:
+        """Capture a stable, bounded source mirror into the owned package root.
+
+        Every remote read is authenticated through :meth:`_git_remote`, and
+        identity/ref checks bracket the clone and bundle publication.  A
+        source with no refs is a valid structure-only repository and therefore
+        produces no synthetic bundle.
+        """
+
+        self._verify_repository_id(repository, expected_repository_id)
+        url = self._repository_url(repository)
+        before = self._git_remote("ls-remote", url, None)
+        if not before:
+            self._verify_repository_id(repository, expected_repository_id)
+            if self._git_remote("ls-remote", url, None):
+                raise GiteaBundleError("source refs changed during export")
+            self._verify_repository_id(repository, expected_repository_id)
+            return None
+
+        work_directory = self._ensure_work_directory()
+        clone_directory = Path(tempfile.mkdtemp(prefix="gitferry-source-", dir=work_directory))
+        result: GitBundleResult | None = None
+        try:
+            self._run_git(["clone", "--mirror", url, os.fspath(clone_directory)], cwd=None)
+            # This is a post-transfer guard before producing another full artifact,
+            # not an aggregate quota while Git is receiving the clone.
+            if (
+                max_bytes is not None
+                and sum(
+                    path.stat().st_size for path in clone_directory.rglob("*") if path.is_file()
+                )
+                > max_bytes
+            ):
+                raise GiteaBundleError("source clone exceeds the configured capture limit")
+            cloned = self._local_refs(clone_directory)
+            if cloned != before:
+                raise GiteaBundleError("source refs changed during export")
+            current = self._git_remote("ls-remote", url, None)
+            if current != before:
+                raise GiteaBundleError("source refs changed during export")
+
+            result = create_git_bundle(
+                clone_directory, self.package_root, member, max_bytes=max_bytes
+            )
+            current = self._git_remote("ls-remote", url, None)
+            self._verify_repository_id(repository, expected_repository_id)
+            if current != before:
+                raise GiteaBundleError("source refs changed during export")
+            return result
+        except GiteaBundleError:
+            if result is not None and result.path.is_file() and not result.path.is_symlink():
+                result.path.unlink(missing_ok=True)
+            raise
+        except (GitBundleError, OSError):
+            if result is not None and result.path.is_file() and not result.path.is_symlink():
+                result.path.unlink(missing_ok=True)
+            raise GiteaBundleError("source bundle export failed") from None
+        finally:
+            shutil.rmtree(clone_directory, ignore_errors=True)
+
     def _verify_repository_id(self, repository: str, expected: str) -> None:
         if not _REPOSITORY.fullmatch(repository):
             raise GiteaBundleError("invalid repository name")
-        owner, name = repository.split("/", 1)
         try:
             verify = ssl.create_default_context(
                 cafile=str(self.ca_file) if self.ca_file else os.environ.get("SSL_CERT_FILE")
             )
-            with httpx.Client(
-                base_url=self.base_url + "/api/v1",
-                headers={"Authorization": "token " + self.token},
-                verify=verify,
-                timeout=20,
-                follow_redirects=False,
-                trust_env=False,
-            ) as client:
-                response = client.get(f"/repos/{owner}/{name}")
-                response.raise_for_status()
-                value = response.json()
-        except (httpx.HTTPError, ValueError):
-            raise GiteaBundleError("target repository identity check failed") from None
-        if not isinstance(value, dict) or str(value.get("id")) != expected:
-            raise GiteaBundleError("target repository id does not match the journal mapping")
+            actual = read_repository_identity(self.base_url, self.token, verify, repository)
+        except (SourceSnapshotError, ValueError, OSError):
+            raise GiteaBundleError("repository identity check failed") from None
+        if actual != expected:
+            raise GiteaBundleError("repository id does not match the expected mapping")
 
     def _push_refs(self, url: str, refs: Mapping[str, str], repository: Path) -> None:
         if not refs:
