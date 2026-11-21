@@ -1,0 +1,22 @@
+apiVersion: gitferry.io/v1
+kind: InstanceBlueprint
+metadata:
+  name: ldap-simple-target
+spec:
+  gitea:
+    baseUrl: https://gitea-target.example.invalid
+    credentialSecretRef: secrets/gitea/target-admin-token
+    caSecretRef: trust/internal-target-ca
+    expectedVersion: 1.27.2
+  authenticationSources:
+    - name: synthetic-openldap
+      type: ldaps
+      mode: simple
+      directoryRealm: SYNTHETIC-OPENLDAP
+      host: ldap.example.invalid
+      port: 636
+      userDn: uid=%s,ou=People,dc=example,dc=invalid
+      userFilter: (&(objectClass=posixAccount)(uid=%s))
+      emailAttribute: mail
+      usernameAttribute: uid
+      caSecretRef: trust/internal-directory-ca

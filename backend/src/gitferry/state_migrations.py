@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -555,5 +555,61 @@ CREATE INDEX identity_decision_events_candidate ON identity_decision_events(cand
 """,
     14: """
 ALTER TABLE identity_candidates ADD COLUMN target_account_evidence TEXT NOT NULL DEFAULT '{}';
+""",
+    15: """
+CREATE TABLE directory_bootstraps (
+    instance_key TEXT NOT NULL CHECK (length(instance_key) BETWEEN 1 AND 128)
+      REFERENCES instances(instance_key),
+    source_name TEXT NOT NULL CHECK (length(source_name) BETWEEN 1 AND 128),
+    realm_key TEXT NOT NULL CHECK (length(realm_key) BETWEEN 1 AND 128)
+      REFERENCES realms(realm_key),
+    intent_digest TEXT NOT NULL CHECK (length(intent_digest)=64 AND
+      intent_digest NOT GLOB '*[^0-9a-fA-F]*'),
+    config_fingerprint TEXT NOT NULL CHECK (length(config_fingerprint)=64 AND
+      config_fingerprint NOT GLOB '*[^0-9a-fA-F]*'),
+    status TEXT NOT NULL CHECK (status IN
+      ('prepared','executing','confirmed','outcome_unknown','conflict')),
+    native_source_id TEXT,
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (instance_key, source_name)
+);
+CREATE TABLE directory_bootstrap_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_key TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (instance_key, source_name)
+      REFERENCES directory_bootstraps(instance_key, source_name)
+);
+CREATE INDEX directory_bootstrap_events_key
+  ON directory_bootstrap_events(instance_key, source_name, event_id);
+
+CREATE TABLE directory_configurations (
+    configuration_id TEXT PRIMARY KEY,
+    instance_key TEXT NOT NULL REFERENCES instances(instance_key),
+    source_name TEXT NOT NULL,
+    directory_realm TEXT NOT NULL REFERENCES realms(realm_key),
+    source_json TEXT NOT NULL,
+    source_sha256 TEXT NOT NULL CHECK (length(source_sha256) = 64),
+    profile_revision INTEGER NOT NULL CHECK (profile_revision > 0),
+    config_revision INTEGER NOT NULL CHECK (config_revision > 0),
+    actor TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    UNIQUE (instance_key, source_name)
+);
+CREATE TABLE directory_configuration_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    configuration_id TEXT NOT NULL REFERENCES directory_configurations(configuration_id),
+    config_revision INTEGER NOT NULL CHECK (config_revision > 0),
+    source_sha256 TEXT NOT NULL CHECK (length(source_sha256) = 64),
+    actor TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    UNIQUE (configuration_id, config_revision)
+);
 """,
 }

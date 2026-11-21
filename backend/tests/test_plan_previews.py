@@ -187,6 +187,10 @@ else: print(json.dumps(PlanRunner(s, lambda _: nullcontext(Adapter())).preview_n
 def test_schema_11_upgrade_preserves_existing_plan_and_operation(tmp_path):
     store, service, plan, _ = setup(tmp_path)
     with store.transaction() as c:
+        c.execute("DROP TABLE directory_configuration_events")
+        c.execute("DROP TABLE directory_configurations")
+        c.execute("DROP TABLE directory_bootstrap_events")
+        c.execute("DROP TABLE directory_bootstraps")
         c.execute("DROP TABLE identity_decision_events")
         c.execute("DROP TABLE identity_candidates")
         c.execute("DROP TABLE plan_previews")

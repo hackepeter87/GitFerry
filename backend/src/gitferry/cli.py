@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 
 from gitferry import (
+    directory_cli,
     identity_cli,
     package_admission_cli,
     package_cli,
@@ -47,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     source_export_cli.configure(subparsers.add_parser("exports"), database_default)
     package_admission_cli.configure(subparsers.add_parser("intake"), database_default)
     identity_cli.configure(subparsers.add_parser("identities"), database_default)
+    directory_cli.configure(subparsers.add_parser("directories"), database_default)
     validate = subparsers.add_parser("validate-blueprint")
     validate.add_argument("path", type=Path)
 
@@ -173,6 +175,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return plan_cli.execute(args)
     if args.command == "exports":
         return source_export_cli.execute(args)
+    if args.command == "directories":
+        return directory_cli.execute(args)
     if args.command == "identities":
         return identity_cli.execute(args)
     if args.command == "intake":

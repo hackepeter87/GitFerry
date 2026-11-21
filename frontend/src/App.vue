@@ -4,6 +4,7 @@ import { nextTick, onMounted, ref } from "vue";
 import { ApiError, getAuthStatus, getSession, login, logout, type Principal } from "./api";
 import ConnectionsPanel from "./ConnectionsPanel.vue";
 import IdentityPanel from "./IdentityPanel.vue";
+import DirectoryPanel from "./DirectoryPanel.vue";
 import PlansPanel from "./PlansPanel.vue";
 import PackageUploadsPanel from "./PackageUploadsPanel.vue";
 import SourceSelectionPanel from "./SourceSelectionPanel.vue";
@@ -199,6 +200,7 @@ function handlePreparedPlan(plan: TransferPlan): void { preparedPlan.value = pla
       </div>
       <ConnectionsPanel @session-expired="handlePanelSessionExpired" />
       <IdentityPanel @session-expired="handlePanelSessionExpired" />
+      <DirectoryPanel @session-expired="handlePanelSessionExpired" />
       <SourceSelectionPanel @session-expired="handlePanelSessionExpired" />
       <PackageUploadsPanel @session-expired="handlePanelSessionExpired" @selected-package="handleSelectedPackage" />
       <PackageAdmissionPanel :upload="selectedPackage" @session-expired="handlePanelSessionExpired" @prepared-plan="handlePreparedPlan" />
