@@ -7,8 +7,10 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -364,8 +366,207 @@ def initial() -> dict[str, Any]:
     }
 
 
-def replay() -> dict[str, Any]:
+def prepare_browser() -> dict[str, Any]:
+    ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for directory in (DATABASE.parent, ROOT / "packages", ROOT / "work", ROOT / "secrets"):
+        directory.mkdir(mode=0o700, exist_ok=True)
+    shutil.copyfile("/tmp/package-admission-trusted.pem", ROOT / "trusted.pem")
+    shutil.copyfile("/tmp/package-admission-trusted.key", ROOT / "trusted.key")
+    _mint_user_tokens(ROOT / "secrets")
     state = StateStore(DATABASE)
+    DATABASE.chmod(0o600)
+    AuthService(state).bootstrap_admin("synthetic.admin", "synthetic integration passphrase")
+    service = PackageAdmissions(state, RuntimePaths(DATABASE, ROOT / "packages", ROOT / "work"))
+    counts = _counts(service)
+    if any(counts.values()):
+        raise RuntimeError("browser setup unexpectedly contains application authority")
+    return {
+        "counts": counts,
+        "target_only": _unreachable("source", 3000),
+        "external_unreachable": _unreachable("1.1.1.1", 80),
+    }
+
+
+def serve_browser() -> None:
+    import uvicorn
+
+    os.environ.update(
+        {
+            "GITFERRY_RUNTIME_MANAGED": "1",
+            "GITFERRY_STATE_DB": str(DATABASE),
+            "GITFERRY_PACKAGE_DIR": str(ROOT / "packages"),
+            "GITFERRY_WORK_DIR": str(ROOT / "work"),
+            "GITFERRY_SECRET_DIR": str(ROOT / "secrets"),
+            "GITFERRY_CA_DIR": str(ROOT),
+        }
+    )
+    plan_worker.ROOT, plan_worker.URL = ROOT, URL
+    with plan_worker.proxy():
+        uvicorn.run(
+            create_app(session_cookie_secure=False),
+            host="0.0.0.0",  # noqa: S104 -- isolated test container interface
+            port=8080,
+            access_log=False,
+            timeout_graceful_shutdown=10,
+        )
+
+
+def start_browser() -> dict[str, Any]:
+    pid_path = ROOT / "browser-server.pid"
+    if pid_path.exists():
+        raise RuntimeError("browser server already has a registered process")
+    with (ROOT / "browser-server.log").open("ab") as log:
+        process = subprocess.Popen(  # noqa: S603
+            [sys.executable, __file__, "serve-browser"],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    pid_path.write_text(str(process.pid))
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError("managed browser server stopped before readiness")
+        try:
+            if (
+                httpx.get("http://localhost:8080/healthz", timeout=1, trust_env=False).status_code
+                == 200
+            ):
+                return {"status": "ready", "pid": process.pid}
+        except httpx.HTTPError:
+            pass
+        time.sleep(0.1)
+    raise RuntimeError("managed browser server readiness timed out")
+
+
+def stop_browser() -> dict[str, Any]:
+    pid_path = ROOT / "browser-server.pid"
+    pid = int(pid_path.read_text())
+    command = Path(f"/proc/{pid}/cmdline").read_bytes()
+    if b"package_admission_worker.py" not in command or b"serve-browser" not in command:
+        raise RuntimeError("browser process identity changed")
+    os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        status = Path(f"/proc/{pid}/stat")
+        if not status.exists() or status.read_text().split(") ", 1)[1].startswith("Z"):
+            pid_path.unlink()
+            return {"status": "stopped"}
+        time.sleep(0.1)
+    raise RuntimeError("browser server did not stop")
+
+
+def browser_upload_evidence() -> dict[str, Any]:
+    state = StateStore(DATABASE)
+    service = PackageAdmissions(state, RuntimePaths(DATABASE, ROOT / "packages", ROOT / "work"))
+    counts = _counts(service)
+    with state.read_connection() as connection:
+        uploads = connection.execute("SELECT * FROM package_uploads").fetchall()
+        instances = connection.execute("SELECT instance_key FROM instances").fetchall()
+    if len(uploads) != 1 or uploads[0]["status"] != "ready":
+        raise RuntimeError("browser did not upload exactly one validated package")
+    if [row[0] for row in instances] != [TARGET] or any(
+        v for k, v in counts.items() if k != "instances"
+    ):
+        raise RuntimeError("upload granted local authority or admitted facts")
+    row = dict(uploads[0])
+    with httpx.Client(base_url="http://localhost:8080", trust_env=False, timeout=30) as client:
+        headers = _api_login(client)
+        resumed = client.post(
+            f"/api/v1/package-uploads/{row['upload_id']}/resume", json={}, headers=headers
+        )
+        resumed.raise_for_status()
+    after = _counts(service)
+    if counts != after or resumed.json()["status"] != "ready":
+        raise RuntimeError("explicit receipt resume changed admission state")
+    result = {
+        "status": row["status"],
+        "package_ref": row["upload_id"],
+        "digest": row["package_digest"],
+        "archive_sha256": row["archive_sha256"],
+        "resumed_status": resumed.json()["status"],
+        "counts_unchanged": counts == after,
+    }
+    # Boolean derives from the complete asserted snapshot above, not a placeholder.
+    (ROOT / "browser-upload.json").write_text(json.dumps(result))
+    return result
+
+
+def browser_result() -> dict[str, Any]:
+    global PACKAGE_REF
+    state = StateStore(DATABASE)
+    service = PackageAdmissions(state, RuntimePaths(DATABASE, ROOT / "packages", ROOT / "work"))
+    upload_evidence = json.loads((ROOT / "browser-upload.json").read_text())
+    browser = json.loads((ROOT / "browser-evidence.json").read_text())
+    PACKAGE_REF = upload_evidence["package_ref"]
+    admitted = service.list()[0]
+    plans = PlanService(state)
+    summaries = plans.list()
+    if len(summaries) != 1:
+        raise RuntimeError("browser did not create exactly one plan")
+    plan = plans.get(summaries[0]["plan_id"])
+    if plan["status"] != "confirmed":
+        raise RuntimeError("browser plan is not confirmed")
+    result = plan
+    repository, refs_remote, git_visibility = _git_visibility()
+    issue = remote("GET", "/repos/source-export-lab/selected/issues/1")
+    comments = remote("GET", "/repos/source-export-lab/selected/issues/1/comments")
+    bundle = next((ROOT / "packages" / PACKAGE_REF / "bundles").glob("*.bundle"))
+    bundle_refs = {
+        line.split(maxsplit=1)[1]: line.split(maxsplit=1)[0]
+        for line in subprocess.run(
+            [shutil.which("git") or "/usr/bin/git", "bundle", "list-heads", str(bundle)],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.splitlines()
+        # Bundle HEAD is a symbolic/default-branch alias, not a transferred ref.
+        if line.split(maxsplit=1)[1].startswith("refs/")
+    }
+    events = (ROOT / "remote-events.jsonl").read_text(encoding="utf-8").splitlines()
+    with service.state.read_connection() as connection:
+        source_exports_rows = connection.execute("SELECT count(*) FROM source_exports").fetchone()[
+            0
+        ]
+    return {
+        "status": result["status"],
+        "package_digest": admitted["digest_sha256"],
+        "review_missing_bindings": browser["review_missing_bindings"],
+        "blocked_without_bindings": browser["blocked_without_bindings"],
+        "plan_id": plan["plan_id"],
+        "repository": repository,
+        "issue_author": issue["user"]["login"],
+        "issue_author_id": issue["user"]["id"],
+        "comment_author": comments[0]["user"]["login"] if comments else "",
+        "comment_author_id": comments[0]["user"]["id"] if comments else None,
+        "target_author_ids": {
+            login: remote("GET", f"/users/{login}")["id"]
+            for login in ("issue-author", "comment-author")
+        },
+        "comment_parent": comments[0]["body"] if comments else "",
+        "comment_issue_url": comments[0].get("issue_url") if comments else "",
+        "issue_url": issue.get("url", ""),
+        "issue_html_url": issue["html_url"],
+        "git_ref": refs_remote["commit"]["id"],
+        "bundle_refs": bundle_refs,
+        "target_refs": {"refs/heads/main": refs_remote["commit"]["id"]},
+        "git_visibility": git_visibility,
+        "post_count": len(events),
+        "objects": _counts(service),
+        "evidence_digest": plan["evidence_digest"],
+        "target_only": _unreachable("source", 3000),
+        "external_unreachable": _unreachable("1.1.1.1", 80),
+        "source_exports_rows": source_exports_rows,
+        "upload": upload_evidence,
+    }
+
+
+def replay() -> dict[str, Any]:
+    global PACKAGE_REF
+    state = StateStore(DATABASE)
+    browser_upload = ROOT / "browser-upload.json"
+    if browser_upload.exists():
+        PACKAGE_REF = json.loads(browser_upload.read_text())["package_ref"]
     paths = RuntimePaths(DATABASE, ROOT / "packages", ROOT / "work")
     service = PackageAdmissions(state, paths)
     before_events = (ROOT / "remote-events.jsonl").read_text(encoding="utf-8").splitlines()
@@ -379,7 +580,12 @@ def replay() -> dict[str, Any]:
         profile_revision=1,
         expected_digest=service.artifact(PACKAGE_REF).digest_sha256,
     )
-    refs = {"issue-author": "issue-author", "comment-author": "comment-author"}
+    if browser_upload.exists():
+        saved = PlanService(state)
+        confirmed = saved.get(saved.list()[0]["plan_id"])
+        refs = confirmed["document"]["inventory"]["request"]["author_credential_refs"]
+    else:
+        refs = {"issue-author": "issue-author", "comment-author": "comment-author"}
     review = service.plan_review(
         PACKAGE_REF,
         target_instance_key=TARGET,
@@ -430,9 +636,21 @@ def replay() -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("initial", "replay"))
+    actions = {
+        "initial": initial,
+        "replay": replay,
+        "prepare-browser": prepare_browser,
+        "start-browser": start_browser,
+        "stop-browser": stop_browser,
+        "browser-upload": browser_upload_evidence,
+        "browser-result": browser_result,
+    }
+    parser.add_argument("mode", choices=(*actions, "serve-browser"))
     args = parser.parse_args()
-    print(json.dumps(initial() if args.mode == "initial" else replay(), sort_keys=True))
+    if args.mode == "serve-browser":
+        serve_browser()
+        return
+    print(json.dumps(actions[args.mode](), sort_keys=True))
 
 
 if __name__ == "__main__":

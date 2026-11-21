@@ -63,6 +63,8 @@ def complete_probe_report() -> dict[str, object]:
                     "api_restart_replay_no_source_access",
                     "target_upload_files_only_before_local_setup",
                     "target_upload_replay_persistent_identity",
+                    "guided_browser_first_import",
+                    "guided_browser_restart_read_only",
                 ),
                 True,
             ),
@@ -534,6 +536,8 @@ def test_application_plan_assertion_is_required(tmp_path: Path, assertion: str) 
         "api_restart_replay_no_source_access",
         "target_upload_files_only_before_local_setup",
         "target_upload_replay_persistent_identity",
+        "guided_browser_first_import",
+        "guided_browser_restart_read_only",
     ],
 )
 def test_source_capture_assertion_is_required(tmp_path: Path, assertion: str) -> None:

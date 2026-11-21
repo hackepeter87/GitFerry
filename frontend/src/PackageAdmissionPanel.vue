@@ -91,5 +91,11 @@ function handleError(cause: unknown, fallback: string): void { if (cause instanc
 </template>
 
 <style scoped>
+.package-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; }
+.package-admission-panel > label { display:block; margin:.75rem 0 .4rem; font-weight:700; }
+.package-admission-panel > select { width:100%; min-height:2.9rem; padding:.65rem .75rem; border:1px solid #829187; border-radius:.25rem; background:#fff; color:#18221c; font:inherit; }
+.plan-options label { display:flex; align-items:center; gap:.65rem; min-height:2.75rem; }
+.plan-options input[type=checkbox] { width:1.15rem; height:1.15rem; min-height:0; padding:0; flex:0 0 auto; }
+
 .package-admission-panel { margin-top: 2rem; padding-top: 1.5rem; border-top: .0625rem solid #ccd4cd; }.admission-content { display: grid; gap: 1rem; margin-top: 1rem; }.admission-box { overflow-wrap:anywhere; padding: 1rem; border: .0625rem solid #c6d2c8; background: #fbfcfa; }.admission-box h3 { margin-top: 0; }.admission-box dl { display: grid; gap: .4rem; }.admission-box dl div { display: grid; grid-template-columns: minmax(8rem, auto) minmax(0, 1fr); gap: .75rem; }.admission-box dt { font-weight: 700; color: #526057; }.admission-box dd { margin: 0; overflow-wrap: anywhere; }.inline-form, .identity-row, .mapping-row { display: grid; gap: .45rem; margin-top: .75rem; padding-top: .75rem; border-top: .0625rem solid #d7dfd8; }.mapping-row { grid-template-columns: minmax(10rem, 1fr) auto; }.mapping-row label, .mapping-row input, .mapping-row button { grid-column: 1 / -1; }.identity-row p { margin: 0; }.plan-options { display: grid; gap: .6rem; margin-top: 1rem; }.notice { color: #315d43; }@media (max-width:48rem) { .package-heading { flex-direction: column; } }
 </style>

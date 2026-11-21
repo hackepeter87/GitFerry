@@ -629,3 +629,62 @@ The sequential failure-contract run `failure-20261121053914-93206` passed: delib
 failed report, retained diagnostics, and run-scoped cleanup exit 0. `make test-clean` then
 reported no remaining GitFerry integration projects. The final focused browser rerun also
 checks keyboard submission and a 390-pixel ready-receipt layout without horizontal overflow.
+
+
+## Guided local decisions and real target browser (Issue #10)
+
+The current slice reuses the existing package admission, exact selection review, identity
+bindings and background plan executor. `test_package_decisions.py` covers explicit registration,
+qualified selectors, non-admin native account checks, IDs beyond JavaScript's safe integer,
+changed authority, immutable binding conflicts, transaction rollback and admin/CSRF boundaries.
+No database migration or transport-format change is needed.
+
+Local gates on 2026-11-21 passed: `make doctor`, `make test` (474 backend tests, Ruff, format,
+MyPy and production frontend build), the existing 32-case browser suite, and the subsequently
+expanded seven-case intake suite. Intake cases additionally cover missing bindings, author
+credential aliases, structure/Git-only exclusion, OU-distinct forms, stale responses and focus
+transfer to the saved draft. Axe 4.14.0 scans the intake/review page at 1280 and 390 pixels with
+no excluded rules; the narrow-width check also rejects horizontal overflow. Axe is a development
+only dependency following the [official Playwright integration](https://playwright.dev/docs/accessibility-testing).
+These scans do not replace manual keyboard or complete accessibility acceptance.
+
+Real local integration run `2e007e9bfabe4733` passed all 22 local mandatory checks and all 23
+`source_exports.assertions`. Environment: Darwin/arm64 host, Linux/arm64 Docker 29.9.3, no
+observed emulation, Gitea 1.27.2 on both sides with the existing image digest unchanged.
+The report records the dirty source snapshot hash; it is not an exact-commit hosted result.
+The final focus/style adjustment is covered by the focused browser tests and still requires
+exact-commit hosted execution with the final image.
+
+`frontend/integration/first-import.spec.ts` uses the actual built frontend and managed backend,
+without mocked API routes. The harness supplies synthetic bootstrap credentials, mounted token
+references and a target-only TLS adapter, but no sender/realm/binding/receipt/plan facts. The
+browser imports a non-secret connection profile through the normal configuration UI, explicitly
+approves it, uploads the source-generated ZIP, confirms local decisions and starts its reviewed
+plan. Native issue author 21 and comment author 20 match their distinct local target accounts;
+the comment is attached to the imported issue and the Git ref matches the bundle. A new app
+process and fresh browser observe the confirmed plan without mutation requests. A separate
+replay verifies the same plan ID, no new objects and no additional remote write events.
+
+A loopback-only test tunnel uses Docker exec to forward browser TCP streams exclusively to
+`localhost:8080` inside `gitferry-b`. No importer network is added or made non-internal; the
+actual target context still proves that source Gitea and external hosts are unreachable. There
+is no fixed Docker socket or platform-specific host path. Each tunnel connection and subprocess
+has bounded lifetime. Browser network traces are disabled for this real-session probe so session
+cookies cannot enter publishable traces. Screenshots, assertion logs, sanitized server logs and
+credential-free result summaries remain available in `integration-results/work/browser-*` and
+`package-admission-evidence.json` before normal scoped cleanup.
+
+Two preceding failed runs were retained as diagnostic evidence: `73d166d01ad643b0` detected that
+a host-published port was unavailable on the internal Docker network; `4541035edaec49e3` detected
+the missing accessible label on the configuration file input. Both ended failed and cleaned up
+with exit code 0. The ingress tunnel and input label correct those causes; no assertion was
+removed to obtain success. Cleanup of the successful run also returned 0.
+
+This proves the bounded target intake flow, not full 0.2 acceptance: source-side complete browser
+acceptance, pre-execution target collision presentation and remaining Issue #10 user-flow checks
+stay open. No real LDAP/AD, 30 GB, historical native timestamp restoration, general exactly-once
+or atomic comment precheck/PATCH claim follows from this run.
+
+The sequential failure contract `failure-20261121063107-99769` passed: the injected failure kept exit
+code 86, captured diagnostics and completed scoped cleanup with exit code 0.
+`make test-clean` then completed successfully. Hosted verification of this slice remains pending.

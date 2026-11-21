@@ -39,7 +39,7 @@ test("admits a ready package and prepares a draft through plan review", async ({
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
   await page.getByRole("button", { name: "Prepare draft for Transfer plans" }).click();
-  await expect(page.getByRole("heading", { name: "Transfer plans" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Transfer plans" })).toBeFocused();
   expect(planReviewCalls).toBe(1);
 });
 

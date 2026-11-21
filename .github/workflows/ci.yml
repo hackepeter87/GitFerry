@@ -87,6 +87,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Set up project
         run: make setup
+      - name: Install integration browser runtime
+        run: cd frontend && npx playwright install --with-deps chromium
       - name: Run integration doctor
         run: make doctor
       - name: Run Gitea integration

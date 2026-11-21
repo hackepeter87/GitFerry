@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ApiError, cancelPlan, getPlan, listPlans, preparePlan, queuePlan, type PlanOperation, type PlanStatus, type TransferPlan } from "./api";
 
 const emit = defineEmits<{ (event: "session-expired"): void }>();
 const props = defineProps<{ preparedPlan?: TransferPlan }>();
 const plans = ref<TransferPlan[]>([]);
+const planHeading = ref<HTMLElement>();
 const selectedId = ref<string>();
 const selected = ref<TransferPlan>();
 const loading = ref(true);
@@ -47,9 +48,11 @@ const selectedActors = computed(() => {
 
 onMounted(load);
 onBeforeUnmount(() => { disposed = true; ++generation; stopPolling(); });
-watch(() => props.preparedPlan, (plan) => {
+watch(() => props.preparedPlan, async (plan) => {
   if (!plan || disposed) return;
   stopPolling(); selectedId.value = plan.plan_id; selected.value = plan; replaceSummary(plan); notice.value = "A new draft is ready for review below."; schedulePoll(++generation, 0);
+  await nextTick();
+  if (!disposed) planHeading.value?.focus();
 });
 
 async function load(): Promise<void> {
@@ -199,7 +202,7 @@ function handleError(cause: unknown, fallback: string): void {
 <template>
   <section class="plans-panel" aria-labelledby="plans-title">
     <div class="plans-heading">
-      <div><p class="kicker">Durable execution review</p><h2 id="plans-title">Transfer plans</h2><p class="supporting">Review the exact local selection and evidence captured for a plan before queueing it. A plan is not a completed migration.</p></div>
+      <div><p class="kicker">Durable execution review</p><h2 id="plans-title" ref="planHeading" tabindex="-1">Transfer plans</h2><p class="supporting">Review the exact local selection and evidence captured for a plan before queueing it. A plan is not a completed migration.</p></div>
       <button type="button" :disabled="loading || detailLoading || saving" @click="refresh">Refresh plans</button>
     </div>
     <p v-if="error" class="alert" role="alert">{{ error }}</p><p v-if="notice" class="notice" role="status">{{ notice }}</p>

@@ -346,6 +346,8 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                         "api_restart_replay_no_source_access",
                         "target_upload_files_only_before_local_setup",
                         "target_upload_replay_persistent_identity",
+                        "guided_browser_first_import",
+                        "guided_browser_restart_read_only",
                     }
                 ),
             ),
