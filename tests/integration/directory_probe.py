@@ -287,6 +287,67 @@ def _wrong_ca_probe() -> bool:
     return True
 
 
+def _second_realm(source: dict[str, Any], first_account: dict[str, Any]) -> dict[str, Any]:
+    """Locally provision a native alias; equal LDAP names do not select a realm."""
+    second = {
+        **source,
+        "name": "synthetic-openldap-second",
+        "directoryRealm": "SYNTHETIC-OPENLDAP-B",
+        "userDn": "uid=%s,ou=People-B,dc=example,dc=invalid",
+    }
+    intent = prepare_ldap_simple_bootstrap(
+        second,
+        gitea_binary=Path("/usr/local/bin/gitea"),
+        gitea_config=Path("/data/gitea/conf/app.ini"),
+        ca_path=Path(DIRECTORY_CA),
+    )
+    _cli(*intent.command[3:])
+    source_id = next(
+        int(line.split()[0])
+        for line in _cli("admin", "auth", "list").splitlines()
+        if len(line.split()) > 1 and line.split()[1] == second["name"]
+    )
+    # Native Gitea usernames are instance-global. The operator chooses an alias,
+    # authentication source and login_name explicitly, before GitFerry mapping.
+    alias = api(
+        TARGET_URL,
+        "POST",
+        "/admin/users",
+        json_body={
+            "username": "ldap-writer",
+            "email": "writer-alias@example.invalid",
+            "source_id": source_id,
+            "login_name": "ldap-reader",
+            "must_change_password": False,
+        },
+    )
+    response = _ldap_request("/user", "synthetic-directory-writer-pass", "ldap-writer")
+    if response.status_code != 200:
+        raise ProbeFailure("explicit second-realm alias could not authenticate")
+    account = response.json()
+    if (
+        account.get("id") != alias["id"]
+        or account.get("id") == first_account["id"]
+        or account.get("source_id") != source_id
+        or account.get("login_name") != "ldap-reader"
+        or account.get("is_admin") is not False
+        or _ldap_request("/user", DIRECTORY_PASSWORD, "ldap-writer").status_code != 401
+        or _ldap_request("/user", "synthetic-directory-writer-pass", "ldap-reader").status_code
+        != 401
+    ):
+        raise ProbeFailure("equal directory logins crossed authentication sources")
+    return {
+        "status": "passed",
+        "same_directory_login": "ldap-reader",
+        "first_native_id": first_account["id"],
+        "second_native_id": account["id"],
+        "second_source_id": source_id,
+        "second_native_login": "ldap-writer",
+        "cross_realm_credentials_rejected": True,
+        "native_alias_requires_email_separately_from_directory_mapping": True,
+    }
+
+
 def run_directory_probe() -> dict[str, Any]:
     # Simple auth uses the user DN template and supplies the user password only
     # to the HTTP client. It has no bind password and no secret CLI argument.
@@ -472,6 +533,7 @@ def run_directory_probe() -> dict[str, Any]:
     return {
         "status": "passed",
         "application_claim_reader": claims,
+        "equal_login_native_alias": _second_realm(source, account),
         "local_application_bootstrap": bootstrap,
         "gitea_version": version,
         "fixture": {

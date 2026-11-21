@@ -82,3 +82,14 @@ package inventory/SBOM from the tested image, build labels, platform, versions a
 report. A separately built architecture has its own identity and evidence. The documented
 Compose installation must use the accepted image, not silently rebuild it. No `latest` or stable
 release is published by milestone acceptance.
+
+
+## 0.3 directory candidate
+
+The application candidate uses Python `0.3.0rc1` and frontend SemVer `0.3.0-rc.1`.
+Manifest v1/v2 bytes and digests remain unchanged. SQLite schema 15 adds local identity decisions,
+directory settings and bootstrap execution records through the existing migration chain; these
+versions are independent. Candidate acceptance requires the same build-once evidence described
+above plus an upgrade from the accepted 0.2 image/state, retained bindings/baselines/unknown outcomes,
+and the real directory desktop workflows. Issue #16 owns exact image and run evidence. Merely
+changing the version does not accept or publish a release.

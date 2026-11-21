@@ -162,8 +162,9 @@ async function bindThroughIdentityAdmin(page: Page, panel: Locator): Promise<voi
     await enter(page, identity.getByLabel("OU path (optional)"), claim.ouPath);
     const realm = identity.getByLabel("Registered realm");
     await choose(page, realm, claim.realm);
-    await choose(page, identity.getByLabel("Configured directory claim source"), "synthetic-openldap-simple");
-    await enter(page, identity.getByLabel("Directory login"), targetLogin);
+    const directorySource = targetLogin === "ldap-writer" ? "synthetic-openldap-second" : "synthetic-openldap-simple";
+    await choose(page, identity.getByLabel("Configured directory claim source"), directorySource);
+    await enter(page, identity.getByLabel("Directory login"), "ldap-reader");
     await enter(page, identity.getByLabel("Expected Gitea auth source ID"), "");
     const credential = identity.getByLabel("Credential reference (optional)");
     await enter(page, credential, targetLogin);
@@ -184,33 +185,40 @@ async function bindThroughIdentityAdmin(page: Page, panel: Locator): Promise<voi
 async function configureDirectory(page: Page): Promise<void> {
   const panel = page.locator(".directory-panel");
   await activate(page, panel.getByRole("button", { name: "Manage directories" }));
-  await choose(page, panel.getByLabel("Approved target connection"), "target");
-  await enter(page, panel.getByLabel("Source name"), "synthetic-openldap-simple");
-  await choose(page, panel.getByLabel("Registered realm"), "SYNTHETIC-OPENLDAP");
-  await enter(page, panel.getByLabel("Directory host"), "openldap");
-  await enter(page, panel.getByLabel("Directory port"), "636");
-  await enter(page, panel.getByLabel("User DN template"), "uid=%s,ou=People,dc=example,dc=invalid");
-  await enter(page, panel.getByLabel("User filter"), "(&(objectClass=posixAccount)(uid=%s)(!(employeeNumber=DISABLED)))");
-  await enter(page, panel.getByLabel("CA secret reference"), "directory.pem");
-  await check(page, panel.getByLabel("Enable claim lookup"));
-  await enter(page, panel.getByLabel("Claim search base"), "ou=People,dc=example,dc=invalid");
-  await enter(page, panel.getByLabel("Claim login attribute"), "uid");
-  await enter(page, panel.getByLabel("Claim external ID attribute"), "employeeNumber");
-  await enter(page, panel.getByLabel("Claim email attribute"), "mail");
-  await enter(page, panel.getByLabel("Claim group search base"), "ou=Groups,dc=example,dc=invalid");
-  await enter(page, panel.getByLabel("Claim group member attribute"), "member");
-  await activate(page, panel.getByRole("button", { name: "Save reviewed settings" }));
-  await expect(panel).toContainText("Directory settings reviewed and saved locally.");
+  const saveSource = async (sourceName: string, realm: string, base: string, newSettings: boolean): Promise<void> => {
+    if (newSettings) await activate(page, panel.getByRole("button", { name: "New settings" }));
+    await choose(page, panel.getByLabel("Approved target connection"), "target");
+    await enter(page, panel.getByLabel("Source name"), sourceName);
+    await choose(page, panel.getByLabel("Registered realm"), realm);
+    await enter(page, panel.getByLabel("Directory host"), "openldap");
+    await enter(page, panel.getByLabel("Directory port"), "636");
+    await enter(page, panel.getByLabel("User DN template"), `uid=%s,${base}`);
+    await enter(page, panel.getByLabel("User filter"), "(&(objectClass=posixAccount)(uid=%s)(!(employeeNumber=DISABLED)))");
+    await enter(page, panel.getByLabel("CA secret reference"), "directory.pem");
+    await check(page, panel.getByLabel("Enable claim lookup"));
+    await enter(page, panel.getByLabel("Claim search base"), base);
+    await enter(page, panel.getByLabel("Claim login attribute"), "uid");
+    await enter(page, panel.getByLabel("Claim external ID attribute"), "employeeNumber");
+    await enter(page, panel.getByLabel("Claim email attribute"), "mail");
+    await enter(page, panel.getByLabel("Claim group search base"), "ou=Groups,dc=example,dc=invalid");
+    await enter(page, panel.getByLabel("Claim group member attribute"), "member");
+    await activate(page, panel.getByRole("button", { name: "Save reviewed settings" }));
+    await expect(panel).toContainText("Directory settings reviewed and saved locally.");
+  };
+  await saveSource("synthetic-openldap-simple", "SYNTHETIC-OPENLDAP", "ou=People,dc=example,dc=invalid", false);
+  await saveSource("synthetic-openldap-second", "SYNTHETIC-OPENLDAP-B", "ou=People-B,dc=example,dc=invalid", true);
 }
 
 async function registerDirectoryRealm(page: Page): Promise<void> {
   const identity = page.locator(".identity-panel");
   await activate(page, identity.getByRole("button", { name: "Manage identities" }));
-  await enter(page, identity.getByLabel("Realm key"), "SYNTHETIC-OPENLDAP");
-  await enter(page, identity.getByLabel("Display name"), "Synthetic OpenLDAP");
-  await enter(page, identity.getByLabel("External marker"), "synthetic-openldap-fixture");
-  await activate(page, identity.getByRole("button", { name: "Register realm" }));
-  await expect(identity).toContainText("Identity realm registered.");
+  for (const [key, name, marker] of [["SYNTHETIC-OPENLDAP", "Synthetic OpenLDAP", "synthetic-openldap-fixture"], ["SYNTHETIC-OPENLDAP-B", "Synthetic OpenLDAP B", "synthetic-openldap-fixture-b"]] as const) {
+    await enter(page, identity.getByLabel("Realm key"), key);
+    await enter(page, identity.getByLabel("Display name"), name);
+    await enter(page, identity.getByLabel("External marker"), marker);
+    await activate(page, identity.getByRole("button", { name: "Register realm" }));
+    await expect(identity).toContainText("Identity realm registered.");
+  }
 }
 
 async function prepareTargetPlan(page: Page, options: PlanPreparationOptions = {}): Promise<{ blocked: boolean; missing: string | null }> {
@@ -383,4 +391,44 @@ test("phase4 rejects an occupied target before execution", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   record({ collision_blocked: true });
+});
+
+test("phase6 reopens and approves restored directory conflicts", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await login(page);
+  const identity = page.locator(".identity-panel");
+  await activate(page, identity.getByRole("button", { name: "Manage identities" }));
+  await expect(identity.getByRole("heading", { name: "Identity administration" })).toBeVisible();
+
+  const bindings = [
+    ["issue-author", "ldap-reader"],
+    ["comment-author", "ldap-writer"],
+  ] as const;
+  for (const [sourceLogin, targetLogin] of bindings) {
+    const card = identity.locator(".identity-card", { hasText: `${sourceLogin} → ${targetLogin}` });
+    await expect(card).toHaveCount(1);
+    await expect(card.getByText("conflict", { exact: true })).toBeVisible();
+    await expect(card).toContainText("Target directory evidence");
+    await expect(card).toContainText("native source");
+    await enter(page, card.getByLabel(`Credential reference for ${sourceLogin}`), targetLogin);
+    await activate(page, card.getByRole("button", { name: "Reopen" }));
+    await expect(card.getByText("pending", { exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "Approve" })).toBeEnabled();
+    await activate(page, card.getByRole("button", { name: "Approve" }));
+    await expect(card.getByText("approved", { exact: true })).toBeVisible();
+    await activate(page, card.getByRole("button", { name: "View events" }));
+    await expect(card.getByLabel("Candidate events")).toContainText("approved");
+  }
+
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.reload();
+  await activate(page, page.locator(".identity-panel").getByRole("button", { name: "Manage identities" }));
+  const persisted = page.locator(".identity-panel");
+  for (const [sourceLogin, targetLogin] of bindings) {
+    const card = persisted.locator(".identity-card", { hasText: `${sourceLogin} → ${targetLogin}` });
+    await expect(card.getByText("approved", { exact: true })).toBeVisible();
+    await expect(card).toContainText("Target directory evidence");
+  }
+  expect(keyboardInteractions).toBeGreaterThan(0);
+  record({ status: "passed", explicit_review: bindings.length, persisted_approved: bindings.length });
 });

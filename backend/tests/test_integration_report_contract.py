@@ -98,6 +98,21 @@ def complete_probe_report() -> dict[str, object]:
         },
         "directory_ad": {
             "status": "passed",
+            "gitea": {
+                "status": "passed",
+                "assertions": dict.fromkeys(
+                    (
+                        "valid_login",
+                        "missing_directory_mail_login",
+                        "disabled_denied",
+                        "wrong_password_denied",
+                        "non_admin",
+                        "explicit_source",
+                        "native_alias_distinct",
+                    ),
+                    True,
+                ),
+            },
             "client": "ldap3 2.9.1",
             "image_id": "sha256:synthetic",
             "platform": "linux/arm64",
@@ -154,7 +169,12 @@ def complete_probe_report() -> dict[str, object]:
                     "guided_browser_production_runtime",
                     "guided_selected_set_and_control",
                     "guided_browser_restart_read_only",
+                    "directory_equal_login_realms_explicit_bindings",
                     "directory_claim_drift_restart_blocked",
+                    "directory_outage_blocks_without_rebinding",
+                    "directory_group_drift_requires_review",
+                    "directory_conflict_desktop_recovery",
+                    "directory_recovery_no_transfer_writes",
                     "directory_functional_users_non_admin",
                     "directory_intended_team_members",
                     "directory_ldap_outsider_denied",
@@ -659,7 +679,12 @@ def test_application_plan_assertion_is_required(tmp_path: Path, assertion: str) 
         "guided_browser_production_runtime",
         "guided_selected_set_and_control",
         "guided_browser_restart_read_only",
+        "directory_equal_login_realms_explicit_bindings",
         "directory_claim_drift_restart_blocked",
+        "directory_outage_blocks_without_rebinding",
+        "directory_group_drift_requires_review",
+        "directory_conflict_desktop_recovery",
+        "directory_recovery_no_transfer_writes",
         "directory_functional_users_non_admin",
         "directory_intended_team_members",
         "directory_ldap_outsider_denied",
@@ -802,3 +827,35 @@ def test_ldap_dn_evidence_is_required(tmp_path: Path, side: str, value: object) 
     report = complete_probe_report()
     report["directory"]["application_claim_reader"][side]["dn"] = value
     assert not report_contract().probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize(
+    "assertion",
+    (
+        "valid_login",
+        "missing_directory_mail_login",
+        "disabled_denied",
+        "wrong_password_denied",
+        "non_admin",
+        "explicit_source",
+        "native_alias_distinct",
+    ),
+)
+def test_ad_gitea_login_evidence_cannot_be_missing(assertion: str) -> None:
+    report = complete_probe_report()
+    del report["directory_ad"]["gitea"]["assertions"][assertion]
+    entries = report_contract().evidence_catalog(report, True)
+    entry = next(item for item in entries if item["id"] == "separate_samba_ad_claim_qualification")
+    assert entry["status"] != "passed"
+
+
+@pytest.mark.parametrize("status", [None, "failed", "blocked", "not-implemented"])
+def test_ad_gitea_failed_or_missing_status_cannot_pass(status: str | None) -> None:
+    report = complete_probe_report()
+    if status is None:
+        del report["directory_ad"]["gitea"]["status"]
+    else:
+        report["directory_ad"]["gitea"]["status"] = status
+    entries = report_contract().evidence_catalog(report, True)
+    entry = next(item for item in entries if item["id"] == "separate_samba_ad_claim_qualification")
+    assert entry["status"] == "failed"

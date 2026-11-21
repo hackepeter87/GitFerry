@@ -331,6 +331,22 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
             "separate_samba_ad_claim_qualification",
             _value(report, "directory_ad.status") == "passed"
             and _value(report, "directory_ad.client") == "ldap3 2.9.1"
+            and _value(report, "directory_ad.gitea.status") == "passed"
+            and _all_required_true(
+                report,
+                "directory_ad.gitea.assertions",
+                frozenset(
+                    (
+                        "valid_login",
+                        "missing_directory_mail_login",
+                        "disabled_denied",
+                        "wrong_password_denied",
+                        "non_admin",
+                        "explicit_source",
+                        "native_alias_distinct",
+                    )
+                ),
+            )
             and bool(_value(report, "directory_ad.image_id"))
             and bool(_value(report, "directory_ad.platform"))
             and str(_value(report, "directory_ad.server_version")).startswith("Version 4.22.11")
@@ -492,7 +508,12 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                         "guided_browser_production_runtime",
                         "guided_selected_set_and_control",
                         "guided_browser_restart_read_only",
+                        "directory_equal_login_realms_explicit_bindings",
                         "directory_claim_drift_restart_blocked",
+                        "directory_outage_blocks_without_rebinding",
+                        "directory_group_drift_requires_review",
+                        "directory_conflict_desktop_recovery",
+                        "directory_recovery_no_transfer_writes",
                         "directory_functional_users_non_admin",
                         "directory_intended_team_members",
                         "directory_ldap_outsider_denied",

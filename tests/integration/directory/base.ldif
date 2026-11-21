@@ -70,7 +70,7 @@ gidNumber: 10002
 homeDirectory: /nonexistent
 mail: ldap-reader-other@example.invalid
 employeeNumber: SYNTHETIC-EXT-20001
-userPassword: synthetic-directory-pass
+userPassword: synthetic-directory-writer-pass
 
 dn: uid=missing-mail,ou=People,dc=example,dc=invalid
 objectClass: inetOrgPerson
@@ -105,7 +105,7 @@ member: uid=ldap-reader,ou=People,dc=example,dc=invalid
 dn: cn=gitea-writers,ou=Groups,dc=example,dc=invalid
 objectClass: groupOfNames
 cn: gitea-writers
-member: uid=ldap-writer,ou=People,dc=example,dc=invalid
+member: uid=ldap-reader,ou=People-B,dc=example,dc=invalid
 
 dn: cn=gitea-outsiders,ou=Groups,dc=example,dc=invalid
 objectClass: groupOfNames

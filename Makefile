@@ -3,7 +3,7 @@ PYTHON := .venv/bin/python
 PYTEST := .venv/bin/pytest
 RUFF := .venv/bin/ruff
 MYPY := .venv/bin/mypy
-GITFERRY_VERSION := 0.2.0rc1
+GITFERRY_VERSION := 0.3.0rc1
 GITFERRY_SOURCE_REVISION := $(shell git rev-parse HEAD)
 
 .PHONY: doctor setup test test-browser test-integration test-integration-diagnostics test-integration-failure-contract test-clean container-build
