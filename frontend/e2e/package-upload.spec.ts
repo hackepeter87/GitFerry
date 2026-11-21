@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const ready = {
-  upload_id: "upload-ready", status: "ready", archive_size: 2048, archive_sha256: "a".repeat(64), package_ref: "pkg.synthetic", package_digest: "b".repeat(64), error_code: null,
+  upload_id: "upload-01234567-89ab-cdef-0123-456789abcdef", status: "ready", archive_size: 2048, archive_sha256: "a".repeat(64), package_ref: "pkg.synthetic", package_digest: "b".repeat(64), error_code: null,
   created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", summary: { package_id: "pkg.synthetic", sender: { instance_key: "source.synthetic", installation_marker: "install-source" }, recipient: { instance_key: "target.synthetic", installation_marker: "install-target" }, repositories: ["synthetic-org/repo"], metadata_present: true, inventory_complete: false, limitations: ["Files only; identity approval is separate"] },
 };
 
@@ -36,13 +36,13 @@ test("submits raw archive with immutable ID and size header", async ({ page }) =
 test("reloads with GET only and shows ready files-only scope", async ({ page }) => {
   const methods: string[] = [];
   await page.route("**/api/v1/package-uploads", async (route) => { methods.push(route.request().method()); await route.fulfill({ json: [ready] }); });
-  await page.route("**/api/v1/package-uploads/upload-ready", async (route) => { methods.push(route.request().method()); await route.fulfill({ json: ready }); });
+  await page.route("**/api/v1/package-uploads/upload-01234567-89ab-cdef-0123-456789abcdef", async (route) => { methods.push(route.request().method()); await route.fulfill({ json: ready }); });
   await open(page, [ready]);
-  await page.getByRole("button", { name: /upload-ready/ }).click();
+  await page.getByRole("button", { name: /upload-01234567-89ab-cdef-0123-456789abcdef/ }).click();
   await expect(page.getByText("The archive files have been validated.")).toBeVisible();
   await expect(page.getByText("synthetic-org/repo", { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: test.info().outputPath("package-upload-ready-narrow.png"), fullPage: true });
+  await page.screenshot({ path: test.info().outputPath("package-upload-01234567-89ab-cdef-0123-456789abcdef-narrow.png"), fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.reload();
   expect(methods).not.toContain("PUT"); expect(methods).not.toContain("POST");
@@ -105,12 +105,12 @@ test("late details cannot replace the current selection", async ({ page }) => {
   await page.route("**/api/v1/package-uploads/upload-old", async (route) => {
     await delayed; await route.fulfill({ json: { ...ready, upload_id: "upload-old" } });
   });
-  await page.route("**/api/v1/package-uploads/upload-ready", (route) => route.fulfill({ json: ready }));
+  await page.route("**/api/v1/package-uploads/upload-01234567-89ab-cdef-0123-456789abcdef", (route) => route.fulfill({ json: ready }));
   await open(page, [{ ...ready, upload_id: "upload-old" }, ready]);
   await page.getByRole("button", { name: /upload-old/ }).click();
-  await page.getByRole("button", { name: /upload-ready/ }).click();
-  await expect(page.getByRole("heading", { name: "upload-ready", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /upload-01234567-89ab-cdef-0123-456789abcdef/ }).click();
+  await expect(page.getByRole("heading", { name: "upload-01234567-89ab-cdef-0123-456789abcdef", exact: true })).toBeVisible();
   const oldReply = page.waitForResponse("**/api/v1/package-uploads/upload-old");
   release(); await oldReply;
-  await expect(page.getByRole("heading", { name: "upload-ready", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "upload-01234567-89ab-cdef-0123-456789abcdef", exact: true })).toBeVisible();
 });

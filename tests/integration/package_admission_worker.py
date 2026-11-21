@@ -231,7 +231,15 @@ def _counts(service: PackageAdmissions) -> dict[str, int]:
     with service.state.read_connection() as connection:
         return {
             table: connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]  # noqa: S608
-            for table in ("package_receipts", "object_origins", "object_mappings", "operations")
+            for table in (
+                "instances",
+                "realms",
+                "identity_bindings",
+                "package_receipts",
+                "object_origins",
+                "object_mappings",
+                "operations",
+            )
         }
 
 
