@@ -16,6 +16,10 @@ Queueing requires the exact reviewed digest. The managed server owns the backgro
 closing an HTTP connection does not cancel queued work. The CLI shares the same executor lock.
 Only one local writer can perform remote operations at a time.
 
+Blocked preflight reports identify selection, storage, connection/CA, administrator, structure,
+author credential, author identity, metadata or bundle checks. These are closed diagnostic
+categories, shared by API/CLI/UI; remote response bodies and exception strings are not persisted.
+
 Before any target mutation, the fixed Gitea adapter checks the approved HTTPS connection,
 separate technical administrator, every selected structure collision, actual author accounts,
 explicitly planned or existing repository access, selected metadata baselines and parents,

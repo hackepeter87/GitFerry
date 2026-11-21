@@ -336,6 +336,8 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                         "lost_restart_outcome_unknown",
                         "lost_no_second_post",
                         "new_packaging_cannot_bypass_unknown",
+                        "explicit_resolution_rejects_wrong_parent_author_and_content",
+                        "explicit_resolution_then_restart_confirms_without_post",
                         "control_repository_unchanged",
                         "credentials_absent_from_state_and_report",
                     }

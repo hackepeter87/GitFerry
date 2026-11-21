@@ -14,8 +14,10 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from gitferry.comment_operations import resolve_unknown_comment_operation
 from gitferry.connection_probe import LocalReferences, approve_connection, probe_connection
 from gitferry.connection_profiles import ConnectionProfile, ProfileService
+from gitferry.gitea_comments import CommentTargetConflict, GiteaCommentClient
 from gitferry.gitea_plan_adapter import GiteaPlanAdapter
 from gitferry.plan_application import prepare_transfer_plan
 from gitferry.plan_runner import PlanRunner
@@ -247,9 +249,10 @@ def isolated() -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "mode", choices=("initial", "replay", "crash", "lost", "resume", "repackage")
+        "mode", choices=("initial", "replay", "crash", "lost", "resume", "repackage", "resolve")
     )
     parser.add_argument("--case", default="initial")
+    parser.add_argument("--target-comment-id")
     args = parser.parse_args()
     state = StateStore(DATABASE)
     with proxy(lose_comment_response=args.mode == "lost"):
@@ -290,6 +293,32 @@ def main() -> None:
             raise RuntimeError("new packaging bypassed an unknown operation")
         else:
             plan = PlanService(state).get((ROOT / (args.case + "-plan-id")).read_text())
+        if args.mode == "resolve":
+            if not args.target_comment_id:
+                raise ValueError("explicit operator-selected target comment ID required")
+            references = LocalReferences(ROOT / "secrets", ROOT)
+            context, _ = references.tls("trusted.pem")
+            with GiteaCommentClient(
+                HTTPS,
+                username="comment-author",
+                token=references.token("comment-author"),
+                verify=context,
+            ) as client:
+                try:
+                    resolve_unknown_comment_operation(
+                        state,
+                        client,
+                        plan["operations"][0]["operation_id"],
+                        target_comment_id=args.target_comment_id,
+                    )
+                except (OperationBlocked, CommentTargetConflict):
+                    print(
+                        json.dumps(
+                            {"rejected": True, "plan": PlanService(state).get(plan["plan_id"])}
+                        )
+                    )
+                    return
+            plan = PlanService(state).get(plan["plan_id"])
         (ROOT / (args.case + "-plan-id")).write_text(plan["plan_id"])
         service = PlanService(state)
         if plan["status"] not in ("running", "preflighting", "confirmed"):

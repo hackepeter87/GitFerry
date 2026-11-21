@@ -21,6 +21,7 @@ from gitferry.gitea_provisioning import (
 from gitferry.issue_operations import execute_issue_operation, preflight_issue_operation
 from gitferry.operations import OperationExecutor
 from gitferry.plan_application import PlanRequest, parse_plan_request
+from gitferry.plan_diagnostics import PreflightBlocked, PreflightCheck
 from gitferry.provisioning import preflight_provisioning_operations, provision_selected_repository
 from gitferry.runtime import RuntimePaths
 from gitferry.state_store import OperationBlocked, OperationRecord, StateStore
@@ -60,6 +61,13 @@ class GiteaPlanAdapter:
         ]
 
     def preflight(self, plan: dict[str, Any]) -> None:
+        self.check = PreflightCheck.SELECTION
+        try:
+            self._preflight(plan)
+        except Exception:
+            raise PreflightBlocked(self.check) from None
+
+    def _preflight(self, plan: dict[str, Any]) -> None:
         document = plan["document"]
         request = parse_plan_request(document["inventory"]["request"])
         self.request = request
@@ -69,10 +77,12 @@ class GiteaPlanAdapter:
             raise OperationBlocked("selected unsupported contents require a revised selection")
         # The estimate is explicit, not a claim about arbitrary Git expansion. A
         # bounded initial import still needs both payload and working space.
+        self.check = PreflightCheck.STORAGE
         for directory in {self.paths.package_directory, self.paths.work_directory}:
             if shutil.disk_usage(directory).free < document["required_bytes"]:
                 raise OperationBlocked("insufficient local space for the reviewed plan")
         profiles = ProfileService(self.state)
+        self.check = PreflightCheck.CONNECTION
         evidence = probe_connection(
             profiles,
             request.target_instance_key,
@@ -91,11 +101,13 @@ class GiteaPlanAdapter:
                 profile.base_url, username=evidence["login"], token=token, verify=context
             )
         )
+        self.check = PreflightCheck.ADMINISTRATOR
         administrator_id = verify_technical_administrator(
             self.admin.get_authenticated_user(), evidence["login"]
         )
         if str(administrator_id) != evidence["account_id"]:
             raise OperationBlocked("technical account changed since connection approval")
+        self.check = PreflightCheck.STRUCTURE
         for repository in request.repositories:
             preflight_provisioning_operations(
                 self.state, self.admin, repository.provisioning(request.target_instance_key)
@@ -104,6 +116,7 @@ class GiteaPlanAdapter:
         # Resolve every actor before any target mutation. A token for the issue
         # author or technical administrator cannot stand in for a comment author.
         for operation in metadata:
+            self.check = PreflightCheck.AUTHOR_CREDENTIAL
             binding_id = str(operation.intent["author_binding_id"])
             if binding_id in self.issues:
                 continue
@@ -121,6 +134,7 @@ class GiteaPlanAdapter:
                 verify=context,
             )
             self.resources.callback(issue_client.close)
+            self.check = PreflightCheck.AUTHOR_IDENTITY
             verify_account(
                 issue_client.get_authenticated_user(),
                 binding.target_login,
@@ -140,9 +154,11 @@ class GiteaPlanAdapter:
             for operation in metadata
             if operation.operation_type == "create_issue"
         )
+        self.check = PreflightCheck.METADATA
         for operation in metadata:
             self._preflight_metadata(operation, planned_parents)
         if any(repository.bundle for repository in request.repositories):
+            self.check = PreflightCheck.BUNDLE
             self._preflight_bundles(
                 plan, profile.base_url, evidence["login"], token, profile.ca_ref, ca_digest
             )

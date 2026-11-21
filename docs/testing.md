@@ -75,14 +75,25 @@ passed. The first attempt correctly failed because the new test TLS proxy omitte
 authentication challenge for Git; diagnostic artifacts and cleanup worked. The proxy now
 forwards that challenge. Existing manifest-v1/v2 and separate-state roundtrip regressions passed.
 
-The final local quality gate passed 270 backend tests plus lint, formatting, MyPy and frontend
+The initial local quality gate passed 270 backend tests plus lint, formatting, MyPy and frontend
 build. The controlled failure contract and `make test-clean` also passed. Hosted run `44847979869` passed the backend/adapter source commit `79f25db` on Linux x86_64
 with Docker Linux/amd64 28.0.4 and no emulation. Its tested PR merge checkout was `0f069e6`;
 the report records both identities, all 22 mandatory checks including workflow cleanup, and
 all 14 application-plan assertions. Both Gitea containers resolved to image ID
 `sha256:e8be8e1f776fe453b811d88887306b1d7bdf83577789465e5d186924014a57a6`.
 The controlled failure report correctly remains failed with exit 86 and successful cleanup.
-The subsequent UI slice still requires its own hosted CI and final exact-head review.
+Hosted run `44849763511` also passed the UI source commit `380e33c`.
+
+Independent review then required categorized preflight diagnostics and real explicit-resolution
+evidence. Local follow-up run `a0307e5e64414afc` passed all 21 required checks and 16 application
+assertions on the same Linux/arm64 environment. Wrong-parent, wrong-native-author and wrong-body
+comment candidates were rejected while the operation stayed unknown. Only after the restart and
+new-packaging halt checks did an explicit operator-selected ID resolve the accepted comment;
+resolution and another process restart confirmed the same target without any additional POST.
+The lost-response case remains blocked. This is controlled reconciliation, not automatic identity
+inference. The report records a dirty workspace at parent `380e33c`; final-commit hosted evidence
+is required separately. The follow-up quality gate passed 281 backend tests, lint, formatting,
+MyPy and frontend build. Closed diagnostic categories are tested for secret redaction.
 Issue #9 remains open for final requirement review and integration. The bounded
 selection probe is not proof of a complete inventory or guided source-to-target import wizard.
 See [the operator boundary](transfer-plans.md) and [ADR 0012](decisions/0012-durable-transfer-plans.md).

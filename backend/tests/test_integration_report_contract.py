@@ -53,6 +53,8 @@ def complete_probe_report() -> dict[str, object]:
                     "lost_remote_post_accepted",
                     "lost_restart_outcome_unknown",
                     "new_packaging_cannot_bypass_unknown",
+                    "explicit_resolution_rejects_wrong_parent_author_and_content",
+                    "explicit_resolution_then_restart_confirms_without_post",
                     "parent_mapping_confirmed",
                     "structure_bundle_and_metadata_confirmed",
                     "target_only_context",
@@ -462,6 +464,8 @@ def test_workflow_cleanup_failure_keeps_report_failed(tmp_path: Path) -> None:
     [
         "crash_no_second_post",
         "lost_restart_outcome_unknown",
+        "explicit_resolution_rejects_wrong_parent_author_and_content",
+        "explicit_resolution_then_restart_confirms_without_post",
         "structure_bundle_and_metadata_confirmed",
     ],
 )

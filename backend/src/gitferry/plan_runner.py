@@ -11,6 +11,7 @@ from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
 from gitferry.operations import ExecutorBusy, OperationExecutor, RemoteWrite
+from gitferry.plan_diagnostics import PreflightBlocked
 from gitferry.state_store import OperationBlocked, OperationRecord
 from gitferry.transfer_plans import PlanConflict, PlanService
 
@@ -113,6 +114,8 @@ class PlanRunner:
                     plan_id, "service stopped at safe boundary; restart will preflight again"
                 )
                 return self.service.get(plan_id)
+            except PreflightBlocked as exc:
+                return self.service.finish(plan_id, "blocked", exc.check.value)
             except (OperationBlocked, PlanConflict):
                 return self.service.finish(
                     plan_id, "blocked", "preflight or operation requires local resolution"

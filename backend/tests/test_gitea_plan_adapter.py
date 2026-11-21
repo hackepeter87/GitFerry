@@ -14,6 +14,7 @@ from gitferry import gitea_plan_adapter as adapter_module
 from gitferry.connection_probe import LocalReferences
 from gitferry.gitea_plan_adapter import GiteaPlanAdapter
 from gitferry.plan_application import prepare_transfer_plan
+from gitferry.plan_diagnostics import PreflightCheck
 from gitferry.plan_runner import PlanRunner
 from gitferry.runtime import RuntimePaths
 from gitferry.state_store import OperationBlocked, StateStore
@@ -164,7 +165,35 @@ def test_all_selected_prerequisites_checked_before_first_write(
     plan = prepare_transfer_plan(state, request)
     runner.service.queue(plan["plan_id"], plan["digest"])
     result = runner.run(plan["plan_id"])
-    assert result["status"] in ("blocked", "failed")
+    assert result["status"] == "blocked"
+    category = {
+        "wrong-author": "author_identity:",
+        "unsupported": "selection:",
+        "missing-credential": "author_credential:",
+    }[failure]
+    assert result["reason"].startswith(category)
+    assert runner.service.get(plan["plan_id"])["reason"] == result["reason"]
+    assert remote.writes == []
+
+
+@pytest.mark.parametrize("check", list(PreflightCheck))
+def test_preflight_diagnostics_are_closed_and_never_include_remote_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, check: PreflightCheck
+) -> None:
+    state, request = configured_plan(tmp_path)
+    runner, remote = runner_for(state, tmp_path, monkeypatch)
+
+    def reject(adapter: GiteaPlanAdapter, plan: dict[str, Any]) -> None:
+        adapter.check = check
+        raise RuntimeError("Authorization: token synthetic-secret-response")
+
+    monkeypatch.setattr(GiteaPlanAdapter, "_preflight", reject)
+    plan = prepare_transfer_plan(state, request)
+    runner.service.queue(plan["plan_id"], plan["digest"])
+    result = runner.run(plan["plan_id"])
+    assert result["status"] == "blocked"
+    assert result["reason"] == check.value
+    assert "synthetic-secret-response" not in json.dumps(result)
     assert remote.writes == []
     assert all(step["status"] in ("prepared", "blocked_parent") for step in result["operations"])
 

@@ -7,7 +7,16 @@ from typing import Any
 
 from connection_profile_probe import certificate
 from gitferry.git_bundle import create_git_bundle
-from support import PACKAGE, TARGET_URL, WORK, ProbeFailure, api, docker_copy, docker_service_exec
+from support import (
+    PACKAGE,
+    TARGET_URL,
+    USER_PASSWORD,
+    WORK,
+    ProbeFailure,
+    api,
+    docker_copy,
+    docker_service_exec,
+)
 
 REPOSITORY = "application-plan-lab/selected"
 REMOTE_ROOT = "/state/application-plans"
@@ -25,16 +34,23 @@ ASSERTIONS = frozenset(
         "lost_restart_outcome_unknown",
         "lost_no_second_post",
         "new_packaging_cannot_bypass_unknown",
+        "explicit_resolution_rejects_wrong_parent_author_and_content",
+        "explicit_resolution_then_restart_confirms_without_post",
         "control_repository_unchanged",
         "credentials_absent_from_state_and_report",
     }
 )
 
 
-def worker(mode: str, case: str = "initial", expected: int = 0) -> dict[str, Any]:
+def worker(
+    mode: str, case: str = "initial", expected: int = 0, *, target_comment_id: str | None = None
+) -> dict[str, Any]:
+    command = ["python", "/probe/plan_worker.py", mode, "--case", case]
+    if target_comment_id is not None:
+        command.extend(["--target-comment-id", target_comment_id])
     result = docker_service_exec(
         "gitferry-b",
-        ["python", "/probe/plan_worker.py", mode, "--case", case],
+        command,
         check=False,
         timeout=90,
     )
@@ -131,6 +147,54 @@ def run_application_plan_probe() -> dict[str, Any]:
                 "status", "process exited before confirmation"
             ),
         }
+    # Only after restart/repackaging has proved the unresolved halt, simulate an
+    # explicit operator selection. IDs are never fed into automatic recovery.
+    other_issue = api(
+        TARGET_URL,
+        "POST",
+        f"/repos/{REPOSITORY}/issues",
+        json_body={"title": "Resolution decoy", "body": "synthetic"},
+    )
+    rejected = []
+    for parent, username, body in (
+        (other_issue["number"], "comment-author", "crash comment"),
+        (1, "issue-author", "crash comment"),
+        (1, "comment-author", "different content"),
+    ):
+        decoy = api(
+            TARGET_URL,
+            "POST",
+            f"/repos/{REPOSITORY}/issues/{parent}/comments",
+            auth=(username, USER_PASSWORD),
+            json_body={"body": body},
+        )
+        result = worker("resolve", "crash", target_comment_id=str(decoy["id"]))
+        rejected.append(
+            result.get("rejected") is True
+            and result["plan"]["operations"][0]["status"] == "outcome_unknown"
+        )
+    assertions["explicit_resolution_rejects_wrong_parent_author_and_content"] = all(rejected)
+    accepted_comment = next(
+        value
+        for value in comments()
+        if value["body"] == "crash comment" and value["user"]["login"] == "comment-author"
+    )
+    before_resolution = events()
+    comment_count = len(comments())
+    resolved = worker("resolve", "crash", target_comment_id=str(accepted_comment["id"]))
+    restarted = worker("resume", "crash")
+    assertions["explicit_resolution_then_restart_confirms_without_post"] = (
+        resolved["plan"]["status"] == restarted["plan"]["status"] == "confirmed"
+        and restarted["plan"]["operations"][0]["target_global_id"] == str(accepted_comment["id"])
+        and events() == before_resolution
+        and len(comments()) == comment_count
+    )
+    details["explicit_resolution"] = {
+        "selection": "operator-selected target comment ID, supplied only after blocked recovery",
+        "rejected_decoys": rejected,
+        "target_comment_id": str(accepted_comment["id"]),
+        "final_plan_status": restarted["plan"]["status"],
+    }
     assertions["control_repository_unchanged"] = (
         api(TARGET_URL, "GET", "/repos/access-lab/control-private") == control
     )
