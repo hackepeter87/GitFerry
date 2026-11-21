@@ -6,9 +6,12 @@ import json
 from typing import Any
 
 from connection_profile_probe import certificate
+from gitferry.application_package import write_package
 from gitferry.git_bundle import create_git_bundle
+from gitferry.package_archive import write_package_archive
 from support import (
     PACKAGE,
+    ROOT,
     TARGET_URL,
     USER_PASSWORD,
     WORK,
@@ -26,6 +29,7 @@ ASSERTIONS = frozenset(
         "distinct_native_authors",
         "parent_mapping_confirmed",
         "target_only_context",
+        "application_package_bundle_received_and_used",
         "confirmed_restart_no_duplicates",
         "crash_remote_post_accepted",
         "crash_restart_outcome_unknown",
@@ -74,10 +78,24 @@ def comments() -> list[dict[str, Any]]:
 
 
 def run_application_plan_probe() -> dict[str, Any]:
-    bundle = create_git_bundle(WORK / "permission-seed", PACKAGE, "application-plan.bundle")
-    (PACKAGE / "application-plan-bundle.json").write_text(
-        json.dumps({"member": bundle.member, "sha256": bundle.sha256, "size": bundle.size})
-    )
+    package_root = WORK / "application-package"
+    package_root.mkdir()
+    bundle = create_git_bundle(WORK / "permission-seed", package_root, "bundles/selected.bundle")
+    package_document = json.loads((ROOT / "examples/application-package.v1.json").read_text())
+    package_document["sender"] = {
+        "instance_key": "source",
+        "installation_marker": "source-plan-install",
+    }
+    package_document["recipient"] = {
+        "instance_key": "target",
+        "installation_marker": "target-plan-install",
+    }
+    selected = package_document["repositories"][0]
+    selected["repository"] = REPOSITORY
+    selected["organization"]["name"] = "application-plan-lab"
+    selected["bundle"] = {"path": bundle.member, "size": bundle.size, "sha256": bundle.sha256}
+    package_artifact = write_package(package_root, package_document)
+    write_package_archive(package_root, PACKAGE / "application-plan.zip")
     directory = WORK / "application-plan-tls"
     directory.mkdir()
     cert, key = certificate(directory, "trusted")
@@ -106,6 +124,14 @@ def run_application_plan_probe() -> dict[str, Any]:
         "parent_mapping_confirmed": len(initial_comments) == 1
         and initial_comments[0]["issue_url"].endswith("/1"),
         "target_only_context": first["isolated"] is True,
+        "application_package_bundle_received_and_used": (
+            first["package_digest"] == package_artifact.digest_sha256
+            and first["isolated"] is True
+            and any(
+                step["operation_type"] == "push_git_bundle" and step["status"] == "confirmed"
+                for step in plan["operations"]
+            )
+        ),
     }
     before = events()
     catalog = worker("browse")

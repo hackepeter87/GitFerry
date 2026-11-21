@@ -1,0 +1,42 @@
+{
+  "format": "gitferry.application-package",
+  "schema_version": 1,
+  "package_id": "synthetic-package-1",
+  "transfer_round_id": "synthetic-round-1",
+  "producer_version": "0.1.0.dev0",
+  "created_at": "2026-11-21T12:00:00Z",
+  "mode": "first-import",
+  "sender": {
+    "instance_key": "source",
+    "installation_marker": "source-install-1"
+  },
+  "recipient": {
+    "instance_key": "target",
+    "installation_marker": "target-install-1"
+  },
+  "repositories": [
+    {
+      "origin": {
+        "instance_key": "source",
+        "global_id": "9007199254740993"
+      },
+      "repository": "synthetic/selected",
+      "organization": {
+        "origin": {
+          "instance_key": "source",
+          "global_id": "42"
+        },
+        "name": "synthetic"
+      },
+      "teams": [],
+      "bundle": null
+    }
+  ],
+  "realms": [],
+  "metadata": null,
+  "inventory_complete": false,
+  "limitations": [
+    "Content inventory is incomplete; receipt authorizes no writes."
+  ],
+  "deletion_semantics": "absence-does-not-delete"
+}

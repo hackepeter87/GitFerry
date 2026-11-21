@@ -421,3 +421,35 @@ and uploaded the failed report. Active ruleset `27751371` requires the exact `qu
 Exact run facts and the requirement-to-test map are in
 [`verification-linux-integration-run.md`](verification-linux-integration-run.md) and the generated
 `integration-results/report.json`.
+
+## Issue #10 application package file boundary
+
+`backend/tests/test_application_package.py` exercises the real schema/parser and archive service,
+including unchanged v1/v2 example bytes, explicit issue-author relationships, large native IDs as
+strings, transfer-direction/scope conflicts, forbidden imported approval/status fields, missing
+or undeclared files and immutable descriptors. A separate Python process verifies received files
+without any source database. `test_package_archive.py` covers traversal/aliases, links, duplicate
+entries, compression, actual/header limits, bounded central-directory allocation, changed source
+bytes, cleanup and concurrent no-overwrite publication. These are file-boundary tests, not a
+claim that complete source inventory or the first-import UI has been accepted.
+
+The existing `application_plan_probe.py` now builds `application-plan.zip`; `plan_worker.py`
+receives it in the target-only Linux context and supplies the validated bundle to the existing
+application plan. Mandatory assertion `application_package_bundle_received_and_used` binds the
+received descriptor digest, opposite-system isolation and confirmed Git push. Structure/metadata
+setup remains the existing synthetic plan fixture. The report-contract deletion test rejects a
+report lacking this assertion; existing interruption, author, parent and control-object evidence
+remains mandatory.
+
+Development run `7aeba64a2bb940ba` passed all 21 local required checks and 18 application-plan
+assertions, with cleanup exit 0, pinned Gitea 1.27.2, Darwin/arm64 host and Linux/arm64 Docker,
+without observed emulation. This was a dirty-worktree development run based on `6014da9`, not an
+immutable-head acceptance. Final local `make doctor` and `make test` passed (343 backend tests, Ruff,
+format, MyPy and frontend build). The focused package/report tests also passed. The independent review reproduced and fixed an embedded
+metadata object whose origin repository was outside the declared selection; a regression now
+rejects it. Additional file-read checks reject a source replaced by a FIFO without blocking, on both
+archive writing and receipt. Receiver-side symlink replacement is also rejected.
+The matrix contract explicitly includes the new file-boundary row without removing any prior
+capability requirement. The controlled-failure contract and scoped cleanup also passed.
+Hosted exact-head and integrated-main evidence belongs to
+[PR #52](https://github.com/hackepeter87/GitFerry/pull/52) and is required before accepting the slice.

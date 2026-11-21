@@ -46,7 +46,9 @@ Owning issues: [#6](https://github.com/hackepeter87/GitFerry/issues/6)–[#11](h
 Issue #9 is accepted through PR #50, integrated as `1b0bed5` and verified by hosted-main
 run `44851149501`. The persisted-plan Gitea execution, API/CLI paths, plan UI and browser
 disconnect flow are covered by their documented real and simulated evidence. Issue #10 is
-now active for the source-selection and complete first-import workflow.
+now active for the complete first-import workflow. Source selection is integrated. The next
+file-boundary slice adds a separate application package descriptor and streaming carrier while
+preserving metadata v1/v2 bytes; it does not complete source export, local admission or the wizard.
 The [plan guide](transfer-plans.md) describes the current boundary without claiming a complete
 first-import wizard.
 
