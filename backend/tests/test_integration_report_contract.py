@@ -56,6 +56,7 @@ def complete_probe_report() -> dict[str, object]:
                     "explicit_resolution_rejects_wrong_parent_author_and_content",
                     "explicit_resolution_then_restart_confirms_without_post",
                     "source_catalog_lists_real_organization_and_repository_without_writes",
+                    "application_package_bundle_received_and_used",
                     "parent_mapping_confirmed",
                     "structure_bundle_and_metadata_confirmed",
                     "target_only_context",
@@ -468,6 +469,7 @@ def test_workflow_cleanup_failure_keeps_report_failed(tmp_path: Path) -> None:
         "explicit_resolution_rejects_wrong_parent_author_and_content",
         "explicit_resolution_then_restart_confirms_without_post",
         "source_catalog_lists_real_organization_and_repository_without_writes",
+        "application_package_bundle_received_and_used",
         "structure_bundle_and_metadata_confirmed",
     ],
 )

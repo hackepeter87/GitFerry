@@ -49,3 +49,32 @@ the summary supports removing an earlier selection. Changing or refreshing the s
 the selection. Reloading the browser also clears this preliminary selection; no durable transfer
 has been submitted yet. Loading and failed pages never imply complete inventory or authorization
 to execute. Export/import execution remains unavailable until the subsequent steps are delivered.
+
+## Portable package file boundary (in progress)
+
+An application package combines a versioned `package.json` selection descriptor with Git bundles
+and an optional unchanged v1/v2 metadata manifest. Issue-author relationships are explicit in
+the descriptor; normal comment authors and parents retain the v2 contract. Organization/team
+entries and member selectors are claims for local review, never approved target permissions.
+The schema is `schemas/v1/application-package.schema.json`; a synthetic structure-only example
+is `examples/application-package.v1.json`. No metadata is fabricated for a Git-only selection.
+
+The shared file service exposes developer/operator CLI commands:
+
+```text
+gitferry packages verify PACKAGE_DIRECTORY
+gitferry packages pack PACKAGE_DIRECTORY --output TRANSFER.zip
+gitferry packages receive TRANSFER.zip --output NEW_PACKAGE_DIRECTORY
+```
+
+Receipt checks declared file bytes, digests, paths, manifest relationships and author references
+before publishing the directory. The default receiver bounds are 64 GiB of archive/payload input
+and 10,000 entries; these are safety limits, **not a measured 30 GB acceptance result**. ZIP
+compression, links, special files, undeclared files, duplicate names and path traversal are
+rejected. Existing destinations are preserved. Reports say `validated-files-only` and
+`execution_authorized: false`. No database, credential or network access is used by these commands.
+
+These are application-core building blocks for the wizard. Administrators are not expected to
+assemble descriptors manually in the final workflow. Source export, durable receipt registration,
+local identity decisions and automatic plan composition remain open in Issue #10. See
+[ADR 0013](decisions/0013-application-package-and-file-receipt.md) for the trust boundary.

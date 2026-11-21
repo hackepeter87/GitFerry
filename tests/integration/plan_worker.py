@@ -14,11 +14,13 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from gitferry.application_package import inspect_package
 from gitferry.comment_operations import resolve_unknown_comment_operation
 from gitferry.connection_probe import LocalReferences, approve_connection, probe_connection
 from gitferry.connection_profiles import ConnectionProfile, ProfileService
 from gitferry.gitea_comments import CommentTargetConflict, GiteaCommentClient
 from gitferry.gitea_plan_adapter import GiteaPlanAdapter
+from gitferry.package_archive import receive_package_archive
 from gitferry.plan_application import prepare_transfer_plan
 from gitferry.plan_runner import PlanRunner
 from gitferry.runtime import RuntimePaths
@@ -182,13 +184,18 @@ def initialize(state: StateStore) -> dict[str, Any]:
     comment = state.register_origin(
         OriginKey("source", REPOSITORY, "comment", "54", parent_origin_id=issue.id)
     )
-    bundle = json.loads(Path("/package/application-plan-bundle.json").read_text())
-    # The package arrives as explicit copied files, not a source connection.
-    import shutil
-
-    package = ROOT / "packages" / "initial"
-    package.mkdir(mode=0o700)
-    shutil.copyfile("/package/" + bundle["member"], package / bundle["member"])
+    # Only the archive crosses the boundary. The receiver has no source connection.
+    package = receive_package_archive(
+        Path("/package/application-plan.zip"), ROOT / "packages" / "initial"
+    )
+    selected = package.document["repositories"][0]
+    if selected["repository"] != REPOSITORY or package.document["recipient"] != {
+        "instance_key": "target",
+        "installation_marker": "target-plan-install",
+    }:
+        raise RuntimeError("received package scope or target disagrees with the local plan")
+    payload = selected["bundle"]
+    bundle = {"member": payload["path"], "sha256": payload["sha256"], "size": payload["size"]}
     request = {
         "version": 1,
         "target_instance_key": "target",
@@ -357,7 +364,15 @@ def main() -> None:
             after_remote_hook=crash if args.mode == "crash" else None,
         )
         result = runner.run(plan["plan_id"])
-        print(json.dumps({"plan": result, "isolated": isolated()}))
+        print(
+            json.dumps(
+                {
+                    "plan": result,
+                    "isolated": isolated(),
+                    "package_digest": inspect_package(ROOT / "packages" / "initial").digest_sha256,
+                }
+            )
+        )
 
 
 if __name__ == "__main__":
