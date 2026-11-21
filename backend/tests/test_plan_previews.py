@@ -258,5 +258,16 @@ def test_preview_api_persists_commands_and_never_accepts_success_overrides(tmp_p
             time.sleep(0.02)
         final = client.get(path).json()
         assert final["preview"]["status"] == "passed" and final["status"] == "draft"
+        stale = client.post(
+            path + "/queue",
+            json={"digest": plan["digest"], "preview_generation": 2},
+            headers=headers,
+        )
+        assert stale.status_code == 409
+        assert stale.json()["error"] == {
+            "code": "plan_conflict",
+            "message": "Transfer plan cannot be queued. Refresh and review the plan and prerequisites.",
+        }
+        assert client.get(path).json()["status"] == "draft"
         assert store.get_operation("op-1").status == "prepared"
     assert not worker.thread.is_alive()

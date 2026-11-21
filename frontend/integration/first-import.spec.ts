@@ -31,8 +31,9 @@ async function enter(page: Page, control: Locator, value: string): Promise<void>
   await page.keyboard.insertText(value);
 }
 async function choose(page: Page, control: Locator, value: string): Promise<void> {
-  const index = await control.locator("option").evaluateAll((options, selected) => options.filter((option) => !(option as HTMLOptionElement).disabled).findIndex((option) => (option as HTMLOptionElement).value === selected), value);
-  expect(index).toBeGreaterThanOrEqual(0);
+  const optionIndex = () => control.locator("option").evaluateAll((options, selected) => options.filter((option) => !(option as HTMLOptionElement).disabled).findIndex((option) => (option as HTMLOptionElement).value === selected), value);
+  await expect.poll(optionIndex).toBeGreaterThanOrEqual(0);
+  const index = await optionIndex();
   await tabTo(page, control);
   await page.keyboard.press("Home");
   for (let step = 0; step < index; step++) await page.keyboard.press("ArrowDown");

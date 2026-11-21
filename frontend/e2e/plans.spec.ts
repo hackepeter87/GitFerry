@@ -154,12 +154,12 @@ test("passes the exact preview generation and surfaces stale-generation conflict
   let queueBody: Record<string, unknown> | undefined;
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [plan] }));
   await page.route(/\/api\/v1\/plans\/a[^?]*$/, async (route) => {
-    if (route.request().url().endsWith("/queue")) { queueBody = route.request().postDataJSON(); return route.fulfill({ status: 409, json: { error: { code: "preview_stale", message: "Preview is stale" } } }); }
+    if (route.request().url().endsWith("/queue")) { queueBody = route.request().postDataJSON(); return route.fulfill({ status: 409, json: { error: { code: "plan_conflict", message: "Transfer plan cannot be queued. Refresh and review the plan and prerequisites." } } }); }
     await route.fulfill({ json: plan });
   });
   await signIn(page);
   await page.getByRole("button", { name: "Start reviewed plan" }).click();
-  await expect(page.getByRole("alert")).toContainText("Preview is stale");
+  await expect(page.getByRole("alert")).toContainText("Refresh and review the plan and prerequisites.");
   expect(queueBody).toEqual({ digest: plan.digest, preview_generation: 1 });
 });
 

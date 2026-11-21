@@ -111,7 +111,9 @@ def create_plan_router(settings: AuthCookieSettings) -> APIRouter:
             return result
         except PlanConflict:
             raise AuthBoundaryError(
-                409, "plan_conflict", "Transfer plan cannot be queued"
+                409,
+                "plan_conflict",
+                "Transfer plan cannot be queued. Refresh and review the plan and prerequisites.",
             ) from None
         except StateStoreError:
             raise AuthBoundaryError(
