@@ -96,3 +96,42 @@ def test_profile_input_is_bounded_and_duplicate_keys_rejected(tmp_path: Path) ->
     for data in (b'{"version":1,"version":2}', b"x" * (256 * 1024 + 1), b"[" * 2000):
         with pytest.raises(ProfileValidationError):
             parse_configuration(data)
+
+
+def test_source_browse_boundary_requires_admin_csrf_and_local_only_routing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from gitferry import profile_api
+
+    calls = []
+
+    def browse(service, key, **value):
+        calls.append((key, value))
+        return {"instance_key": key, "entries": [], "inventory_complete": False}
+
+    monkeypatch.setattr(profile_api, "browse_source", browse)
+    auth = AuthService(StateStore(tmp_path / "state.sqlite3"))
+    auth.bootstrap_admin("synthetic.admin", "correct synthetic passphrase")
+    with TestClient(create_app(auth_service=auth), base_url="https://testserver") as client:
+        path = "/api/v1/connections/source/browse"
+        body = {"expected_revision": 1, "kind": "organizations", "organization": None, "page": 1}
+        assert client.post(path, json=body).status_code == 401
+        client.post(
+            "/api/v1/auth/login",
+            json={
+                "username": "synthetic.admin",
+                "password": "correct synthetic passphrase",
+            },
+        )
+        assert client.post(path, json=body).status_code == 403
+        headers = {"x-gitferry-csrf": client.cookies["gitferry_csrf"]}
+        assert (
+            client.post(
+                path, json={**body, "url": "https://untrusted.invalid"}, headers=headers
+            ).status_code
+            == 422
+        )
+        assert not calls
+        response = client.post(path, json=body, headers=headers)
+        assert response.status_code == 200 and response.json()["inventory_complete"] is False
+        assert calls == [("source", body)]

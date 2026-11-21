@@ -47,7 +47,7 @@ Hosted CI run `44840084900` passed for initial commit `0f7c92a`; current correct
 are tracked on [PR #49](https://github.com/hackepeter87/GitFerry/pull/49). Evidence for the initial
 commit does not approve a later correction or merge commit.
 
-## Issue #9: application-plan work in progress
+## Issue #9: accepted bounded application-plan execution
 
 The plan core now connects to the fixed Gitea adapter and protected API/local CLI. Local tests
 cover immutable plans, atomic publication, original baseline preservation, writer exclusion,
@@ -94,9 +94,38 @@ The lost-response case remains blocked. This is controlled reconciliation, not a
 inference. The report records a dirty workspace at parent `380e33c`; final-commit hosted evidence
 is required separately. The follow-up quality gate passed 281 backend tests, lint, formatting,
 MyPy and frontend build. Closed diagnostic categories are tested for secret redaction.
-Issue #9 remains open for final requirement review and integration. The bounded
+Final exact-head AI review accepted source `f28f593`; hosted PR run `44850635166` passed.
+PR #50 merged as `1b0bed567de73379d225cd0b1da99a9d6eb936bf`. Integrated-main run
+`44851149501` passed both jobs. Its inspected report binds that clean merge commit, all
+22 required checks, 16 application assertions and successful cleanup on Linux/x86_64,
+Docker Linux/amd64, without emulation. Issue #9 is closed. The bounded
 selection probe is not proof of a complete inventory or guided source-to-target import wizard.
 See [the operator boundary](transfer-plans.md) and [ADR 0012](decisions/0012-durable-transfer-plans.md).
+
+## Issue #10: source selection slice
+
+The shared source-catalog service reads paginated organizations and their repositories through
+locally approved HTTPS profiles. The initial local `make test` passed 295 backend tests, lint, format,
+MyPy and frontend build. All 18 browser tests passed, including four mocked source-selection
+cases: cross-page/organization selection, failures/source changes, session expiry, and explicit
+selection with an in-flight refresh guard. Browser mocks do not replace remote evidence.
+
+Real Gitea integration run `1a1f7621fab547dd` passed all 21 required checks and the mandatory
+`source_catalog_lists_real_organization_and_repository_without_writes` assertion. The existing
+Linux/arm64, pinned Gitea 1.27.2 setup returned the actual organization/repository through the
+approved TLS profile without additional writes. Cleanup passed. This local dirty-workspace run
+is not immutable-head or hosted-CI evidence for the pending Issue #10 PR.
+
+Review required capturing the same credentials/TLS context for check and catalog read.
+The correction adds rotation, approval-revocation and escaped-secret tests. Its local quality
+gate passed 298 tests; real integration run `38372e7558c34a45` again passed all 21 required
+checks and 17 application assertions, with successful cleanup. Current-commit hosted evidence
+remains a separate merge gate.
+
+This slice is namespace browsing, not complete content inventory or a completed first import.
+The UI keeps selection in the current browser view and says that export/import execution is
+not yet available. Remaining package, identity, execution and complete browser acceptance stay
+in Issue #10. See [the current interface contract](first-import.md).
 
 ## Environment
 

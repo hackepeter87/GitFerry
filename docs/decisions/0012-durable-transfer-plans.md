@@ -1,6 +1,6 @@
 # ADR 0012: Local plans reference the existing operation journal
 
-Status: implementation in progress under [Issue #9](https://github.com/hackepeter87/GitFerry/issues/9).
+Status: accepted under [Issue #9](https://github.com/hackepeter87/GitFerry/issues/9), integrated as `1b0bed5`.
 
 ## Context
 
@@ -51,8 +51,8 @@ background plan workflow.
 
 The application planner, fixed Gitea/bundle composition, API/CLI boundaries and real-Gitea
 restart/crash/lost-response probes are now implemented and locally exercised. The protected
-server starts its worker using the same runtime store and paths. Issue #9 remains open for
-final review/integration. The plan panel uses the same persisted state and supports reviewed
+server starts its worker using the same runtime store and paths. Issue #9 passed exact-head
+review and hosted PR/main verification. The plan panel uses the same persisted state and supports reviewed
 execution and draft creation from saved local selections. Chromium tests distinguish the real
 worker with a simulated remote from the separate real-Gitea interruption proof. The existing
 integration suite remains the regression baseline. Manifest v1/v2 versions and bytes do not

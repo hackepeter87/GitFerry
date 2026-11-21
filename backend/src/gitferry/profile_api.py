@@ -22,6 +22,8 @@ from gitferry.connection_profiles import (
     ProfileService,
     ProfileValidationError,
 )
+from gitferry.gitea_provisioning import ProvisioningTargetConflict
+from gitferry.source_catalog import browse_source
 
 MAX_CONFIGURATION_BYTES = 256 * 1024
 
@@ -132,6 +134,21 @@ def create_profile_router(settings: AuthCookieSettings) -> APIRouter:
         value = await _body(request, {"expected_revision", "evidence_digest"})
         approve_connection(service(request), key, **value)
         return asdict(service(request).get(key))
+
+    @router.post("/{key}/browse", dependencies=write)
+    async def browse(key: str, request: Request) -> dict[str, Any]:
+        from starlette.concurrency import run_in_threadpool
+
+        value = await _body(request, {"expected_revision", "kind", "organization", "page"})
+        try:
+            return await run_in_threadpool(browse_source, service(request), key, **value)
+        except (ConnectionUnavailable, ProvisioningTargetConflict):
+            raise AuthBoundaryError(
+                422,
+                "source_unavailable",
+                "Source page unavailable. Check source access and connection approval; "
+                "retry this page.",
+            ) from None
 
     return router
 

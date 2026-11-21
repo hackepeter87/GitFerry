@@ -11,7 +11,9 @@ from typing import Any
 
 from gitferry.connection_probe import ConnectionUnavailable, approve_connection, probe_connection
 from gitferry.connection_profiles import ConnectionProfile, ProfileConflict, ProfileService
+from gitferry.gitea_provisioning import ProvisioningTargetConflict
 from gitferry.profile_api import MAX_CONFIGURATION_BYTES, parse_configuration
+from gitferry.source_catalog import browse_source
 from gitferry.state_store import StateStore, StateStoreError
 
 
@@ -38,7 +40,11 @@ def configure(parser: argparse.ArgumentParser, database_default: str | None) -> 
     test = actions.add_parser("test")
     approve = actions.add_parser("approve")
     approve.add_argument("--evidence-digest", required=True)
-    for command in (update, retire, rebuild, test, approve):
+    browse = actions.add_parser("browse")
+    browse.add_argument("--kind", choices=("organizations", "repositories"), required=True)
+    browse.add_argument("--organization")
+    browse.add_argument("--page", type=int, default=1)
+    for command in (update, retire, rebuild, test, approve, browse):
         command.add_argument("instance_key")
         command.add_argument("--expected-revision", required=True, type=int)
 
@@ -95,6 +101,15 @@ def execute(args: argparse.Namespace) -> int:
             result = probe_connection(
                 service, args.instance_key, expected_revision=args.expected_revision
             )
+        elif action == "browse":
+            result = browse_source(
+                service,
+                args.instance_key,
+                expected_revision=args.expected_revision,
+                kind=args.kind,
+                organization=args.organization,
+                page=args.page,
+            )
         elif action == "approve":
             approve_connection(
                 service,
@@ -107,7 +122,7 @@ def execute(args: argparse.Namespace) -> int:
             raise ValueError("Unknown connection command")
         print(json.dumps(result, sort_keys=True))
         return 0
-    except (ValueError, ProfileConflict, ConnectionUnavailable) as exc:
+    except (ValueError, ProfileConflict, ConnectionUnavailable, ProvisioningTargetConflict) as exc:
         print(json.dumps({"status": "failed", "error": str(exc)}))
         return 2
     except (OSError, StateStoreError):

@@ -4,6 +4,7 @@ import { nextTick, onMounted, ref } from "vue";
 import { ApiError, getAuthStatus, getSession, login, logout, type Principal } from "./api";
 import ConnectionsPanel from "./ConnectionsPanel.vue";
 import PlansPanel from "./PlansPanel.vue";
+import SourceSelectionPanel from "./SourceSelectionPanel.vue";
 
 type View = "loading" | "bootstrap" | "login" | "admin" | "unavailable";
 
@@ -188,6 +189,7 @@ function handlePanelSessionExpired(): void {
         </div>
       </div>
       <ConnectionsPanel @session-expired="handlePanelSessionExpired" />
+      <SourceSelectionPanel @session-expired="handlePanelSessionExpired" />
       <PlansPanel @session-expired="handlePanelSessionExpired" />
     </section>
 

@@ -22,6 +22,7 @@ from gitferry.gitea_plan_adapter import GiteaPlanAdapter
 from gitferry.plan_application import prepare_transfer_plan
 from gitferry.plan_runner import PlanRunner
 from gitferry.runtime import RuntimePaths
+from gitferry.source_catalog import browse_source
 from gitferry.state_store import OperationBlocked, OriginKey, StateStore
 from gitferry.transfer_plans import PlanService
 
@@ -249,13 +250,30 @@ def isolated() -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "mode", choices=("initial", "replay", "crash", "lost", "resume", "repackage", "resolve")
+        "mode",
+        choices=("initial", "replay", "crash", "lost", "resume", "repackage", "resolve", "browse"),
     )
     parser.add_argument("--case", default="initial")
     parser.add_argument("--target-comment-id")
     args = parser.parse_args()
     state = StateStore(DATABASE)
     with proxy(lose_comment_response=args.mode == "lost"):
+        if args.mode == "browse":
+            service = ProfileService(state)
+            refs = LocalReferences(ROOT / "secrets", ROOT)
+            result = {}
+            for kind, organization in (("organizations", None), ("repositories", ORG)):
+                result[kind] = browse_source(
+                    service,
+                    "target",
+                    expected_revision=service.get("target").revision,
+                    kind=kind,
+                    organization=organization,
+                    page=1,
+                    references=refs,
+                )
+            print(json.dumps(result))
+            return
         if args.mode == "initial":
             plan = initialize(state)
         elif args.mode in ("crash", "lost"):

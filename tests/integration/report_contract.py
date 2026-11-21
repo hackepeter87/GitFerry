@@ -338,6 +338,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                         "new_packaging_cannot_bypass_unknown",
                         "explicit_resolution_rejects_wrong_parent_author_and_content",
                         "explicit_resolution_then_restart_confirms_without_post",
+                        "source_catalog_lists_real_organization_and_repository_without_writes",
                         "control_repository_unchanged",
                         "credentials_absent_from_state_and_report",
                     }
