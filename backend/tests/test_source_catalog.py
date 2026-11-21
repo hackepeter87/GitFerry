@@ -6,7 +6,12 @@ from pathlib import Path
 
 import httpx
 import pytest
-from gitferry.connection_probe import ConnectionUnavailable, approve_connection, probe_connection
+from gitferry.connection_probe import (
+    ConnectionUnavailable,
+    LocalReferences,
+    approve_connection,
+    probe_connection,
+)
 from gitferry.connection_profiles import ProfileConflict
 from gitferry.source_catalog import browse_source
 from test_connection_probe import setup
@@ -97,6 +102,14 @@ def test_source_repository_page_is_scoped_to_selected_organization(tmp_path: Pat
         httpx.Response(200, json=[{"id": True, "name": "x"}]),
         httpx.Response(200, json=[{"id": 1, "name": "../x"}]),
         httpx.Response(200, json=[{"id": 1, "name": "synthetic-test-token"}]),
+        httpx.Response(
+            200,
+            content=(
+                '[{"id":1,"name":"'
+                + "".join(f"\\u{ord(char):04x}" for char in "synthetic-test-token")
+                + '"}]'
+            ).encode(),
+        ),
         httpx.Response(200, json=[{"id": 1, "name": "x"}] * 2),
     ],
 )
@@ -129,6 +142,62 @@ def test_source_browsing_requires_local_approval_before_any_request(tmp_path: Pa
             page=1,
             references=refs,
         )
+
+
+def test_source_check_and_page_share_material_despite_credential_rotation(tmp_path: Path) -> None:
+    service, refs, transport, calls = prepared(
+        tmp_path, httpx.Response(200, json=[{"id": 1, "name": "synthetic-org"}])
+    )
+
+    class RotatingReferences(LocalReferences):
+        token_reads = 0
+        tls_reads = 0
+
+        def token(self, reference: str) -> str:
+            self.token_reads += 1
+            return "synthetic-test-token" if self.token_reads == 1 else "different-account-token"
+
+        def tls(self, reference):
+            self.tls_reads += 1
+            return refs.tls(reference)
+
+    rotating = RotatingReferences()
+    result = browse_source(
+        service,
+        "a",
+        expected_revision=1,
+        kind="organizations",
+        organization=None,
+        page=1,
+        references=rotating,
+        transport=transport,
+    )
+    assert result["entries"] == [{"id": "1", "name": "synthetic-org"}]
+    assert rotating.token_reads == rotating.tls_reads == 1
+    assert {request.headers["authorization"] for request in calls} == {"token synthetic-test-token"}
+
+
+def test_missing_source_material_preserves_probe_revocation(tmp_path: Path, monkeypatch) -> None:
+    service, refs, transport, calls = prepared(tmp_path, httpx.Response(200, json=[]))
+    before = len(calls)
+
+    def missing(reference):
+        raise ConnectionUnavailable("synthetic missing reference")
+
+    monkeypatch.setattr(refs, "token", missing)
+    with pytest.raises(ConnectionUnavailable):
+        browse_source(
+            service,
+            "a",
+            expected_revision=1,
+            kind="organizations",
+            organization=None,
+            page=1,
+            references=refs,
+            transport=transport,
+        )
+    assert len(calls) == before
+    assert not service.get("a").locally_approved
 
 
 def test_catalog_page_size_and_total_deadline_are_bounded(tmp_path: Path, monkeypatch) -> None:

@@ -22,6 +22,30 @@ MAX_PAGE_BYTES = 2 * 1024 * 1024
 PAGE_DEADLINE_SECONDS = 15.0
 
 
+class _SourceReferences(LocalReferences):
+    """Keep the check and catalog request on the same privately captured material."""
+
+    def __init__(self, references: LocalReferences, credential_ref: str, ca_ref: str | None):
+        self._credential_ref, self._ca_ref = credential_ref, ca_ref
+        self._references = references
+        self._token: str | None = None
+        self._tls: tuple[ssl.SSLContext, str] | None = None
+
+    def token(self, reference: str) -> str:
+        if reference != self._credential_ref:
+            raise ConnectionUnavailable("Source credential reference changed")
+        if self._token is None:
+            self._token = self._references.token(reference)
+        return self._token
+
+    def tls(self, reference: str | None) -> tuple[ssl.SSLContext, str]:
+        if reference != self._ca_ref:
+            raise ConnectionUnavailable("Source CA reference changed")
+        if self._tls is None:
+            self._tls = self._references.tls(reference)
+        return self._tls
+
+
 def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -98,7 +122,9 @@ def browse_source(
     service._check_revision(profile, expected_revision)
     if not profile.locally_approved:
         raise ProfileConflict("Test and locally approve this connection before browsing")
-    refs = references or LocalReferences()
+    refs = _SourceReferences(
+        references or LocalReferences(), profile.credential_ref, profile.ca_ref
+    )
     evidence = probe_connection(
         service,
         key,
@@ -123,13 +149,13 @@ def browse_source(
             seen.add(str(native_id))
             if kind == "organizations":
                 name = value.get("name")
-                if not isinstance(name, str):
+                if not isinstance(name, str) or token in name:
                     raise ValueError("missing organization name")
                 _path_segment(name, "organization")
                 entries.append({"id": str(native_id), "name": name})
             else:
                 repository = value.get("full_name")
-                if not isinstance(repository, str):
+                if not isinstance(repository, str) or token in repository:
                     raise ValueError("missing repository scope")
                 owner, _ = _repository_segments(repository)
                 if owner != organization or type(value.get("private")) is not bool:

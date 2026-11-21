@@ -6,7 +6,9 @@ The durable plan service is already available; see [transfer plans](transfer-pla
 ## Source selection
 
 The source browser uses an enabled, locally approved connection profile. It rechecks source
-identity before reading a page and uses the existing local token and CA references. It never
+identity before reading a page and uses the existing local token and CA references.
+The check captures token/TLS material once and reuses it for the catalog read, so a local
+credential rotation cannot substitute an unverified account between those calls. It never
 accepts a URL or credentials from a page request and performs no Gitea writes.
 
 `POST /api/v1/connections/{key}/browse` requires an authenticated administrator and CSRF header:
