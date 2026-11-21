@@ -21,6 +21,8 @@ from gitferry.auth_api import (
     create_auth_router,
 )
 from gitferry.blueprints import MAX_BLUEPRINT_BYTES, BlueprintValidationError, validate_text
+from gitferry.connection_profiles import ProfileConflict, ProfileValidationError
+from gitferry.profile_api import create_profile_router, profile_error
 from gitferry.runtime import RuntimeStatus, initialize_runtime
 from gitferry.state_migrations import SCHEMA_VERSION
 
@@ -74,6 +76,13 @@ def create_app(
     async def auth_error_handler(_: Request, exc: AuthBoundaryError) -> JSONResponse:
         return auth_error_response(exc)
 
+    @application.exception_handler(ProfileConflict)
+    @application.exception_handler(ProfileValidationError)
+    async def profile_error_handler(
+        _: Request, exc: ProfileConflict | ProfileValidationError
+    ) -> JSONResponse:
+        return auth_error_response(profile_error(exc))
+
     @application.middleware("http")
     async def security_headers(
         request: Request,
@@ -89,7 +98,7 @@ def create_app(
         response.headers["X-XSS-Protection"] = "0"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        if request.url.path.startswith("/api/v1/auth/"):
+        if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         route = request.scope.get("route")
         route_template = getattr(route, "path", "<unmatched>")
@@ -113,6 +122,7 @@ def create_app(
         )
 
     application.include_router(create_auth_router(cookie_settings))
+    application.include_router(create_profile_router(cookie_settings))
     application.post(
         "/api/v1/blueprints/validate",
         dependencies=[Depends(admin_csrf_dependency(cookie_settings))],

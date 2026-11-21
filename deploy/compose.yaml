@@ -18,6 +18,7 @@ services:
       GITFERRY_PACKAGE_DIR: /var/lib/gitferry/packages
       GITFERRY_WORK_DIR: /var/lib/gitferry/work
       GITFERRY_CA_DIR: /etc/gitferry/ca
+      GITFERRY_SECRET_DIR: /run/secrets
       GITFERRY_SOURCE_TOKEN_FILE: /run/secrets/source_api_token
       GITFERRY_TARGET_TOKEN_FILE: /run/secrets/target_api_token
     volumes:

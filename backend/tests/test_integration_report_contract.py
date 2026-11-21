@@ -38,6 +38,27 @@ def complete_probe_report() -> dict[str, object]:
         "control_repository_change_preserved": True,
     }
     report: dict[str, object] = {
+        "connection_profiles": {
+            "status": "passed",
+            "assertions": dict.fromkeys(
+                (
+                    "real_gitea_version_and_account",
+                    "check_did_not_approve",
+                    "explicit_local_approval",
+                    "read_only_connection_check",
+                    "untrusted_ca_rejected",
+                    "wrong_ca_rejected",
+                    "hostname_mismatch_rejected",
+                    "expired_certificate_rejected",
+                    "credentials_absent_from_state_and_exports",
+                    "api_probe_and_local_approval",
+                    "cli_restart_preserves_approved_evidence",
+                    "credentials_absent_from_boundaries_and_logs",
+                    "system_trust_store_without_ca_reference",
+                ),
+                True,
+            ),
+        },
         "gitea": {"source": "1.27.2", "target": "1.27.2"},
         "comment_transport_roundtrip": {"assertions": comment_assertions},
         "portable_transport_roundtrip": {
@@ -241,6 +262,26 @@ def test_probe_contract_requires_every_top_level_probe(tmp_path: Path) -> None:
     results = prepare_results(tmp_path, report)
 
     assert not module.probe_contract_is_complete(results)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "false"])
+def test_connection_assertion_cannot_be_omitted_or_failed(tmp_path: Path, mutation: str) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    assertions = report["connection_profiles"]["assertions"]
+    if mutation == "missing":
+        del assertions["real_gitea_version_and_account"]
+    else:
+        assertions["real_gitea_version_and_account"] = False
+    results = prepare_results(tmp_path, report)
+    assert not module.probe_contract_is_complete(results)
+    assert not module.finalize(
+        results,
+        run_status=0,
+        cleanup_status=0,
+        phase="probe-complete",
+        diagnostics_captured=False,
+    )
 
 
 def test_finalize_rejects_incomplete_run_metadata(tmp_path: Path) -> None:

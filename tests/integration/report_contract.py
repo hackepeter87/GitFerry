@@ -298,6 +298,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
     """Map every requested regression to an executed assertion or focused unit test."""
 
     mandatory_sections = (
+        "connection_profiles",
         "git_bundle",
         "metadata",
         "identity_and_permissions",
@@ -315,6 +316,32 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         and all(_value(report, f"{section}.status") == "passed" for section in mandatory_sections)
     )
     entries = [
+        (
+            "connection_profiles_strict_tls_and_local_authority",
+            _all_required_true(
+                report,
+                "connection_profiles.assertions",
+                frozenset(
+                    {
+                        "real_gitea_version_and_account",
+                        "check_did_not_approve",
+                        "explicit_local_approval",
+                        "read_only_connection_check",
+                        "untrusted_ca_rejected",
+                        "wrong_ca_rejected",
+                        "hostname_mismatch_rejected",
+                        "expired_certificate_rejected",
+                        "credentials_absent_from_state_and_exports",
+                        "api_probe_and_local_approval",
+                        "cli_restart_preserves_approved_evidence",
+                        "credentials_absent_from_boundaries_and_logs",
+                        "system_trust_store_without_ca_reference",
+                    }
+                ),
+            ),
+            "tests/integration/connection_profile_probe.py",
+            "connection_profiles.assertions",
+        ),
         (
             "all_required_probe_sections_completed",
             mandatory_sections_passed,
