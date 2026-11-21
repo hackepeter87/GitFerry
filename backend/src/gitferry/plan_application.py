@@ -220,7 +220,11 @@ def _metadata_operation(
 
 
 def prepare_transfer_plan(
-    state: StateStore, value: Mapping[str, Any], *, expected_profile_revision: int | None = None
+    state: StateStore,
+    value: Mapping[str, Any],
+    *,
+    expected_profile_revision: int | None = None,
+    content_inventory: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     request = parse_plan_request(value)
     with state.read_connection() as connection:
@@ -302,6 +306,7 @@ def prepare_transfer_plan(
             {operation.operation_type for operation in operations.values()}
         ),
         "inventory_complete": False,
+        "content_inventory": content_inventory,
         "limitations": [
             "Selected explicit inputs only; not a complete remote inventory",
             "Native historical creation timestamps are not restored",

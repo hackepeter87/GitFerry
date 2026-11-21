@@ -112,10 +112,12 @@ def _read_bounded(path: Path, limit: int) -> bytes:
     return raw
 
 
-def _schema() -> dict[str, Any]:
-    path = Path(__file__).resolve().parents[3] / "schemas/v1/application-package.schema.json"
+def _schema(version: int) -> dict[str, Any]:
+    path = (
+        Path(__file__).resolve().parents[3] / f"schemas/v{version}/application-package.schema.json"
+    )
     if not path.is_file():
-        path = Path.cwd() / "schemas/v1/application-package.schema.json"
+        path = Path.cwd() / f"schemas/v{version}/application-package.schema.json"
     value: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
     return value
 
@@ -129,7 +131,12 @@ def _issue_key(value: dict[str, Any]) -> tuple[str, str, str]:
 
 
 def _validate(document: dict[str, Any]) -> None:
-    errors = Draft202012Validator(_schema(), format_checker=FormatChecker()).iter_errors(document)
+    version = document.get("schema_version")
+    if type(version) is not int or version not in (1, 2):
+        raise PackageError("unsupported application package version")
+    errors = Draft202012Validator(_schema(version), format_checker=FormatChecker()).iter_errors(
+        document
+    )
     if next(errors, None) is not None:
         # Do not reflect untrusted values (possibly credentials) into a public report.
         raise PackageError("invalid or unsupported application package descriptor")
@@ -200,7 +207,12 @@ def _validate(document: dict[str, Any]) -> None:
 
 
 def _contents(directory: Path, document: dict[str, Any]) -> dict[str, tuple[int, str]]:
+    from gitferry.package_inventory import validate_inventory_contents
+
     files: dict[str, tuple[int, str]] = {}
+    if document["schema_version"] == 2:
+        reference = document["inventory"]
+        files[reference["path"]] = (reference["size"], reference["sha256"])
     for repository in document["repositories"]:
         bundle = repository["bundle"]
         if bundle is not None:
@@ -211,6 +223,7 @@ def _contents(directory: Path, document: dict[str, Any]) -> dict[str, tuple[int,
             files[member] = facts
     reference = document["metadata"]
     if reference is None:
+        validate_inventory_contents(directory, document, None)
         return files
     try:
         for name in ("manifest.json", "manifest.json.sha256"):
@@ -249,6 +262,7 @@ def _contents(directory: Path, document: dict[str, Any]) -> dict[str, tuple[int,
             and item["author"]["realm_key"] not in realms
         ):
             raise PackageError("comment author references an undeclared realm")
+    validate_inventory_contents(directory, document, data)
     for payload in data["payloads"]:
         member = "metadata/" + payload["path"]
         package_path(member)

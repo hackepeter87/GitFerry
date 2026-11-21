@@ -13,6 +13,7 @@ from gitferry.application_package import (
     load_package_metadata,
 )
 from gitferry.connection_profiles import _identifier
+from gitferry.package_inventory import inventory_report
 from gitferry.runtime import RuntimePaths
 from gitferry.state_codec import canonical_json, now
 from gitferry.state_store import StateStore
@@ -142,6 +143,27 @@ def _facts(
                         "global_id": identity["global_id"],
                     },
                 )
+        if document["schema_version"] == 2:
+            # Source-copy observations are scoped to the sender, not reinterpreted origins.
+            copies = [
+                ("organization", organization["name"], organization),
+                ("repository", repository["repository"], repository),
+            ]
+            copies.extend(("team", organization["name"], team) for team in repository["teams"])
+            for kind, scope, copied in copies:
+                identifier, _ = _portable_origin(
+                    {"origin": {**copied["origin"], "repository": scope, "object_type": kind}}
+                )
+                _insert_replica(
+                    connection,
+                    identifier,
+                    kind,
+                    {
+                        "instance_key": document["sender"]["instance_key"],
+                        "repository": scope,
+                        "global_id": copied["source_native_id"],
+                    },
+                )
     if document["metadata"] is not None:
         metadata = load_package_metadata(artifact)
         _local_replicas(connection, metadata, target)
@@ -181,6 +203,7 @@ def _facts(
         "blocked_operations": blocked,
         "replay": previous is not None,
         "inventory_complete": False,
+        "content_inventory": inventory_report(artifact.directory, document),
         "limitations": document["limitations"],
         "realms": document["realms"],
         "execution_authorized": False,
@@ -341,5 +364,8 @@ class PackageAdmissions:
             expected_digest=review["digest_sha256"],
         )
         return prepare_transfer_plan(
-            self.state, selection["request"], expected_profile_revision=profile_revision
+            self.state,
+            selection["request"],
+            expected_profile_revision=profile_revision,
+            content_inventory=review["content_inventory"],
         )

@@ -107,7 +107,7 @@ class ClassObservation(_Model):
                 raise ValueError("observed count must match concrete objects")
         elif self.count is not None or self.objects or not self.reason:
             raise ValueError("unobserved content needs an unknown count and explicit reason")
-        identities = [(value.namespace, value.key) for value in self.objects]
+        identities = [value.key for value in self.objects]
         if len(set(identities)) != len(identities):
             raise ValueError("duplicate inventory object identity")
         return self
@@ -249,6 +249,52 @@ def inventory_summary(document: InventoryDocument) -> dict[str, Any]:
                 reason = "Transfer for this class is not implemented"
             else:
                 reason = ""
+                if observation.content_class == "issues" and any(
+                    item.facts.get("label_ids") for item in observation.objects
+                ):
+                    reason = "Issue label assignments need the unimplemented label adapter"
+                if observation.content_class == "issues" and any(
+                    item.facts.get("milestone_id") or item.facts.get("assignees")
+                    for item in observation.objects
+                ):
+                    reason = (
+                        "Milestone and assignee relationships need additional transfer adapters"
+                    )
+                if observation.content_class in {"issues", "comments"} and any(
+                    item.author is None for item in observation.objects
+                ):
+                    reason = "Every selected metadata object needs an observed native author"
+                if observation.content_class in {"teams", "permissions"}:
+                    for item in observation.objects:
+                        if item.key.startswith("user:"):
+                            reason = (
+                                "Direct collaborator grants are not transferred by this adapter"
+                            )
+                            break
+                        units = item.facts.get("units_map", {})
+                        if not isinstance(units, dict):
+                            reason = "Malformed team units"
+                            break
+                        permission = item.facts.get("permission")
+                        if permission in {"admin", "owner"} or units.get("repo.code") in {
+                            "admin",
+                            "owner",
+                        }:
+                            continue  # Technical ownership is an explicit existing exclusion.
+                        if (
+                            units.get("repo.code") not in {"read", "write"}
+                            or units.get("repo.issues") != units.get("repo.code")
+                            or any(
+                                k not in {"repo.code", "repo.issues"} and v != "none"
+                                for k, v in units.items()
+                            )
+                            or permission not in {"none", units.get("repo.code")}
+                        ):
+                            reason = (
+                                "Split, administrative or additional team units "
+                                "need an unsupported adapter"
+                            )
+                            break
             if reason:
                 blockers.append(
                     {
@@ -281,3 +327,13 @@ def inventory_summary(document: InventoryDocument) -> dict[str, Any]:
             "unknown sizes require separate capacity review, not a hard quota"
         ),
     }
+
+
+def export_classes(*, metadata: bool, members: bool) -> list[str]:
+    """The bounded first-import selection; additional classes need their own adapters."""
+    classes = {"git_refs", "organizations", "teams", "permissions"}
+    if metadata or members:
+        classes.add("identities")
+    if metadata:
+        classes.update(("issues", "comments"))
+    return sorted(classes)

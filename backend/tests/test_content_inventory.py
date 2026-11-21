@@ -15,12 +15,28 @@ from gitferry.content_inventory import (
 
 
 def _observation(content_class: str, *, status: str = "observed", reason: str = "") -> dict:
+    facts: dict[str, object] = {"kind": content_class}
+    author = None
+    if content_class in {"issues", "comments"}:
+        author = {"account_id": "1", "login": "synthetic-author"}
+    if content_class in {"teams", "permissions"}:
+        facts.update(
+            permission="read",
+            units_map={"repo.code": "read", "repo.issues": "read"},
+        )
     value: dict = {
         "content_class": content_class,
         "status": status,
         "count": 1 if status == "observed" else None,
         "objects": (
-            [{"key": f"{content_class}-1", "namespace": "repo", "facts": {"kind": content_class}}]
+            [
+                {
+                    "key": f"{content_class}-1",
+                    "namespace": "repo",
+                    "facts": facts,
+                    "author": author,
+                }
+            ]
             if status == "observed"
             else []
         ),
@@ -52,6 +68,10 @@ def _document(*, requested_classes: list[str] | None = None) -> dict:
         ],
         "deletion_semantics": "absence-does-not-delete",
     }
+
+
+def _split_units(item: dict) -> None:
+    item["facts"].update(units_map={"repo.code": "read", "repo.issues": "write"})
 
 
 def test_inventory_requires_exact_catalog_and_observed_counts() -> None:
@@ -117,6 +137,7 @@ def test_native_ids_are_strict_precise_strings_and_repository_scoped() -> None:
     ("field", "invalid"),
     [
         ("format", "other.inventory"),
+        ("schema_version", 2),
         ("comparison_version", 2),
         ("unexpected", True),
     ],
@@ -134,6 +155,25 @@ def test_unknown_format_versions_and_fields_are_rejected(field: str, invalid: ob
 def test_boolean_versions_are_not_accepted_as_numeric_versions() -> None:
     value = _document()
     value["schema_version"] = True
+    with pytest.raises(InventoryError):
+        parse_inventory(value)
+
+
+def test_parent_relationships_must_be_known_catalog_objects() -> None:
+    value = _document(requested_classes=["comments"])
+    comment = next(
+        item for item in value["repositories"][0]["classes"] if item["content_class"] == "comments"
+    )
+    comment["objects"][0]["parent"] = {"content_class": "issues", "key": "missing-issue"}
+    with pytest.raises(InventoryError):
+        parse_inventory(value)
+
+    value = _document()
+    value["repositories"][0]["classes"][0]["objects"][0]["parent"] = {
+        "content_class": "issues",
+        "key": "git_refs-1",
+        "extra": "forbidden",
+    }
     with pytest.raises(InventoryError):
         parse_inventory(value)
 
@@ -157,6 +197,61 @@ def test_summary_distinguishes_complete_ready_full_transfer_and_exclusions() -> 
     assert {item["content_class"] for item in summary["excluded_classes"]} == set(
         CONTENT_CLASSES
     ) - set(TRANSFER_CLASSES)
+
+
+@pytest.mark.parametrize(
+    ("content_class", "mutate", "reason"),
+    [
+        (
+            "issues",
+            lambda item: item["facts"].update(label_ids=["label-1"]),
+            "Issue label assignments",
+        ),
+        ("issues", lambda item: item.update(author=None), "observed native author"),
+        (
+            "teams",
+            _split_units,
+            "Split, administrative or additional team units",
+        ),
+        (
+            "permissions",
+            lambda item: item.update(key="user:1"),
+            "Direct collaborator grants",
+        ),
+    ],
+)
+def test_selected_capability_facts_block_transfer(content_class: str, mutate, reason: str) -> None:
+    value = _document(requested_classes=[content_class])
+    observation = next(
+        item
+        for item in value["repositories"][0]["classes"]
+        if item["content_class"] == content_class
+    )
+    mutate(observation["objects"][0])
+    summary = inventory_summary(parse_inventory(value))
+    assert summary["transfer_ready"] is False
+    assert any(
+        item["content_class"] == content_class and reason in item["reason"]
+        for item in summary["blockers"]
+    )
+
+
+def test_technical_owner_is_explicitly_excluded_but_ordinary_team_is_blocked() -> None:
+    value = _document(requested_classes=["teams"])
+    team = next(
+        item for item in value["repositories"][0]["classes"] if item["content_class"] == "teams"
+    )["objects"][0]
+    team["facts"].update(
+        permission="admin", units_map={"repo.code": "admin", "repo.issues": "admin"}
+    )
+    summary = inventory_summary(parse_inventory(value))
+    assert summary["transfer_ready"] is True
+    assert not summary["blockers"]
+
+    team["facts"].update(permission="read", units_map={"repo.code": "read", "repo.issues": "write"})
+    summary = inventory_summary(parse_inventory(value))
+    assert summary["transfer_ready"] is False
+    assert "unsupported adapter" in summary["blockers"][0]["reason"]
 
 
 @pytest.mark.parametrize("status", ["not-supported", "failed", "blocked"])
@@ -191,3 +286,14 @@ def test_digest_tracks_facts_but_comparison_ignores_only_snapshot_and_time() -> 
     assert inventory_digest(observed) != inventory_digest(changed)
     assert comparison_facts(observed) == comparison_facts(changed)
     assert comparison_facts(observed)["source_installation_marker"] == "installation-2026-11"
+
+
+def test_parent_keys_cannot_be_ambiguous_across_namespaces() -> None:
+    value = _document()
+    observation = value["repositories"][0]["classes"][0]
+    copied = deepcopy(observation["objects"][0])
+    copied["namespace"] = "another-namespace"
+    observation["objects"].append(copied)
+    observation["count"] = 2
+    with pytest.raises(InventoryError):
+        parse_inventory(value)

@@ -94,7 +94,27 @@ def _document(job: dict[str, Any], *, repository: str = "synthetic/selected", so
                             "status": "observed",
                             "count": 1,
                             "objects": [
-                                {"key": f"{name}-1", "namespace": "repo", "facts": {"value": name}}
+                                {
+                                    "key": f"{name}-1",
+                                    "namespace": "repo",
+                                    "facts": (
+                                        {
+                                            "value": name,
+                                            "permission": "read",
+                                            "units_map": {
+                                                "repo.code": "read",
+                                                "repo.issues": "read",
+                                            },
+                                        }
+                                        if name in {"teams", "permissions"}
+                                        else {"value": name}
+                                    ),
+                                    "author": (
+                                        {"account_id": "1", "login": "synthetic-author"}
+                                        if name in {"issues", "comments"}
+                                        else None
+                                    ),
+                                }
                             ],
                             "reason": "",
                             "limitations": [],
@@ -309,12 +329,15 @@ def test_concurrent_calls_have_one_executor_and_one_observation(tmp_path: Path) 
 
         results = list(pool.map(invoke, (1, 2)))
     assert calls == ["inventory-1"]
-    assert sum(
-        not isinstance(result, ExecutorBusy)
-        and result is not None
-        and result["status"] == "ready"
-        for result in results
-    ) == 1
+    assert (
+        sum(
+            not isinstance(result, ExecutorBusy)
+            and result is not None
+            and result["status"] == "ready"
+            for result in results
+        )
+        == 1
+    )
     assert sum(isinstance(result, ExecutorBusy) for result in results) == 1
 
 

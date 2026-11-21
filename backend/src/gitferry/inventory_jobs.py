@@ -190,6 +190,7 @@ class InventoryJobs:
         return document
 
     def _validate_result(self, job: dict[str, Any], document: InventoryDocument) -> None:
+        parse_inventory(document.model_dump(mode="json"))
         profile, _ = self._authority(job)
         request = job["request"]
         observed = sorted(

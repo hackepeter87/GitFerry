@@ -11,6 +11,7 @@ from typing import Any
 from gitferry.comment_operations import execute_comment_operation, preflight_comment_operation
 from gitferry.connection_probe import LocalReferences, probe_connection
 from gitferry.connection_profiles import ProfileService
+from gitferry.content_inventory import InventoryDocument
 from gitferry.gitea_comments import GiteaCommentClient
 from gitferry.gitea_issues import GiteaIssueClient
 from gitferry.gitea_provisioning import (
@@ -21,6 +22,7 @@ from gitferry.gitea_provisioning import (
 from gitferry.identity_observations import require_current_account
 from gitferry.issue_operations import execute_issue_operation, preflight_issue_operation
 from gitferry.operations import OperationExecutor
+from gitferry.package_inventory import expected_git_refs, read_inventory
 from gitferry.plan_application import PlanRequest, parse_plan_request
 from gitferry.plan_diagnostics import PreflightBlocked, PreflightCheck
 from gitferry.provisioning import preflight_provisioning_operations, provision_selected_repository
@@ -43,6 +45,7 @@ class GiteaPlanAdapter:
         self.request: PlanRequest | None = None
         self.preflight_digest: str | None = None
         self.scope: str | None = None
+        self.content_inventory: InventoryDocument | None = None
         # Imported lazily so the existing issue/comment operations remain independent.
         from gitferry.gitea_bundles import GiteaBundlePusher
 
@@ -78,16 +81,18 @@ class GiteaPlanAdapter:
             raise OperationBlocked("plan selection points at another target")
         if request.unsupported_items:
             raise OperationBlocked("selected unsupported contents require a revised selection")
+        self.content_inventory = None
         if request.package_digest is not None:
             from gitferry.package_admission import PackageAdmissions
 
             if request.package_ref is None:
                 raise OperationBlocked("package-bound plan has no local package reference")
-            PackageAdmissions(self.state, self.paths).verify_receipt(
+            artifact = PackageAdmissions(self.state, self.paths).verify_receipt(
                 request.package_ref,
                 target_instance_key=request.target_instance_key,
                 expected_digest=request.package_digest,
             )
+            self.content_inventory = read_inventory(artifact.directory, artifact.document)
         # The estimate is explicit, not a claim about arbitrary Git expansion. A
         # bounded initial import still needs both payload and working space.
         self.check = PreflightCheck.STORAGE
@@ -288,7 +293,11 @@ class GiteaPlanAdapter:
                 from gitferry.provisioning import BundleIntent
 
                 bundle = BundleIntent(**repository.bundle.model_dump())
-                self.bundles.preflight(bundle)
+                imported = self.bundles.preflight(bundle)
+                if self.content_inventory is not None and self.bundles._local_refs(
+                    imported.destination
+                ) != expected_git_refs(self.content_inventory, repository.repository):
+                    raise OperationBlocked("Git bundle differs from portable inventory refs")
                 if self.admin.find_repository(repository.repository) is not None:
                     confirmed = any(
                         step["operation_type"] == "push_git_bundle"

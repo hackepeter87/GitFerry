@@ -151,6 +151,16 @@ def _object(
         if not isinstance(labels, list):
             raise SourceSnapshotError("issue labels are malformed")
         facts["label_ids"] = sorted(str(_id(label.get("id"), "issue label")) for label in labels)
+        milestone = value.get("milestone")
+        if milestone is not None and not isinstance(milestone, dict):
+            raise SourceSnapshotError("issue milestone is malformed")
+        facts["milestone_id"] = str(_id(milestone.get("id"), "milestone")) if milestone else None
+        assignees = value.get("assignees", []) or []
+        if not isinstance(assignees, list):
+            raise SourceSnapshotError("issue assignees are malformed")
+        facts["assignees"] = sorted(
+            (_user(user, "assignee") for user in assignees), key=lambda user: user["global_id"]
+        )
     return InventoryObject(
         key=identifier,
         namespace=namespace,
@@ -228,7 +238,12 @@ def _repository(
     def collect(key: str, call: Callable[[], ClassObservation]) -> None:
         observations[key] = _attempt(key, call)
 
-    collect("git_refs", lambda: _refs(reader, path))
+    if repo.get("empty") is True:
+        observations["git_refs"] = _observed(
+            "git_refs", [], ["Native Gitea empty=true; export separately rechecks Git refs"]
+        )
+    else:
+        collect("git_refs", lambda: _refs(reader, path))
     observations["lfs"] = _unknown(
         "lfs",
         "No REST LFS enumeration; pointer and object-store inspection remains required",
@@ -675,6 +690,8 @@ def _identities(
         for item in observations[name].objects:
             if item.author is not None:
                 add(item.author)
+            for assignee in item.facts.get("assignees", []):
+                add({"account_id": assignee["global_id"], "login": assignee["login"]})
     for team in observations["teams"].objects if "teams" in required else []:
         for member in team.facts["members"]:
             add({"account_id": member["global_id"], "login": member["login"]})
