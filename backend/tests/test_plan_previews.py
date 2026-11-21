@@ -14,6 +14,7 @@ import pytest
 from gitferry.operations import ExecutorBusy, OperationExecutor
 from gitferry.plan_diagnostics import PreflightBlocked, PreflightCheck
 from gitferry.plan_runner import BackgroundPlanWorker, PlanRunner
+from gitferry.state_migrations import SCHEMA_VERSION
 from gitferry.state_store import StateStore
 from gitferry.transfer_plans import PlanConflict, PlanService
 from test_plan_boundaries import _client
@@ -186,14 +187,16 @@ else: print(json.dumps(PlanRunner(s, lambda _: nullcontext(Adapter())).preview_n
 def test_schema_11_upgrade_preserves_existing_plan_and_operation(tmp_path):
     store, service, plan, _ = setup(tmp_path)
     with store.transaction() as c:
+        c.execute("DROP TABLE identity_decision_events")
+        c.execute("DROP TABLE identity_candidates")
         c.execute("DROP TABLE plan_previews")
-        c.execute("DELETE FROM schema_migrations WHERE version=12")
+        c.execute("DELETE FROM schema_migrations WHERE version>=12")
         c.execute("PRAGMA user_version=11")
     migrated = StateStore(store.path)
     assert PlanService(migrated).get(plan["plan_id"]) == plan
     assert migrated.get_operation("op-1").status == "prepared"
     with migrated.read_connection() as c:
-        assert c.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert c.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert c.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 

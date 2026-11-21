@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 from dataclasses import asdict
 from typing import Annotated, Any
@@ -15,7 +14,6 @@ from gitferry.connection_probe import LocalReferences
 from gitferry.connection_profiles import normalize_url
 from gitferry.package_admission import PackageAdmissionConflict, PackageAdmissions, _authority
 from gitferry.package_selection import _selector
-from gitferry.state_codec import canonical_json
 from gitferry.state_store import BindingConflict, OperationBlocked
 from gitferry.target_accounts import check_target_account
 from gitferry.transport_state import _check_endpoint
@@ -218,55 +216,74 @@ class PackageDecisions:
             "credential_checked": request.credential_ref is not None,
         }
 
-    def confirm_binding(self, package_ref: str, request: BindingRequest) -> dict[str, Any]:
+    def confirm_binding(
+        self, package_ref: str, request: BindingRequest, *, actor: str = "local-cli"
+    ) -> dict[str, Any]:
+        # Package-local approval and general identity administration share one journal.
+        # A new package ID must not bypass a rejected or conflicted local decision.
+        from gitferry.identity_application import (
+            CandidateRequest,
+            IdentityAction,
+            IdentityApplication,
+        )
+
         artifact = self._artifact(package_ref, request)
         selector = request.selector.model_dump()
-        if not any(item["selector"] == selector for item in _identities(artifact)):
+        selected = next(
+            (item for item in _identities(artifact) if item["selector"] == selector), None
+        )
+        if selected is None:
             raise PackageAdmissionConflict("identity is not selected by this package")
         self.state.get_realm(selector["realm_key"])
         observed = self.check_account(package_ref, request)
         if observed["target_account_id"] != request.target_account_id:
             raise PackageAdmissionConflict("target account differs from reviewed identity")
-        artifact = self._artifact(package_ref, request)
-        binding_id = (
-            "binding-"
-            + hashlib.sha256(
-                canonical_json(
-                    {"target": request.target_instance_key, "selector": selector}
-                ).encode()
-            ).hexdigest()[:48]
-        )
-        with self.state.transaction() as connection:
-            if self._authority(connection, artifact, request) != observed["authority_digest"]:
-                raise PackageAdmissionConflict("target approval changed before binding")
-            previous = connection.execute(
-                "SELECT * FROM identity_bindings WHERE source_realm_key=? AND source_login=? "
-                "AND source_external_id=? AND source_ou_path=? AND target_instance_key=?",
-                (
-                    selector["realm_key"],
-                    selector["login"],
-                    selector["external_id"],
-                    selector["ou_path"],
-                    request.target_instance_key,
-                ),
-            ).fetchone()
-            if previous:
-                if (
-                    str(previous["target_account_id"]) != request.target_account_id
-                    or previous["target_login"] != request.target_login
-                ):
-                    raise BindingConflict("existing identity binding must not be redirected")
-                binding_id = previous["binding_id"]
-            self.state.confirm_identity_binding(
-                binding_id=binding_id,
-                source_realm_key=selector["realm_key"],
-                source_login=selector["login"],
-                source_external_id=selector["external_id"],
-                source_ou_path=selector["ou_path"],
-                target_instance_key=request.target_instance_key,
-                target_account_id=int(request.target_account_id),
-                target_login=request.target_login,
-                mapping_version=previous["mapping_version"] if previous else 1,
-                connection=connection,
+        application = IdentityApplication(self.state, self.references)
+        # Prerequisite flags describe intended uses, not a second binding permission system.
+        prerequisites = {
+            "issue_author": "author" in selected["roles"],
+            "comment_author": "author" in selected["roles"],
+            "team_member": "member" in selected["roles"],
+        }
+        known = [
+            item
+            for item in application.decisions.list_candidates()
+            if item["selector"] == selector
+            and item["target"]["instance_key"] == request.target_instance_key
+            and item["target"]["account_id"] == request.target_account_id
+        ]
+        if known:
+            candidate = known[0]
+            if (
+                candidate["target"]["login"] != request.target_login
+                or candidate["authority_digest"] != observed["authority_digest"]
+                or candidate["profile_revision"] != request.profile_revision
+            ):
+                raise BindingConflict("candidate evidence changed; review identity administration")
+        else:
+            candidate = application.propose(
+                CandidateRequest(
+                    target_instance_key=request.target_instance_key,
+                    profile_revision=request.profile_revision,
+                    authority_digest=observed["authority_digest"],
+                    selector=request.selector,
+                    target_account_id=request.target_account_id,
+                    target_login=request.target_login,
+                    credential_ref=request.credential_ref,
+                    prerequisites=prerequisites,
+                )
             )
+        if candidate["status"] == "pending":
+            candidate = application.decide(
+                candidate["candidate_id"],
+                IdentityAction(
+                    expected_revision=candidate["revision"],
+                    decision="approved",
+                    profile_revision=request.profile_revision,
+                    credential_ref=request.credential_ref,
+                ),
+                actor=actor,
+            )
+        if candidate["status"] != "approved":
+            raise BindingConflict("local identity decision is unresolved; review it explicitly")
         return self.prerequisites(package_ref, request)

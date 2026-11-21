@@ -12,7 +12,14 @@ from typing import Any
 
 import httpx
 
-from gitferry import package_admission_cli, package_cli, plan_cli, profile_cli, source_export_cli
+from gitferry import (
+    identity_cli,
+    package_admission_cli,
+    package_cli,
+    plan_cli,
+    profile_cli,
+    source_export_cli,
+)
 from gitferry.auth import AuthError, AuthService
 from gitferry.blueprints import BlueprintValidationError, load_and_validate
 from gitferry.comment_operations import resolve_unknown_comment_operation
@@ -39,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_cli.configure(subparsers.add_parser("plans"), database_default)
     source_export_cli.configure(subparsers.add_parser("exports"), database_default)
     package_admission_cli.configure(subparsers.add_parser("intake"), database_default)
+    identity_cli.configure(subparsers.add_parser("identities"), database_default)
     validate = subparsers.add_parser("validate-blueprint")
     validate.add_argument("path", type=Path)
 
@@ -165,6 +173,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return plan_cli.execute(args)
     if args.command == "exports":
         return source_export_cli.execute(args)
+    if args.command == "identities":
+        return identity_cli.execute(args)
     if args.command == "intake":
         return package_admission_cli.execute(args)
     if args.command == "admin":

@@ -10,7 +10,12 @@ from fastapi import APIRouter, Depends, Request
 from starlette.concurrency import run_in_threadpool
 
 from gitferry.application_package import PackageError
-from gitferry.auth_api import AuthBoundaryError, AuthCookieSettings, admin_csrf_dependency
+from gitferry.auth_api import (
+    AuthBoundaryError,
+    AuthCookieSettings,
+    admin_csrf_dependency,
+    require_authenticated,
+)
 from gitferry.connection_probe import ConnectionUnavailable
 from gitferry.connection_profiles import ProfileConflict
 from gitferry.gitea_provisioning import ProvisioningTargetConflict
@@ -115,7 +120,9 @@ def create_package_decision_router(settings: AuthCookieSettings) -> APIRouter:
         return await run(
             request,
             lambda service, value: service.confirm_binding(
-                package_ref, BindingRequest.model_validate(value)
+                package_ref,
+                BindingRequest.model_validate(value),
+                actor=require_authenticated(request, settings).account_id,
             ),
         )
 
