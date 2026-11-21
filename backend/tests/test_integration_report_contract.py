@@ -99,6 +99,7 @@ def complete_probe_report() -> dict[str, object]:
         "directory_ad": {
             "status": "passed",
             "gitea": {
+                "status": "passed",
                 "assertions": dict.fromkeys(
                     (
                         "valid_login",
@@ -110,7 +111,7 @@ def complete_probe_report() -> dict[str, object]:
                         "native_alias_distinct",
                     ),
                     True,
-                )
+                ),
             },
             "client": "ldap3 2.9.1",
             "image_id": "sha256:synthetic",
@@ -846,3 +847,15 @@ def test_ad_gitea_login_evidence_cannot_be_missing(assertion: str) -> None:
     entries = report_contract().evidence_catalog(report, True)
     entry = next(item for item in entries if item["id"] == "separate_samba_ad_claim_qualification")
     assert entry["status"] != "passed"
+
+
+@pytest.mark.parametrize("status", [None, "failed", "blocked", "not-implemented"])
+def test_ad_gitea_failed_or_missing_status_cannot_pass(status: str | None) -> None:
+    report = complete_probe_report()
+    if status is None:
+        del report["directory_ad"]["gitea"]["status"]
+    else:
+        report["directory_ad"]["gitea"]["status"] = status
+    entries = report_contract().evidence_catalog(report, True)
+    entry = next(item for item in entries if item["id"] == "separate_samba_ad_claim_qualification")
+    assert entry["status"] == "failed"

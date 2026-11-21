@@ -331,6 +331,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
             "separate_samba_ad_claim_qualification",
             _value(report, "directory_ad.status") == "passed"
             and _value(report, "directory_ad.client") == "ldap3 2.9.1"
+            and _value(report, "directory_ad.gitea.status") == "passed"
             and _all_required_true(
                 report,
                 "directory_ad.gitea.assertions",

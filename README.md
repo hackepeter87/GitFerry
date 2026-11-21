@@ -2,7 +2,7 @@
 
 GitFerry is an open-source, platform-independent administration tool for controlled file-mediated
 Gitea-to-Gitea repository transport, including selected Gitea metadata and explicit identity
-mappings. The `0.2.0rc1` candidate provides the bounded desktop first-import workflow. It is not
+mappings. The `0.3.0rc1` candidate provides the bounded desktop first-import and explicit directory-mapping workflows. It is not
 a stable release or a complete implementation of later roadmap capabilities. The delivery plan is tracked in GitHub and the
 [release roadmap](docs/roadmap.md).
 
