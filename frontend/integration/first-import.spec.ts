@@ -194,7 +194,14 @@ test("phase2 confirms local decisions and previews the real first import", async
   const requiredBytes = savedPlans[0].document.required_bytes;
   expect(requiredBytes).toBeGreaterThan(64 * 1024 * 1024);
   await expect(plans.locator(".storage-estimate")).toHaveText(`${requiredBytes.toLocaleString()} bytes`);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const layout = await page.evaluate(() => ({
+    width: document.documentElement.scrollWidth, viewport: window.innerWidth,
+    overflow: [...document.querySelectorAll("body *")].map((element) => ({
+      tag: element.tagName, id: element.id, class: element.className,
+      right: element.getBoundingClientRect().right,
+    })).filter((element) => element.right > window.innerWidth).slice(0, 30),
+  }));
+  expect(layout.width, JSON.stringify(layout)).toBeLessThanOrEqual(layout.viewport);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   record({ storage_estimate_reviewed: true, preview_ready: true, review_missing_bindings: Boolean(missing && !missing.endsWith("None")),
     blocked_without_bindings: blocked });
