@@ -25,6 +25,11 @@ def test_ci_keeps_stable_required_check_contexts() -> None:
         step["run"] for step in jobs["quality"]["steps"] if isinstance(step, dict) and "run" in step
     ]
     assert quality_commands == [
+        "python scripts/check_python.py\n"
+        "python -m venv /tmp/gitferry-minimum-python\n"
+        "/tmp/gitferry-minimum-python/bin/pip install --disable-pip-version-check '.[dev]'\n"
+        "/tmp/gitferry-minimum-python/bin/pip check\n"
+        "PYTHONPATH=backend/src /tmp/gitferry-minimum-python/bin/pytest backend/tests -q\n",
         "make setup",
         "cd frontend && npx playwright install --with-deps chromium",
         "make doctor",

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -18,7 +18,7 @@ from gitferry.state_store import StateStore
 
 class Clock:
     def __init__(self) -> None:
-        self.value = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)
+        self.value = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
 
     def __call__(self) -> datetime:
         return self.value

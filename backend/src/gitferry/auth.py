@@ -10,7 +10,7 @@ import sqlite3
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from gitferry.state_store import StateStore
@@ -104,20 +104,20 @@ class _PasswordRecord:
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _timestamp(value: datetime) -> str:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("authentication clock must return a timezone-aware datetime")
-    return value.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    return value.astimezone(UTC).isoformat(timespec="microseconds")
 
 
 def _parse_timestamp(value: str) -> datetime:
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise SessionDenied("session is not valid")
-    return parsed.astimezone(timezone.utc)
+    return parsed.astimezone(UTC)
 
 
 def _normalize_username(value: str, *, strict: bool) -> str:
@@ -458,7 +458,7 @@ class AuthService:
         if row is None:
             return 0
         started = _parse_timestamp(str(row["window_started_at"]))
-        if now.astimezone(timezone.utc) - started >= LOGIN_WINDOW:
+        if now.astimezone(UTC) - started >= LOGIN_WINDOW:
             connection.execute("DELETE FROM auth_login_limits WHERE key_hash = ?", (rate_key,))
             return 0
         return int(row["failures"])
@@ -487,7 +487,7 @@ class AuthService:
         if (
             row["revoked_at"] is not None
             or row["disabled_at"] is not None
-            or _parse_timestamp(str(row["expires_at"])) <= now.astimezone(timezone.utc)
+            or _parse_timestamp(str(row["expires_at"])) <= now.astimezone(UTC)
             or not hmac.compare_digest(_token_hash(verifier), bytes(row["verifier_hash"]))
         ):
             raise SessionDenied("session is not valid")

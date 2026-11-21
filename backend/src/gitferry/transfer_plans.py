@@ -234,7 +234,7 @@ class PlanService:
         )
         if len(steps) != len(document["operations"]) or any(
             {"operation_id": step["operation_id"], **json.loads(step["snapshot_json"])} != expected
-            for step, expected in zip(steps, document["operations"])
+            for step, expected in zip(steps, document["operations"], strict=False)
         ):
             raise PlanConflict("plan step references do not match the immutable document")
         ops = [

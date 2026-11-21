@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -248,7 +248,7 @@ def header(manifest_id: str, sender: str, recipient: str, mode: str) -> dict[str
             "context": f"isolated GitFerry {recipient} state",
         },
         "mode": mode,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "deletion_semantics": "absence-does-not-delete",
         "selected_repositories": [
             {
@@ -355,7 +355,7 @@ def seed_forward(state: StateStore) -> dict[str, Any]:
         origin_created_at=issue["created_at"],
         target_native_created_at=issue["created_at"],
     )
-    for index, (origin, value) in enumerate(zip(origins, comments)):
+    for index, (origin, value) in enumerate(zip(origins, comments, strict=False)):
         body = {"body": value["body"]}
         state.create_baseline(
             baseline_id=f"comments-a-{index}",
@@ -384,7 +384,7 @@ def seed_forward(state: StateStore) -> dict[str, Any]:
             baseline={"body": value["body"]},
             confirmed=None,
         )
-        for origin, value in zip(origins, comments)
+        for origin, value in zip(origins, comments, strict=False)
     ]
     artifact = write_transport(FORWARD_OUT, document)
     report = record_export(state, artifact, local_instance_key=INSTANCE_A)
@@ -719,7 +719,7 @@ def repackage_return(state: StateStore) -> dict[str, Any]:
     document = {
         **original.document,
         "manifest_id": "comments-v2-return-repackaged",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
     artifact = write_transport(Path("/state/outbox/comments-repackaged"), document)
     report = record_export(state, artifact, local_instance_key=INSTANCE_B)
@@ -732,7 +732,7 @@ def repackage_return(state: StateStore) -> dict[str, Any]:
 
 def preflight_return(state: StateStore, artifact: Any, report: Any) -> list[str]:
     drift = []
-    for item, origin_id in zip(artifact.document["objects"], report.origin_ids):
+    for item, origin_id in zip(artifact.document["objects"], report.origin_ids, strict=False):
         if (
             item["origin"]["object_type"] != "issue_comment"
             or item["origin"]["instance_key"] != INSTANCE_A
@@ -767,7 +767,7 @@ def apply_return(state: StateStore) -> tuple[int, dict[str, Any]]:
     drift = preflight_return(state, artifact, report)
     if drift:
         return 5, {"status": "blocked", "drift_origins": drift, "admission": report.status}
-    pairs = list(zip(artifact.document["objects"], report.origin_ids))
+    pairs = list(zip(artifact.document["objects"], report.origin_ids, strict=False))
     outcomes: list[dict[str, Any]] = []
     for item, origin_id in pairs:
         if item["origin"]["object_type"] != "issue":

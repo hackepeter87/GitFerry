@@ -79,7 +79,7 @@ def matrix_rows() -> list[dict[str, str]]:
             break
         cells = [cell.strip() for cell in line.strip("|").split("|")]
         assert len(cells) == len(headers), line
-        rows.append(dict(zip(headers, cells)))
+        rows.append(dict(zip(headers, cells, strict=False)))
     return rows
 
 
