@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
+from browser_tunnel import browser_tunnel
 from connection_profile_probe import certificate
 from gitferry.application_package import inspect_package
 from gitferry.package_archive import receive_package_archive
 from support import (
     ADMIN,
+    COMPOSE,
     PACKAGE,
     SOURCE_URL,
     WORK,
@@ -45,12 +51,18 @@ ASSERTIONS = frozenset(
         "api_restart_replay_no_source_access",
         "target_upload_files_only_before_local_setup",
         "target_upload_replay_persistent_identity",
+        "guided_browser_first_import",
+        "guided_browser_restart_read_only",
     }
 )
 
 TARGET_REPLAY_PROGRAM = """from pathlib import Path
 import hashlib
 import json
+import os
+import re
+import shutil
+import subprocess
 import urllib.error
 import urllib.request
 from gitferry.package_archive import receive_package_archive
@@ -100,6 +112,39 @@ def _target_worker(mode: str) -> dict[str, Any]:
     if result.returncode:
         raise ProbeFailure(f"package admission worker {mode} failed with exit {result.returncode}")
     return json.loads(result.stdout)
+
+
+def _run_browser(archive: Path, phase: str, base_url: str) -> dict[str, Any]:
+    evidence = WORK / f"browser-{phase}.json"
+    environment = {
+        **os.environ,
+        "GITFERRY_INTEGRATION_ARCHIVE": str(archive),
+        "GITFERRY_INTEGRATION_EVIDENCE": str(evidence),
+        "GITFERRY_INTEGRATION_APP_URL": base_url,
+        "GITFERRY_INTEGRATION_BROWSER_OUTPUT": str(WORK / ("browser-" + phase)),
+    }
+    with (WORK / f"browser-{phase}.log").open("wb") as log:
+        result = subprocess.run(  # noqa: S603
+            [
+                shutil.which("npx") or "/usr/bin/npx",
+                "playwright",
+                "test",
+                "--config=playwright.integration.config.ts",
+                "--grep",
+                phase,
+            ],
+            cwd=Path(__file__).parents[2] / "frontend",
+            env=environment,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            timeout=180,
+        )
+    if result.returncode or not evidence.is_file():
+        raise ProbeFailure("real first-import browser phase failed: " + phase)
+    value = json.loads(evidence.read_text())
+    if value.get("status") != "passed":
+        raise ProbeFailure("missing first-import browser evidence: " + phase)
+    return value
 
 
 def run_source_export_probe() -> dict[str, Any]:
@@ -155,7 +200,46 @@ def run_source_export_probe() -> dict[str, Any]:
     if target_probe.returncode:
         raise ProbeFailure("target-only archive verification failed")
     target_details = json.loads(target_probe.stdout)
-    target_package = _target_worker("initial")
+    setup = _target_worker("prepare-browser")
+    if (
+        any(setup["counts"].values())
+        or not setup["target_only"]
+        or not setup["external_unreachable"]
+    ):
+        raise ProbeFailure(
+            "browser setup contains unauthorized application facts or network access"
+        )
+    _target_worker("start-browser")
+    try:
+        with browser_tunnel(COMPOSE) as base_url:
+            uploaded = _run_browser(archive_host, "phase1", base_url)
+            _target_worker("browser-upload")
+            browser = _run_browser(archive_host, "phase2", base_url)
+        docker_copy(
+            WORK / "browser-phase2.json",
+            "gitferry-b:/state/package-admission/browser-evidence.json",
+        )
+        target_package = _target_worker("browser-result")
+    finally:
+        try:
+            docker_copy(
+                "gitferry-b:/state/package-admission/browser-server.log",
+                WORK / "browser-server.log",
+            )
+        finally:
+            _target_worker("stop-browser")
+    _target_worker("start-browser")
+    try:
+        with browser_tunnel(COMPOSE) as base_url:
+            restart = _run_browser(archive_host, "phase3", base_url)
+    finally:
+        try:
+            docker_copy(
+                "gitferry-b:/state/package-admission/browser-server.log",
+                WORK / "browser-server.log",
+            )
+        finally:
+            _target_worker("stop-browser")
     target_replay = _target_worker("replay")
     # Keep bounded, credential-free comparison facts before the runner cleans up
     # the isolated instances, including when a later assertion fails.
@@ -267,7 +351,13 @@ def run_source_export_probe() -> dict[str, Any]:
         ),
         "target_upload_files_only_before_local_setup": (
             target_package["upload"]["status"] == "ready"
-            and target_package["upload"]["package_ref"] == "source-export-real"
+            and bool(
+                re.fullmatch(
+                    r"upload-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+                    target_package["upload"]["package_ref"],
+                )
+            )
+            and target_package["upload"]["package_ref"] == uploaded["upload_id"]
             and target_package["upload"]["resumed_status"] == "ready"
             and target_package["upload"]["counts_unchanged"]
         ),
@@ -279,6 +369,12 @@ def run_source_export_probe() -> dict[str, Any]:
             and target_replay["upload_counts_unchanged"]
         ),
     }
+    assertions["guided_browser_first_import"] = (
+        browser["status"] == "passed" and browser["confirmed"]
+    )
+    assertions["guided_browser_restart_read_only"] = (
+        restart["status"] == "passed" and restart["read_only"]
+    )
     if set(assertions) != ASSERTIONS or not all(assertions.values()):
         raise ProbeFailure(f"Source export assertions failed: {assertions}")
     return {

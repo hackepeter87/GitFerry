@@ -6,6 +6,8 @@ import ConnectionsPanel from "./ConnectionsPanel.vue";
 import PlansPanel from "./PlansPanel.vue";
 import PackageUploadsPanel from "./PackageUploadsPanel.vue";
 import SourceSelectionPanel from "./SourceSelectionPanel.vue";
+import PackageAdmissionPanel from "./PackageAdmissionPanel.vue";
+import type { PackageUpload, TransferPlan } from "./api";
 
 type View = "loading" | "bootstrap" | "login" | "admin" | "unavailable";
 
@@ -17,6 +19,8 @@ const message = ref("");
 const submitting = ref(false);
 const usernameInput = ref<HTMLInputElement>();
 const passwordInput = ref<HTMLInputElement>();
+const selectedPackage = ref<PackageUpload>();
+const preparedPlan = ref<TransferPlan>();
 
 onMounted(initialize);
 
@@ -126,6 +130,9 @@ function handlePanelSessionExpired(): void {
   view.value = "login";
   message.value = "Your session expired or was revoked. Sign in again.";
 }
+
+function handleSelectedPackage(upload?: PackageUpload): void { selectedPackage.value = upload; }
+function handlePreparedPlan(plan: TransferPlan): void { preparedPlan.value = plan; }
 </script>
 
 <template>
@@ -191,8 +198,9 @@ function handlePanelSessionExpired(): void {
       </div>
       <ConnectionsPanel @session-expired="handlePanelSessionExpired" />
       <SourceSelectionPanel @session-expired="handlePanelSessionExpired" />
-      <PackageUploadsPanel @session-expired="handlePanelSessionExpired" />
-      <PlansPanel @session-expired="handlePanelSessionExpired" />
+      <PackageUploadsPanel @session-expired="handlePanelSessionExpired" @selected-package="handleSelectedPackage" />
+      <PackageAdmissionPanel :upload="selectedPackage" @session-expired="handlePanelSessionExpired" @prepared-plan="handlePreparedPlan" />
+      <PlansPanel :prepared-plan="preparedPlan" @session-expired="handlePanelSessionExpired" />
     </section>
 
     <section v-else class="panel panel-narrow" aria-labelledby="unavailable-title">

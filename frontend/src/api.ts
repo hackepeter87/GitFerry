@@ -167,6 +167,72 @@ export interface PackageUpload {
   summary: PackageUploadSummary | null;
 }
 
+export interface PackageAdmissionBase {
+  target_instance_key: string;
+  profile_revision: number;
+}
+export interface PackageAdmissionPrerequisite {
+  package_id: string;
+  digest_sha256: string;
+  target_instance_key: string;
+  profile_revision: number;
+  sender: { instance_key: string; installation_marker: string; registered: boolean };
+  realms: Array<{ realm_key: string; display_name: string; external_marker: string; registered: boolean }>;
+  identities: Array<{
+    selector: { realm_key: string; login: string; external_id: string; ou_path: string | null };
+    roles: string[];
+    binding: { binding_id: string; target_login: string; target_account_id: string; mapping_version: number } | null;
+  }>;
+  repositories: string[];
+  bundle_bytes: number;
+  metadata_present: boolean;
+  limitations: string[];
+}
+
+export interface PackagePlanReview {
+  digest_sha256: string;
+  target_instance_key: string;
+  profile_revision: number;
+  review_digest: string;
+  selection: {
+    request: Record<string, unknown>;
+    missing_bindings: string[];
+    missing_credentials: string[];
+    waiting_parents: string[];
+    blocked_operations: string[];
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+export function packageAdmissionPrerequisites(packageRef: string, value: PackageAdmissionBase): Promise<PackageAdmissionPrerequisite> {
+  return request(`/api/v1/packages/${encodeURIComponent(packageRef)}/prerequisites`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+}
+export function confirmPackageSender(packageRef: string, value: PackageAdmissionBase & { expected_digest: string; display_name: string; base_url: string }): Promise<PackageAdmissionPrerequisite> {
+  return request(`/api/v1/packages/${encodeURIComponent(packageRef)}/confirm-sender`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+}
+export function confirmPackageRealm(packageRef: string, value: PackageAdmissionBase & { expected_digest: string; realm_key: string; display_name: string; external_marker: string }): Promise<PackageAdmissionPrerequisite> {
+  return request(`/api/v1/packages/${encodeURIComponent(packageRef)}/confirm-realm`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+}
+export function checkPackageAccount(packageRef: string, value: PackageAdmissionBase & { expected_digest: string; target_login: string; credential_ref: string | null }): Promise<{ target_login: string; target_account_id: string; credential_checked: boolean }> {
+  return request(`/api/v1/packages/${encodeURIComponent(packageRef)}/check-account`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+}
+export function confirmPackageBinding(packageRef: string, value: PackageAdmissionBase & { expected_digest: string; selector: PackageAdmissionPrerequisite["identities"][number]["selector"]; target_login: string; target_account_id: string; credential_ref: string | null }): Promise<PackageAdmissionPrerequisite> {
+  return request(`/api/v1/packages/${encodeURIComponent(packageRef)}/confirm-binding`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+}
+export function reviewPackage(packageRef: string, value: PackageAdmissionBase): Promise<Record<string, unknown>> {
+  return request(`/api/v1/packages/${encodeURIComponent(packageRef)}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+}
+export function admitPackage(packageRef: string, value: PackageAdmissionBase & { expected_digest: string }): Promise<Record<string, unknown>> {
+  return request(`/api/v1/packages/${encodeURIComponent(packageRef)}/admit`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+}
+export function reviewPackagePlan(packageRef: string, value: PackageAdmissionBase & { include_metadata: boolean; apply_members: boolean; author_credential_refs: Record<string, string> }): Promise<PackagePlanReview> {
+  return request(`/api/v1/packages/${encodeURIComponent(packageRef)}/plan-review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+}
+export function preparePackagePlan(packageRef: string, value: PackageAdmissionBase & { expected_review_digest: string; include_metadata: boolean; apply_members: boolean; author_credential_refs: Record<string, string> }): Promise<TransferPlan> {
+  return request(`/api/v1/packages/${encodeURIComponent(packageRef)}/prepare-plan`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,

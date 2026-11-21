@@ -297,6 +297,8 @@ class StateStore:
         display_name: str,
         base_url: str,
         installation_marker: str,
+        *,
+        connection: sqlite3.Connection | None = None,
     ) -> InstanceRegistration:
         for field, value in (
             ("instance_key", instance_key),
@@ -305,21 +307,35 @@ class StateStore:
             ("installation_marker", installation_marker),
         ):
             _require_text(value, field)
-        connection = self._connect()
+        owned = connection is None
+        connection = connection or self._connect()
         try:
             connection.execute(
                 "INSERT INTO instances VALUES (?, ?, ?, ?, ?)",
                 (instance_key, display_name, base_url, installation_marker, _now()),
             )
         except sqlite3.IntegrityError:
-            existing = self.get_instance(instance_key)
+            row = connection.execute(
+                "SELECT * FROM instances WHERE instance_key=?", (instance_key,)
+            ).fetchone()
+            if row is None:
+                raise StateStoreError(
+                    "instance registration conflicts with another installation"
+                ) from None
+            existing = InstanceRegistration(
+                row["instance_key"],
+                row["display_name"],
+                row["base_url"],
+                row["installation_marker"],
+            )
             if existing != InstanceRegistration(
                 instance_key, display_name, base_url, installation_marker
             ):
                 raise StateStoreError("instance registration must not be redirected") from None
         finally:
-            connection.close()
-        return self.get_instance(instance_key)
+            if owned:
+                connection.close()
+        return InstanceRegistration(instance_key, display_name, base_url, installation_marker)
 
     def get_instance(self, instance_key: str) -> InstanceRegistration:
         row = self._one("SELECT * FROM instances WHERE instance_key = ?", (instance_key,))
@@ -328,7 +344,12 @@ class StateStore:
         )
 
     def register_realm(
-        self, realm_key: str, display_name: str, external_marker: str
+        self,
+        realm_key: str,
+        display_name: str,
+        external_marker: str,
+        *,
+        connection: sqlite3.Connection | None = None,
     ) -> RealmRegistration:
         for field, value in (
             ("realm_key", realm_key),
@@ -336,19 +357,28 @@ class StateStore:
             ("external_marker", external_marker),
         ):
             _require_text(value, field)
-        connection = self._connect()
+        owned = connection is None
+        connection = connection or self._connect()
         try:
             connection.execute(
                 "INSERT INTO realms VALUES (?, ?, ?, ?)",
                 (realm_key, display_name, external_marker, _now()),
             )
         except sqlite3.IntegrityError:
-            existing = self.get_realm(realm_key)
+            row = connection.execute(
+                "SELECT * FROM realms WHERE realm_key=?", (realm_key,)
+            ).fetchone()
+            if row is None:
+                raise StateStoreError("realm marker is already registered") from None
+            existing = RealmRegistration(
+                row["realm_key"], row["display_name"], row["external_marker"]
+            )
             if existing != RealmRegistration(realm_key, display_name, external_marker):
                 raise StateStoreError("realm registration must not be redirected") from None
         finally:
-            connection.close()
-        return self.get_realm(realm_key)
+            if owned:
+                connection.close()
+        return RealmRegistration(realm_key, display_name, external_marker)
 
     def get_realm(self, realm_key: str) -> RealmRegistration:
         row = self._one("SELECT * FROM realms WHERE realm_key = ?", (realm_key,))
@@ -366,6 +396,7 @@ class StateStore:
         target_account_id: int,
         target_login: str,
         mapping_version: int,
+        connection: sqlite3.Connection | None = None,
     ) -> IdentityBindingRecord:
         expected = IdentityBindingRecord(
             binding_id,
@@ -378,7 +409,8 @@ class StateStore:
             target_login,
             mapping_version,
         )
-        connection = self._connect()
+        owned = connection is None
+        connection = connection or self._connect()
         try:
             connection.execute(
                 "INSERT INTO identity_bindings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -413,8 +445,9 @@ class StateStore:
                 raise BindingConflict("target account is already bound") from None
             raise BindingConflict("external identity is already bound for this target") from None
         finally:
-            connection.close()
-        return self.get_identity_binding(expected.binding_id)
+            if owned:
+                connection.close()
+        return expected
 
     def get_identity_binding(self, binding_id: str) -> IdentityBindingRecord:
         return self._binding(

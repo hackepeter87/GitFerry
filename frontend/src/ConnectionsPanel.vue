@@ -144,7 +144,7 @@ function handleError(cause: unknown, fallback: string): void { if (cause instanc
 
 <template>
   <section class="connections-panel" aria-labelledby="connections-title">
-    <div class="connections-heading"><div><p class="kicker">Transport endpoints</p><h2 id="connections-title">Connections</h2><p class="supporting">Store endpoint details and references to locally mounted credentials. Only non-secret reference aliases are stored in GitFerry.</p></div><div class="actions"><button type="button" @click="downloadExport">Export</button><button type="button" @click="chooseImport">Import</button><input ref="importInput" class="visually-hidden" type="file" accept="application/json,.json" @change="readImport"></div></div>
+    <div class="connections-heading"><div><p class="kicker">Transport endpoints</p><h2 id="connections-title">Connections</h2><p class="supporting">Store endpoint details and references to locally mounted credentials. Only non-secret reference aliases are stored in GitFerry.</p></div><div class="actions"><button type="button" @click="downloadExport">Export</button><button type="button" @click="chooseImport">Import</button><input ref="importInput" class="visually-hidden" aria-label="Connection configuration file" tabindex="-1" type="file" accept="application/json,.json" @change="readImport"></div></div>
     <p v-if="error" class="alert" role="alert">{{ error }}</p><p v-if="notice" class="notice" role="status">{{ notice }}</p>
     <p v-if="loading" class="status-line" aria-live="polite">Loading connections…</p>
     <p v-else-if="!profiles.length" class="empty">No connections yet. Add one below.</p>

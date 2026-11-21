@@ -1,6 +1,6 @@
 # ADR 0017: Durable package upload receipt
 
-Status: proposed under [Issue #10](https://github.com/hackepeter87/GitFerry/issues/10).
+Status: accepted through [PR #56](https://github.com/hackepeter87/GitFerry/pull/56).
 
 ## Context
 

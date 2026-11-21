@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { ApiError, getPackageUpload, listPackageUploads, resumePackageUpload, uploadPackageArchive, type PackageUpload } from "./api";
 
-const emit = defineEmits<{ (event: "session-expired"): void }>();
+const emit = defineEmits<{ (event: "session-expired"): void; (event: "selected-package", upload?: PackageUpload): void }>();
 const uploads = ref<PackageUpload[]>([]);
 const selected = ref<PackageUpload>();
 const file = ref<File>();
@@ -60,7 +60,7 @@ async function submit(): Promise<void> {
   try {
     const value = await uploadPackageArchive(pendingId.value, file.value);
     if (disposed) return;
-    replace(value); selected.value = value;
+    replace(value); selected.value = value; emit("selected-package", value);
     try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* Optional browser recovery state. */ }
     pendingId.value = ""; file.value = undefined; pendingMeta.value = undefined; if (fileInput.value) fileInput.value.value = "";
     notice.value = value.status === "ready" ? "Package received and validated. Review its scope below." : "Package received. Check its validation status below.";
@@ -70,11 +70,11 @@ async function submit(): Promise<void> {
 
 async function inspect(upload: PackageUpload): Promise<void> {
   const request = ++detailRequest;
-  selected.value = upload; error.value = "";
+  selected.value = upload; emit("selected-package", upload); error.value = "";
   try {
     const value = await getPackageUpload(upload.upload_id);
     if (disposed || request !== detailRequest) return;
-    selected.value = value; replace(value);
+    selected.value = value; replace(value); emit("selected-package", value);
   } catch (cause) { if (!disposed && request === detailRequest) handleError(cause, "Package details could not be loaded."); }
 }
 
@@ -85,7 +85,7 @@ async function resume(): Promise<void> {
   try {
     const value = await resumePackageUpload(selected.value.upload_id);
     if (disposed || request !== detailRequest) return;
-    selected.value = value; replace(value);
+    selected.value = value; replace(value); emit("selected-package", value);
     notice.value = value.status === "ready" ? "Package validation completed. Review its scope below." : "Validation checked. Review the current status below.";
   } catch (cause) { if (!disposed && request === detailRequest) handleError(cause, "Validation could not be resumed."); }
   finally { busy.value = false; }
