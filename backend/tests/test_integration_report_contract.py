@@ -138,6 +138,29 @@ def complete_probe_report() -> dict[str, object]:
         },
         "source_exports": {
             "status": "passed",
+            "ad_identity_recovery": {
+                "status": "passed",
+                "assertions": dict.fromkeys(
+                    (
+                        "missing_mail_binding_approved",
+                        "native_account_login_without_implicit_rights",
+                        "outage_blocks_without_rebinding",
+                        "ad_group_change_persists_conflict",
+                        "restored_groups_need_explicit_review",
+                        "disabled_subject_blocks",
+                        "enabled_subject_needs_explicit_review",
+                        "same_login_new_sid_blocks",
+                        "sid_conflict_survives_restart_and_review",
+                        "binding_unchanged",
+                        "no_mapped_writes",
+                    ),
+                    True,
+                ),
+                "recreated": {
+                    "before": {"sid": "S-1-5-21-1", "dn": "CN=synthetic", "login": "synthetic"},
+                    "after": {"sid": "S-1-5-21-2", "dn": "CN=synthetic", "login": "synthetic"},
+                },
+            },
             "image_id": "sha256:" + "a" * 64,
             "assertions": dict.fromkeys(
                 (
@@ -171,6 +194,7 @@ def complete_probe_report() -> dict[str, object]:
                     "guided_browser_restart_read_only",
                     "directory_equal_login_realms_explicit_bindings",
                     "directory_claim_drift_restart_blocked",
+                    "directory_ad_identity_drift_restart_blocked",
                     "directory_outage_blocks_without_rebinding",
                     "directory_group_drift_requires_review",
                     "directory_conflict_desktop_recovery",
@@ -681,6 +705,7 @@ def test_application_plan_assertion_is_required(tmp_path: Path, assertion: str) 
         "guided_browser_restart_read_only",
         "directory_equal_login_realms_explicit_bindings",
         "directory_claim_drift_restart_blocked",
+        "directory_ad_identity_drift_restart_blocked",
         "directory_outage_blocks_without_rebinding",
         "directory_group_drift_requires_review",
         "directory_conflict_desktop_recovery",
@@ -856,6 +881,53 @@ def test_ad_gitea_failed_or_missing_status_cannot_pass(status: str | None) -> No
         del report["directory_ad"]["gitea"]["status"]
     else:
         report["directory_ad"]["gitea"]["status"] = status
+    entries = report_contract().evidence_catalog(report, True)
+    entry = next(item for item in entries if item["id"] == "separate_samba_ad_claim_qualification")
+    assert entry["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "assertion",
+    (
+        "missing_mail_binding_approved",
+        "native_account_login_without_implicit_rights",
+        "outage_blocks_without_rebinding",
+        "ad_group_change_persists_conflict",
+        "restored_groups_need_explicit_review",
+        "disabled_subject_blocks",
+        "enabled_subject_needs_explicit_review",
+        "same_login_new_sid_blocks",
+        "sid_conflict_survives_restart_and_review",
+        "binding_unchanged",
+        "no_mapped_writes",
+    ),
+)
+def test_ad_identity_recovery_requires_every_assertion(assertion: str) -> None:
+    report = complete_probe_report()
+    del report["source_exports"]["ad_identity_recovery"]["assertions"][assertion]
+    entries = report_contract().evidence_catalog(report, True)
+    entry = next(item for item in entries if item["id"] == "separate_samba_ad_claim_qualification")
+    assert entry["status"] == "failed"
+
+
+@pytest.mark.parametrize("side", ["before", "after"])
+@pytest.mark.parametrize("field", ["sid", "dn", "login"])
+def test_ad_recreation_requires_observed_facts(side: str, field: str) -> None:
+    report = complete_probe_report()
+    del report["source_exports"]["ad_identity_recovery"]["recreated"][side][field]
+    entries = report_contract().evidence_catalog(report, True)
+    entry = next(item for item in entries if item["id"] == "separate_samba_ad_claim_qualification")
+    assert entry["status"] == "failed"
+
+
+@pytest.mark.parametrize("status", [None, "failed", "blocked", "not-implemented"])
+def test_ad_recovery_failed_or_missing_status_cannot_pass(status: str | None) -> None:
+    report = complete_probe_report()
+    evidence = report["source_exports"]["ad_identity_recovery"]
+    if status is None:
+        del evidence["status"]
+    else:
+        evidence["status"] = status
     entries = report_contract().evidence_catalog(report, True)
     entry = next(item for item in entries if item["id"] == "separate_samba_ad_claim_qualification")
     assert entry["status"] == "failed"

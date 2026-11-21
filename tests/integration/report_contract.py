@@ -332,6 +332,40 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
             _value(report, "directory_ad.status") == "passed"
             and _value(report, "directory_ad.client") == "ldap3 2.9.1"
             and _value(report, "directory_ad.gitea.status") == "passed"
+            and _value(report, "source_exports.ad_identity_recovery.status") == "passed"
+            and _all_required_true(
+                report,
+                "source_exports.ad_identity_recovery.assertions",
+                frozenset(
+                    (
+                        "missing_mail_binding_approved",
+                        "native_account_login_without_implicit_rights",
+                        "outage_blocks_without_rebinding",
+                        "ad_group_change_persists_conflict",
+                        "restored_groups_need_explicit_review",
+                        "disabled_subject_blocks",
+                        "enabled_subject_needs_explicit_review",
+                        "same_login_new_sid_blocks",
+                        "sid_conflict_survives_restart_and_review",
+                        "binding_unchanged",
+                        "no_mapped_writes",
+                    )
+                ),
+            )
+            and all(
+                isinstance(value, str) and bool(value)
+                for side in ("before", "after")
+                for field in ("sid", "dn", "login")
+                for value in (
+                    _value(report, f"source_exports.ad_identity_recovery.recreated.{side}.{field}"),
+                )
+            )
+            and _value(report, "source_exports.ad_identity_recovery.recreated.before.login")
+            == _value(report, "source_exports.ad_identity_recovery.recreated.after.login")
+            and _value(report, "source_exports.ad_identity_recovery.recreated.before.sid")
+            != _value(report, "source_exports.ad_identity_recovery.recreated.after.sid")
+            and _value(report, "source_exports.ad_identity_recovery.recreated.before.dn")
+            == _value(report, "source_exports.ad_identity_recovery.recreated.after.dn")
             and _all_required_true(
                 report,
                 "directory_ad.gitea.assertions",
@@ -510,6 +544,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                         "guided_browser_restart_read_only",
                         "directory_equal_login_realms_explicit_bindings",
                         "directory_claim_drift_restart_blocked",
+                        "directory_ad_identity_drift_restart_blocked",
                         "directory_outage_blocks_without_rebinding",
                         "directory_group_drift_requires_review",
                         "directory_conflict_desktop_recovery",

@@ -805,7 +805,7 @@ qualifies the server response only; the product does not expand transitive group
 use an explicit OU base because referrals are intentionally rejected.
 
 This is Samba AD-compatible evidence, not Windows Server AD, trust/replication, Kerberos client
-or Gitea AD-authentication qualification. `tests/integration/ad/run.sh` is the focused diagnostic
+qualification of every Gitea AD deployment. `tests/integration/ad/run.sh` is the focused diagnostic
 entry; common report assertions and scoped cleanup remain mandatory for delivery.
 
 
@@ -824,3 +824,18 @@ Samba qualification independently checks actual Gitea login and source-linked al
 including a directory account without mail and denied disabled/wrong-password attempts. Its public
 CA is appended to the isolated target trust volume without replacing the OpenLDAP CA. Technical
 administration remains separate; no database is edited. Field-level limits are in `directories.md`.
+
+
+The target-local `ad_identity_probe.py` uses the same identity services and SQLite state as the
+application. It explicitly approves a source-qualified claim against a real Samba SID and native
+Gitea alias, without granting repository rights. Fresh worker processes check directory outage,
+direct-group changes, disabled accounts, and explicit review after restored facts. Deleting and
+recreating the synthetic LDAP object at the same DN/login obtains a server-assigned new SID;
+GitFerry must retain the original binding and conflict even when Gitea still authenticates the
+same native alias. Reopen cannot authorize that identity replacement. The common report requires
+all recovery assertions and records the before/after SID, DN and local decision states. LDAP writes
+are fixture administration over verified LDAPS, not direct database manipulation.
+
+These checks qualify AD-compatible binding preflight and recovery. The complete desktop
+provisioning/rights workflow remains separately OpenLDAP-qualified. A passed blocking test leaves
+the changed-SID operation unresolved; it does not report that identity as migrated.
