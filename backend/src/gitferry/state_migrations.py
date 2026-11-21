@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -630,5 +630,43 @@ CREATE TABLE source_inventory_jobs (
     CHECK (status NOT IN ('queued','running') OR document_json IS NULL)
 );
 CREATE INDEX source_inventory_jobs_status ON source_inventory_jobs(status, created_at);
+""",
+    17: """
+CREATE TABLE operations_backup AS SELECT * FROM operations;
+DROP TABLE operations;
+
+CREATE TABLE operations (
+    operation_id TEXT PRIMARY KEY,
+    origin_id TEXT NOT NULL REFERENCES object_origins(origin_id),
+    target_instance_key TEXT NOT NULL REFERENCES instances(instance_key),
+    target_repository_scope TEXT NOT NULL,
+    operation_type TEXT NOT NULL CHECK (
+        operation_type IN (
+            'create_issue', 'create_comment', 'update_issue', 'update_comment',
+            'create_organization', 'create_team', 'create_repository',
+            'assign_team_repository', 'add_team_member', 'push_git_bundle',
+            'upload_lfs_object', 'bootstrap_wiki', 'push_wiki_bundle'
+        )
+    ),
+    mapping_version INTEGER NOT NULL CHECK (mapping_version > 0),
+    baseline_id TEXT REFERENCES baselines(baseline_id),
+    intent_json TEXT NOT NULL,
+    intent_hash TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN (
+            'prepared', 'blocked_parent', 'executing', 'outcome_unknown',
+            'confirmed', 'conflict', 'failed'
+        )
+    ),
+    executor_id TEXT,
+    target_global_id TEXT,
+    target_issue_index INTEGER,
+    error_reason TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+INSERT INTO operations SELECT * FROM operations_backup;
+DROP TABLE operations_backup;
 """,
 }

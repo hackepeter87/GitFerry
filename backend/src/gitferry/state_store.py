@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 import uuid
 from collections.abc import Iterator, Mapping
@@ -76,6 +77,9 @@ _MAPPING_PRESERVING_OPERATION_TYPES = frozenset(
         "assign_team_repository",
         "add_team_member",
         "push_git_bundle",
+        "upload_lfs_object",
+        "bootstrap_wiki",
+        "push_wiki_bundle",
     }
 )
 
@@ -92,7 +96,7 @@ SchemaSignature = tuple[
 
 def _apply_migrations(connection: sqlite3.Connection, current: int) -> None:
     for version in range(current + 1, SCHEMA_VERSION + 1):
-        if version in (3, 4):
+        if version in (3, 4, 17):
             # Rebuilding a referenced table is the documented SQLite migration
             # pattern. Foreign keys must be disabled outside the transaction and
             # are checked in full before the connection is accepted again.
@@ -105,7 +109,7 @@ def _apply_migrations(connection: sqlite3.Connection, current: int) -> None:
             + f"PRAGMA user_version = {version};\nCOMMIT;"
         )
         connection.executescript(script)
-        if version in (3, 4):
+        if version in (3, 4, 17):
             connection.execute("PRAGMA foreign_keys = ON")
             violations = list(connection.execute("PRAGMA foreign_key_check"))
             if violations:
@@ -1094,6 +1098,7 @@ class StateStore:
         before_commit: Any | None = None,
     ) -> OperationRecord:
         _require_text(target.target_global_id, "target_global_id")
+        observed_json = _confirmation_evidence(target.observed_state)
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -1153,9 +1158,9 @@ class StateStore:
             )
             connection.execute(
                 "INSERT INTO operation_events "
-                "(operation_id, from_status, to_status, created_at) "
-                "VALUES (?, 'executing', 'confirmed', ?)",
-                (operation_id, now),
+                "(operation_id, from_status, to_status, evidence_json, created_at) "
+                "VALUES (?, 'executing', 'confirmed', ?, ?)",
+                (operation_id, observed_json, now),
             )
             connection.commit()
         except Exception:
@@ -1174,10 +1179,12 @@ class StateStore:
         target_issue_index: int | None,
         observed_intent: Mapping[str, Any],
         evidence: str,
+        observed_state: dict[str, Any] | None = None,
     ) -> OperationRecord:
         if not target_global_id:
             raise ValueError("a stable target global id is required for reconciliation")
         _require_text(evidence, "evidence")
+        observation = _confirmation_evidence(observed_state)
         observed_json = _canonical_json(observed_intent)
         observed_hash = hashlib.sha256(observed_json.encode()).hexdigest()
         connection = self._connect()
@@ -1240,6 +1247,7 @@ class StateStore:
                     "target_issue_index": target_issue_index,
                     "intent_hash": observed_hash,
                     "evidence": evidence,
+                    **(_decode_object(observation) if observation else {}),
                 }
             )
             connection.execute(
@@ -1465,3 +1473,16 @@ class StateStore:
     @staticmethod
     def new_conflict_id() -> str:
         return str(uuid.uuid4())
+
+
+def _confirmation_evidence(observed: dict[str, Any] | None) -> str | None:
+    """Keep non-secret native confirmation facts in the existing atomic event record."""
+    if observed is None:
+        return None
+    if not isinstance(observed, dict) or _contains_secret(observed):
+        raise ValueError("confirmation facts must be a non-secret object")
+    json.dumps(observed, allow_nan=False)
+    encoded = _canonical_json({"observed_state": observed})
+    if len(encoded.encode("utf-8")) > 256 * 1024:
+        raise ValueError("confirmation facts exceed the supported bound")
+    return encoded
