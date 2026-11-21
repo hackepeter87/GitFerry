@@ -102,6 +102,25 @@ Docker Linux/amd64, without emulation. Issue #9 is closed. The bounded
 selection probe is not proof of a complete inventory or guided source-to-target import wizard.
 See [the operator boundary](transfer-plans.md) and [ADR 0012](decisions/0012-durable-transfer-plans.md).
 
+## Issue #10: source selection slice
+
+The shared source-catalog service reads paginated organizations and their repositories through
+locally approved HTTPS profiles. Local `make test` passed 295 backend tests, lint, format,
+MyPy and frontend build. All 18 browser tests passed, including four mocked source-selection
+cases: cross-page/organization selection, failures/source changes, session expiry, and explicit
+selection with an in-flight refresh guard. Browser mocks do not replace remote evidence.
+
+Real Gitea integration run `1a1f7621fab547dd` passed all 21 required checks and the mandatory
+`source_catalog_lists_real_organization_and_repository_without_writes` assertion. The existing
+Linux/arm64, pinned Gitea 1.27.2 setup returned the actual organization/repository through the
+approved TLS profile without additional writes. Cleanup passed. This local dirty-workspace run
+is not immutable-head or hosted-CI evidence for the pending Issue #10 PR.
+
+This slice is namespace browsing, not complete content inventory or a completed first import.
+The UI keeps selection in the current browser view and says that export/import execution is
+not yet available. Remaining package, identity, execution and complete browser acceptance stay
+in Issue #10. See [the current interface contract](first-import.md).
+
 ## Environment
 
 The documented integration entry point is `make test-integration` on both local development and

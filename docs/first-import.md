@@ -38,3 +38,12 @@ authors, rights, payloads and fidelity limitations must be inventoried and revie
 export or import plan can be accepted. Browsing creates no object mappings, identity bindings or
 executable operations. The remaining export, package receipt, binding and end-to-end UI steps are
 tracked by Issue #10; no manual manifest or SQLite editing is the intended user workflow.
+
+## Current browser step
+
+Choose a locally approved source, then an organization and repositories. Source reads start only
+after explicit selection. Selections survive page and organization navigation within this view;
+the summary supports removing an earlier selection. Changing or refreshing the source clears
+the selection. Reloading the browser also clears this preliminary selection; no durable transfer
+has been submitted yet. Loading and failed pages never imply complete inventory or authorization
+to execute. Export/import execution remains unavailable until the subsequent steps are delivered.

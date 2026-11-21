@@ -38,6 +38,7 @@ ASSERTIONS = frozenset(
         "explicit_resolution_then_restart_confirms_without_post",
         "control_repository_unchanged",
         "credentials_absent_from_state_and_report",
+        "source_catalog_lists_real_organization_and_repository_without_writes",
     }
 )
 
@@ -107,6 +108,13 @@ def run_application_plan_probe() -> dict[str, Any]:
         "target_only_context": first["isolated"] is True,
     }
     before = events()
+    catalog = worker("browse")
+    assertions["source_catalog_lists_real_organization_and_repository_without_writes"] = (
+        any(item["name"] == "application-plan-lab" for item in catalog["organizations"]["entries"])
+        and any(item["repository"] == REPOSITORY for item in catalog["repositories"]["entries"])
+        and catalog["repositories"]["inventory_complete"] is False
+        and events() == before
+    )
     replay = worker("replay")
     assertions["confirmed_restart_no_duplicates"] = (
         replay["plan"]["status"] == "confirmed"
