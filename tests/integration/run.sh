@@ -158,7 +158,8 @@ export GITFERRY_IT_ADMIN_PASSWORD="$admin_password"
 export GITFERRY_IT_USER_PASSWORD="$user_password"
 export GITFERRY_IT_PROJECT="$project"
 export GITFERRY_IT_RUNTIME_IMAGE="$runtime_image"
-export GITFERRY_VERSION=0.1.0.dev0
+GITFERRY_VERSION=$(PYTHONPATH="$root/backend/src" "$python" -c 'from gitferry import __version__; print(__version__)')
+export GITFERRY_VERSION
 export GITFERRY_SOURCE_REVISION=${GITFERRY_CI_SOURCE_SHA:-$(git -C "$root" rev-parse HEAD)}
 export GITFERRY_IT_INSTANCE_NONCE=$($python -c 'import secrets; print(secrets.token_hex(12))')
 export GITFERRY_IT_SOURCE_PORT=${GITFERRY_IT_SOURCE_PORT:-33001}

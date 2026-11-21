@@ -207,6 +207,11 @@ def github_snapshots(issues: list[Any], project: dict[str, Any]) -> list[dict[st
     """Normalize complete read-only GitHub exports; no network or local authority changes."""
     if issues and isinstance(issues[0], list):
         issues = [issue for page in issues for issue in page]
+    issue_numbers = [issue.get("number") for issue in issues if "pull_request" not in issue]
+    if len(issue_numbers) != len(set(issue_numbers)):
+        raise ValueError("duplicate issue records")
+    if not (set(range(8, 37)) | {47, 48}).issubset(issue_numbers):
+        raise ValueError("incomplete required issue scope")
     items = project.get("items", [])
     if project.get("totalCount") != len(items):
         raise ValueError("incomplete Project export")

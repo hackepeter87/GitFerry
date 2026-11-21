@@ -70,3 +70,8 @@ def test_candidate_version_is_shared_by_api_frontend_and_build() -> None:
         f"GITFERRY_VERSION: ${{GITFERRY_VERSION:-{__version__}}}"
         in (ROOT / "tests/integration/compose.yaml").read_text()
     )
+
+    runner = (ROOT / "tests/integration/run.sh").read_text()
+    probe = (ROOT / "tests/integration/oci_runtime_probe.py").read_text()
+    assert "from gitferry import __version__; print(__version__)" in runner
+    assert 'labels.get("org.opencontainers.image.version") == __version__' in probe

@@ -186,11 +186,12 @@ def test_github_export_requires_complete_project_and_normalizes_fields() -> None
         "needs Decision": "No",
     }
     project = {"items": [item], "totalCount": 1}
-    data = issue_audit.github_snapshots([[issue]], project)
-    assert issue_audit.audit_snapshot(data[0])["status"] == "passed"
+    issues = [dict(issue, number=number) for number in [*range(8, 37), 47, 48]]
+    data = issue_audit.github_snapshots([issues], project)
+    assert issue_audit.audit_snapshot(data[-1])["status"] == "passed"
     project["totalCount"] = 2
     with pytest.raises(ValueError, match="incomplete"):
-        issue_audit.github_snapshots([issue], project)
+        issue_audit.github_snapshots(issues, project)
 
 
 def test_release_prefix_and_project_completion_cannot_hide_mismatch() -> None:
@@ -204,3 +205,10 @@ def test_release_prefix_and_project_completion_cannot_hide_mismatch() -> None:
     assert "issue state contradicts project status" in issue_audit.audit_snapshot(data)["findings"]
     data["project"]["Status"] = "Done"
     assert issue_audit.audit_snapshot(data)["status"] == "passed"
+
+
+def test_incomplete_issue_export_cannot_pass() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="incomplete required issue scope"):
+        issue_audit.github_snapshots([snapshot()["issue"]], {"totalCount": 0, "items": []})
