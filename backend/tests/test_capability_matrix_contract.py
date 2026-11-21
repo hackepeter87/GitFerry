@@ -29,6 +29,7 @@ REQUIRED_IDS = {
     "identity-bindings",
     "auth-source-bootstrap",
     "directory-integration",
+    "directory-ad",
     "issues",
     "labels",
     "issue-comments",

@@ -329,11 +329,8 @@ class LocalBootstrap:
         return self.journal.apply(record, runner, verify=verify, before_execute=before_execute)
 
     def status(self) -> DirectoryBootstrapRecord | None:
-        preflight, _ = self._preflight()
+        preflight, config_fingerprint = self._preflight()
         name = str(self.source.get("name", ""))
-        config_fingerprint = hashlib.sha256(
-            _file(self.gitea_config, _MAX_CONFIG, "Gitea config")
-        ).hexdigest()
         record = self._stored(preflight, config_fingerprint, name)
         if record is None:
             return None

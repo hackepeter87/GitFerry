@@ -1,5 +1,8 @@
 # GitFerry product capability and evidence matrix
 
+Target directory authority remains local. Imported claims never authorize directory or
+administrator changes; LDAP and AD qualification are tracked separately below.
+
 This matrix is the auditable boundary between the product target and currently verified behavior.
 It is not a feature wish list and a passing test count does not upgrade an individual row. The
 reference integration target is Gitea 1.27.2, image digest

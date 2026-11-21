@@ -100,6 +100,8 @@ def test_apply_creates_and_confirmed_replay_only_reads_back(tmp_path: Path) -> N
     assert confirmed.native_source_id == "7"
     replay = bootstrap.apply()
     assert replay == confirmed
+    assert bootstrap.status() == confirmed
+    assert bootstrap.plan().config_fingerprint == confirmed.config_fingerprint
 
 
 def test_changed_config_cannot_be_reported_as_confirmed(tmp_path: Path) -> None:
