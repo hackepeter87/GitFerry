@@ -338,8 +338,8 @@ def inventory_summary(document: InventoryDocument) -> dict[str, Any]:
 
 
 def _native_transfer_reason(observation: ClassObservation) -> str:
+    from gitferry.git_refs import valid_ref
     from gitferry.lfs_payloads import LFSPayloadError, LFSPointer
-    from gitferry.package_native import valid_ref
 
     if observation.content_class == "lfs":
         try:

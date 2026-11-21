@@ -86,6 +86,20 @@ class NativePayloadApplication:
                 confirmed_native_facts(self.state, operation)
                 return  # The following push compares the saved refs before writing.
 
+            _, _, repository = self.wiki._wiki_parent(scope, int(parent))
+            with self.state.read_connection() as connection:
+                pushes = connection.execute(
+                    "SELECT operation_id FROM operations WHERE origin_id=? "
+                    "AND target_instance_key=? AND operation_type='push_wiki_bundle'",
+                    (operation.origin_id, operation.target_instance_key),
+                ).fetchall()
+            desired = (
+                self.state.get_operation(pushes[0][0]).intent["refs"] if len(pushes) == 1 else {}
+            )
+            branch = repository.get("default_branch")
+            if not isinstance(branch, str) or "refs/heads/" + branch not in desired:
+                raise OperationBlocked("target wiki default branch is absent from selected history")
+
             def bootstrap(_: dict[str, Any]) -> TargetConfirmation:
                 page = self.wiki.bootstrap(
                     scope, int(parent), intent["title"], intent["content"], intent["message"]

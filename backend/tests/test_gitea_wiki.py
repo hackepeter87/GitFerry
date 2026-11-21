@@ -138,3 +138,24 @@ def test_get_page_quotes_documented_path_and_bootstrap_rejects_lost_identity() -
             client.bootstrap("org/repo", 17, "Home", "content", "message")
     finally:
         client.close()
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {},
+        {"http_git_disabled": True, "lfs_disabled": False},
+        {"http_git_disabled": False, "lfs_disabled": True},
+    ],
+)
+def test_native_target_settings_fail_closed(settings: dict) -> None:
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.path))
+        return httpx.Response(200, json=settings)
+
+    with _client(handler) as client:
+        with pytest.raises(GiteaWikiError):
+            client.verify_native_settings(lfs=True)
+    assert calls == [("GET", "/api/v1/settings/repository")]

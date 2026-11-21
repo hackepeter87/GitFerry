@@ -52,6 +52,9 @@ class FakeWiki:
         self.commit = commit
         self.page_calls: list[tuple[str, int, str]] = []
 
+    def _wiki_parent(self, *args):
+        return "org", "repo", {"default_branch": "main"}
+
     def bootstrap(self, *args: object) -> dict:
         return {
             "title": "Home",
@@ -208,3 +211,23 @@ def test_bootstrap_root_guard_rejects_non_root_history_without_force_push(tmp_pa
     with pytest.raises(OperationBlocked, match="preexisting"):
         app.verify_bootstrap("org/repo", "42", page, operation.intent)
     assert git.pushes == 0
+
+
+def test_default_branch_mismatch_blocks_before_wiki_post(tmp_path: Path) -> None:
+    state, plan, app, _, _ = _app(tmp_path)
+    selected = _selected()
+    selected["wiki"]["refs"] = {"refs/heads/different": "a" * 40}
+    operation = next(
+        o
+        for o in prepare_native_operations(state, plan, selected)[0]
+        if o.operation_type == "bootstrap_wiki"
+    )
+
+    def must_not_post(*_):
+        raise AssertionError("wiki POST must not run")
+
+    app.wiki.bootstrap = must_not_post
+    with OperationExecutor(state, "default-branch-check") as executor:
+        with pytest.raises(OperationBlocked, match="default branch"):
+            app.apply(operation, executor)
+    assert state.get_operation(operation.operation_id).status == "prepared"

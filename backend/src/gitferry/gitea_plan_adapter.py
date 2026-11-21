@@ -215,6 +215,9 @@ class GiteaPlanAdapter:
                 profile.base_url, username=evidence["login"], token=token, verify=context
             )
             self.resources.enter_context(wiki_client)
+            wiki_client.verify_native_settings(
+                lfs=any(selected["lfs"] is not None for selected in self.native_payloads)
+            )
             maximum = int(os.environ.get("GITFERRY_EXPORT_MAX_GIT_BYTES", str(1024**3)))
             if maximum <= 0:
                 raise OperationBlocked("native payload bound must be positive")

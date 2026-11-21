@@ -36,6 +36,16 @@ class WikiState:
 class GiteaWikiClient(GiteaProvisioningClient):
     """Read native wiki facts and perform one explicit technical bootstrap."""
 
+    def verify_native_settings(self, *, lfs: bool) -> None:
+        try:
+            _, value = self._bounded_json("GET", "/settings/repository", expected_status=200)
+        except httpx.HTTPStatusError:
+            raise GiteaWikiError("native repository capabilities could not be checked") from None
+        if not isinstance(value, dict) or value.get("http_git_disabled") is not False:
+            raise GiteaWikiError("target HTTP Git capability is unavailable or unknown")
+        if lfs and value.get("lfs_disabled") is not False:
+            raise GiteaWikiError("target LFS capability is unavailable or unknown")
+
     def _wiki_parent(
         self, repository: str, expected_repository_id: str | int
     ) -> tuple[str, str, dict[str, Any]]:
