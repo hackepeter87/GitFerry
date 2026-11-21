@@ -63,6 +63,7 @@ ASSERTIONS = frozenset(
         "guided_browser_restart_read_only",
         "directory_equal_login_realms_explicit_bindings",
         "directory_claim_drift_restart_blocked",
+        "directory_ad_identity_drift_restart_blocked",
         "directory_outage_blocks_without_rebinding",
         "directory_group_drift_requires_review",
         "directory_conflict_desktop_recovery",
@@ -616,11 +617,18 @@ def run_source_export_probe() -> dict[str, Any]:
             for value in reviewed_bindings
         )
     )
+    from ad_identity_probe import run as run_ad_identity
+
+    ad_identity = run_ad_identity()
+    assertions["directory_ad_identity_drift_restart_blocked"] = ad_identity[
+        "status"
+    ] == "passed" and all(ad_identity["assertions"].values())
     if set(assertions) != ASSERTIONS or not all(assertions.values()):
         raise ProbeFailure(f"Source export assertions failed: {assertions}")
     return {
         "status": "passed",
         "identity_recovery": identity_recovery,
+        "ad_identity_recovery": ad_identity,
         "assertions": assertions,
         "browser_runtime": runtimes,
         "image_id": built_image,

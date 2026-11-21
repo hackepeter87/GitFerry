@@ -96,3 +96,11 @@ missing directory mail, rejected disabled accounts and wrong passwords, plus exp
 This is AD-compatible server evidence, not Microsoft Windows AD qualification. Product directory
 claims contain direct groups; a successful server-side nested-group query is not transitive product
 permission support. The common report records these separately from the OpenLDAP desktop rights flow.
+
+
+For the qualified Samba target, an already approved binding is rechecked against the directory.
+Outage blocks use without replacing the binding. Changed direct groups or a disabled subject create
+a persistent conflict; restoring the original facts still requires explicit local review. A user
+recreated at the same DN and login has a different SID and cannot reopen the old binding. Native
+Gitea login alone does not authorize replacement or grant repository rights. This recovery proof
+uses the application services; the complete desktop provisioning/rights flow is OpenLDAP-qualified.
