@@ -139,8 +139,11 @@ class PlanRunner:
 class BackgroundPlanWorker:
     """Process-owned thread; HTTP clients only persist commands and read status."""
 
-    def __init__(self, runner: PlanRunner):
+    def __init__(
+        self, runner: PlanRunner, *, run_export: Callable[[], dict[str, Any] | None] | None = None
+    ):
         self.runner = runner
+        self.run_export = run_export
         self.last_error: str | None = None
         self.wake = threading.Event()
         self.thread = threading.Thread(target=self._loop, name="gitferry-plan-worker", daemon=True)
@@ -157,8 +160,11 @@ class BackgroundPlanWorker:
         while not self.runner.stop.is_set():
             try:
                 result = self.runner.run_next()
+                exported = None
+                if self.run_export is not None and not self.runner.stop.is_set():
+                    exported = self.run_export()
                 self.last_error = None
-                if result is not None:
+                if result is not None or exported is not None:
                     continue
             except ExecutorBusy:
                 pass

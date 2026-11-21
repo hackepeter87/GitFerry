@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -466,6 +466,20 @@ CREATE TABLE package_receipts (
     package_ref TEXT NOT NULL UNIQUE,
     document_json TEXT NOT NULL,
     received_at TEXT NOT NULL
+);
+""",
+    10: """
+CREATE TABLE source_export_deliveries (
+    export_id TEXT PRIMARY KEY REFERENCES source_exports(export_id),
+    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'ready', 'failed')),
+    candidate_digest TEXT CHECK (candidate_digest IS NULL OR length(candidate_digest) = 64),
+    archive_sha256 TEXT CHECK (archive_sha256 IS NULL OR length(archive_sha256) = 64),
+    archive_size INTEGER CHECK (archive_size >= 0),
+    error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK ((status = 'ready') = (archive_sha256 IS NOT NULL)),
+    CHECK (status != 'ready' OR archive_size IS NOT NULL)
 );
 """,
 }

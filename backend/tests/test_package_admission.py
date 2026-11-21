@@ -18,7 +18,7 @@ from gitferry.package_admission import PackageAdmissionConflict, PackageAdmissio
 from gitferry.package_archive import receive_package_archive, write_package_archive
 from gitferry.package_selection import build_package_selection
 from gitferry.runtime import RuntimePaths
-from gitferry.state_migrations import MIGRATIONS
+from gitferry.state_migrations import MIGRATIONS, SCHEMA_VERSION
 from gitferry.state_store import OriginKey, StateStore
 from gitferry.transfer_plans import PlanConflict
 from gitferry.transport import ManifestConflict
@@ -392,7 +392,7 @@ def test_schema_eight_migration_retains_registered_installation(tmp_path: Path) 
     with state.read_connection() as connection:
         assert connection.execute("SELECT count(*) FROM package_receipts").fetchone()[0] == 0
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
 
 
 @pytest.mark.parametrize("action", ["admit", "selection"])

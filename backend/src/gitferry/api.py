@@ -28,6 +28,8 @@ from gitferry.plan_api import create_plan_router
 from gitferry.plan_runner import BackgroundPlanWorker, PlanRunner
 from gitferry.profile_api import create_profile_router, profile_error
 from gitferry.runtime import RuntimeStatus, initialize_runtime
+from gitferry.source_export_api import create_source_export_router
+from gitferry.source_export_jobs import SourceExportJobs
 from gitferry.state_migrations import SCHEMA_VERSION
 from gitferry.transfer_plans import PlanService
 
@@ -62,7 +64,12 @@ def create_app(
                         application.state.runtime.store, application.state.runtime.paths
                     ),
                 )
-                application.state.plan_worker = BackgroundPlanWorker(runner)
+                application.state.export_jobs = SourceExportJobs(
+                    application.state.runtime.store, application.state.runtime.paths
+                )
+                application.state.plan_worker = BackgroundPlanWorker(
+                    runner, run_export=application.state.export_jobs.run_next
+                )
                 application.state.plan_worker.start()
             except Exception as exc:
                 readiness.failed(exc)
@@ -148,6 +155,7 @@ def create_app(
     application.include_router(create_profile_router(cookie_settings))
     application.include_router(create_plan_router(cookie_settings))
     application.include_router(create_package_admission_router(cookie_settings))
+    application.include_router(create_source_export_router(cookie_settings))
     application.post(
         "/api/v1/blueprints/validate",
         dependencies=[Depends(admin_csrf_dependency(cookie_settings))],

@@ -187,73 +187,78 @@ class SourceExports:
     def run(
         self, export_id: str, *, after_publish_hook: Callable[[], None] | None = None
     ) -> dict[str, Any]:
+        with OperationExecutor(self.state, "source-" + uuid.uuid4().hex):
+            return self._run_owned(export_id, after_publish_hook=after_publish_hook)
+
+    def _run_owned(
+        self, export_id: str, *, after_publish_hook: Callable[[], None] | None = None
+    ) -> dict[str, Any]:
+        """Run while the caller owns this state's OperationExecutor lock."""
         _identifier(export_id)
         self._root(self.paths.package_directory)
         self._root(self.paths.work_directory)
         destination = self.paths.package_directory / export_id
         work = self.paths.work_directory / export_id
-        with OperationExecutor(self.state, "source-" + uuid.uuid4().hex):
-            job = self.get(export_id)
-            if job["status"] == "captured":
-                if work.is_symlink() or (work.exists() and not work.is_dir()):
-                    raise SourceExportConflict("source work path is not an owned directory")
-                if inspect_package(destination).digest_sha256 != job["package_digest"]:
-                    raise SourceExportConflict("confirmed source package bytes changed")
-                if work.exists():
-                    shutil.rmtree(work)
-                return job
-            try:
-                if work.is_symlink() or (work.exists() and not work.is_dir()):
-                    raise SourceExportConflict("source work path is not an owned directory")
-                self._check_local(export_id)
-                if destination.exists() or destination.is_symlink():
-                    # A crash after publication needs no remote retry. Admit only
-                    # bytes matching the saved candidate and original local intent.
-                    record_source_capture(self.state, inspect_package(destination), export_id)
-                    return self.get(export_id)
-                if work.exists():
-                    shutil.rmtree(work)
-                work.mkdir(mode=0o700)
-                with self.state.transaction() as connection:
-                    connection.execute(
-                        "UPDATE source_exports SET status='capturing', candidate_digest=NULL, "
-                        "error_code=NULL, updated_at=? WHERE export_id=?",
-                        (now(), export_id),
-                    )
-                artifact = self._capture(job, work)
-                self._check_local(export_id)
-                with self.state.transaction() as connection:
-                    connection.execute(
-                        "UPDATE source_exports SET candidate_digest=?, updated_at=? "
-                        "WHERE export_id=?",
-                        (artifact.digest_sha256, now(), export_id),
-                    )
-                for member in artifact.files:
-                    with (artifact.directory / member).open("rb") as stream:
-                        os.fsync(stream.fileno())
-                for path in sorted(
-                    (p for p in artifact.directory.rglob("*") if p.is_dir()),
-                    key=lambda p: len(p.parts),
-                    reverse=True,
-                ):
-                    _sync_directory(path)
-                _sync_directory(artifact.directory)
-                _rename_noreplace(artifact.directory, destination)
-                _sync_directory(destination.parent)
-                if after_publish_hook is not None:
-                    after_publish_hook()
+        job = self.get(export_id)
+        if job["status"] == "captured":
+            if work.is_symlink() or (work.exists() and not work.is_dir()):
+                raise SourceExportConflict("source work path is not an owned directory")
+            if inspect_package(destination).digest_sha256 != job["package_digest"]:
+                raise SourceExportConflict("confirmed source package bytes changed")
+            if work.exists():
+                shutil.rmtree(work)
+            return job
+        try:
+            if work.is_symlink() or (work.exists() and not work.is_dir()):
+                raise SourceExportConflict("source work path is not an owned directory")
+            self._check_local(export_id)
+            if destination.exists() or destination.is_symlink():
+                # A crash after publication needs no remote retry. Admit only
+                # bytes matching the saved candidate and original local intent.
                 record_source_capture(self.state, inspect_package(destination), export_id)
-            except Exception:
-                with self.state.transaction() as connection:
-                    connection.execute(
-                        "UPDATE source_exports SET status='failed', "
-                        "error_code='source-capture-not-confirmed', updated_at=? "
-                        "WHERE export_id=? AND status!='captured'",
-                        (now(), export_id),
-                    )
-                raise
-            finally:
-                shutil.rmtree(work, ignore_errors=True)
+                return self.get(export_id)
+            if work.exists():
+                shutil.rmtree(work)
+            work.mkdir(mode=0o700)
+            with self.state.transaction() as connection:
+                connection.execute(
+                    "UPDATE source_exports SET status='capturing', candidate_digest=NULL, "
+                    "error_code=NULL, updated_at=? WHERE export_id=?",
+                    (now(), export_id),
+                )
+            artifact = self._capture(job, work)
+            self._check_local(export_id)
+            with self.state.transaction() as connection:
+                connection.execute(
+                    "UPDATE source_exports SET candidate_digest=?, updated_at=? WHERE export_id=?",
+                    (artifact.digest_sha256, now(), export_id),
+                )
+            for member in artifact.files:
+                with (artifact.directory / member).open("rb") as stream:
+                    os.fsync(stream.fileno())
+            for path in sorted(
+                (p for p in artifact.directory.rglob("*") if p.is_dir()),
+                key=lambda p: len(p.parts),
+                reverse=True,
+            ):
+                _sync_directory(path)
+            _sync_directory(artifact.directory)
+            _rename_noreplace(artifact.directory, destination)
+            _sync_directory(destination.parent)
+            if after_publish_hook is not None:
+                after_publish_hook()
+            record_source_capture(self.state, inspect_package(destination), export_id)
+        except Exception:
+            with self.state.transaction() as connection:
+                connection.execute(
+                    "UPDATE source_exports SET status='failed', "
+                    "error_code='source-capture-not-confirmed', updated_at=? "
+                    "WHERE export_id=? AND status!='captured'",
+                    (now(), export_id),
+                )
+            raise
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
         return self.get(export_id)
 
     def _capture(self, job: dict[str, Any], work: Path) -> PackageArtifact:
