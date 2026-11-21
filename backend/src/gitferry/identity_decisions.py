@@ -149,6 +149,7 @@ class IdentityDecisionService:
         email: str | None = None,
         candidate_id: str | None = None,
         account_evidence: Mapping[str, Any] | None = None,
+        credential_checked: bool = False,
     ) -> dict[str, Any]:
         account_evidence = dict(account_evidence or {})
         if set(account_evidence) - {"source_id", "login_name"}:
@@ -227,7 +228,7 @@ class IdentityDecisionService:
                     "pending",
                     "system",
                     "candidate-created",
-                    canonical_json(payload),
+                    canonical_json({**payload, "credential_checked": credential_checked}),
                     timestamp,
                 ),
             )
@@ -305,6 +306,7 @@ class IdentityDecisionService:
         actor: str,
         authority_digest: str,
         profile_revision: int,
+        credential_checked: bool = False,
     ) -> dict[str, Any]:
         """Explicit re-review changes connection evidence, never the identity or account."""
         _text(actor, "actor")
@@ -328,6 +330,7 @@ class IdentityDecisionService:
                     "previous_authority_digest": row["authority_digest"],
                     "authority_digest": authority_digest,
                     "profile_revision": profile_revision,
+                    "credential_checked": credential_checked,
                 }
             )
             connection.execute(
@@ -362,6 +365,7 @@ class IdentityDecisionService:
         actor: str,
         reason: str | None = None,
         binder: Callable[[dict[str, Any], sqlite3.Connection], Any] | None = None,
+        credential_checked: bool = False,
     ) -> dict[str, Any]:
         if (
             decision not in {"pending", "rejected", "approved", "conflict"}
@@ -388,7 +392,10 @@ class IdentityDecisionService:
                 raise IdentityDecisionConflict("identity candidate has already been decided")
             record = self._record(row)
             final = decision
-            evidence: dict[str, Any] = {"candidate": candidate_id}
+            evidence: dict[str, Any] = {
+                "candidate": candidate_id,
+                "credential_checked": credential_checked,
+            }
             if decision == "approved" and binder is None:
                 raise ValueError("approved decisions require a binding callback")
             if decision == "approved" and binder is not None:

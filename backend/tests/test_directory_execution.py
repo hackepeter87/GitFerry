@@ -114,6 +114,37 @@ def test_changed_prepare_during_callback_cannot_overwrite_executing(tmp_path: Pa
     assert confirmed.status == "confirmed"
 
 
+def test_before_execute_failure_leaves_prepared_and_can_retry(tmp_path: Path) -> None:
+    svc, record = prepared(tmp_path)
+    runner_calls = 0
+
+    def runner(_):
+        nonlocal runner_calls
+        runner_calls += 1
+        return "1"
+
+    with pytest.raises(RuntimeError, match="prerequisite"):
+        svc.apply(
+            record,
+            runner,
+            before_execute=lambda: (_ for _ in ()).throw(RuntimeError("prerequisite")),
+        )
+    preserved = svc.get("instance-a", "ldap")
+    assert preserved is not None and preserved.status == "prepared"
+    assert [event["to_status"] for event in svc.events("instance-a", "ldap")] == ["prepared"]
+    confirmed = svc.apply(record, runner, before_execute=lambda: None)
+    assert confirmed.status == "confirmed"
+    assert runner_calls == 1
+
+
+def test_realm_key_accepts_registered_slash_identifier(tmp_path: Path) -> None:
+    svc = service(tmp_path)
+    state = svc.state
+    state.register_realm("corp/example", "Synthetic Corp", "realm-marker-corp")
+    record = svc.prepare("instance-a", "corp/example", "ldap", "a" * 64, "b" * 64)
+    assert record.realm_key == "corp/example"
+
+
 def test_confirmed_replay_requires_successful_readback(tmp_path: Path) -> None:
     svc, record = prepared(tmp_path)
     confirmed = svc.apply(record, lambda _: "1")

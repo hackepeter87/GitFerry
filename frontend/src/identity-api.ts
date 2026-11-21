@@ -59,6 +59,7 @@ export interface IdentityEvent {
   revision?: number;
   created_at?: string;
   details?: Record<string, unknown>;
+  evidence?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -88,6 +89,7 @@ export function createIdentityCandidate(value: {
   target_account_id: string;
   target_login: string;
   email?: string | null;
+  credential_ref?: string;
   prerequisites: IdentityPrerequisites;
 }): Promise<IdentityCandidate> {
   return request("/api/v1/identities/candidates", json(value));

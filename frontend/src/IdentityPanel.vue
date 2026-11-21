@@ -25,6 +25,7 @@ const saving = ref(false);
 const error = ref("");
 const notice = ref("");
 const checked = ref<{ accountId: string; login: string; digest: string; profileRevision: number }>();
+const credentialRefs = ref<Record<string, string>>({});
 const realmForm = ref({ realm_key: "", display_name: "", external_marker: "" });
 const form = ref({
   target_instance_key: "",
@@ -97,10 +98,12 @@ async function submitCandidate(): Promise<void> {
       target_instance_key: profile.instance_key, profile_revision: profile.revision, authority_digest: checked.value.digest,
       selector: { realm_key: form.value.realm_key, login: form.value.source_login.trim(), external_id: form.value.external_id.trim(), ou_path: form.value.ou_path.trim() },
       target_account_id: checked.value.accountId, target_login: checked.value.login, email: form.value.email.trim() || null,
+      ...(form.value.credential_ref.trim() ? { credential_ref: form.value.credential_ref.trim() } : {}),
       prerequisites: { issue_author: form.value.issue_author, comment_author: form.value.comment_author, team_member: form.value.team_member },
     });
     if (!mounted) return;
     candidates.value = [candidate, ...candidates.value.filter((item) => item.candidate_id !== candidate.candidate_id)];
+    if (form.value.credential_ref.trim()) credentialRefs.value[candidate.candidate_id] = form.value.credential_ref.trim();
     checked.value = undefined;
     notice.value = "Candidate submitted for explicit approval.";
   } catch (cause) { handleError(cause, "The identity candidate could not be submitted."); }
@@ -115,7 +118,8 @@ async function decide(candidate: IdentityCandidate, decision: "approved" | "reje
   }
   error.value = ""; notice.value = ""; saving.value = true;
   try {
-    const updated = await decideIdentityCandidate(candidate.candidate_id, { expected_revision: candidate.revision, decision, profile_revision: profile?.revision ?? candidate.profile_revision });
+    const credentialRef = credentialRefs.value[candidate.candidate_id]?.trim();
+    const updated = await decideIdentityCandidate(candidate.candidate_id, { expected_revision: candidate.revision, decision, profile_revision: profile?.revision ?? candidate.profile_revision, ...(decision !== "rejected" && credentialRef ? { credential_ref: credentialRef } : {}) });
     candidates.value = candidates.value.map((item) => item.candidate_id === updated.candidate_id ? updated : item);
     notice.value = `Candidate ${updated.status}.`;
   } catch (cause) { handleError(cause, "The candidate decision could not be saved. Reload and review the current revision."); }
@@ -130,6 +134,13 @@ async function showEvents(candidate: IdentityCandidate): Promise<void> {
 function handleError(cause: unknown, fallback: string): void {
   if (cause instanceof ApiError && cause.status === 401) { emit("session-expired"); return; }
   error.value = cause instanceof ApiError && cause.status === 409 ? "This identity changed elsewhere or its checked fields are stale. Reload and check the account again." : cause instanceof ApiError && cause.message ? cause.message : fallback;
+}
+
+function eventCredentialEvidence(event: IdentityEvent): string | undefined {
+  const direct = event.evidence?.credential_checked;
+  const detailed = event.details?.credential_checked;
+  const value = typeof direct === "boolean" ? direct : detailed;
+  return typeof value === "boolean" ? `credential checked ${value ? "yes" : "no"}` : undefined;
 }
 
 </script>
@@ -161,7 +172,7 @@ function handleError(cause: unknown, fallback: string): void {
           <button class="primary" type="submit" :disabled="saving || !checked || checked.profileRevision !== profiles.find((item) => item.instance_key === form.target_instance_key)?.revision">Submit for approval</button>
         </form>
       </div>
-          <section aria-labelledby="candidate-list-title"><h3 id="candidate-list-title">Candidates</h3><p v-if="!candidates.length" class="empty">No identity candidates yet.</p><ul v-else class="identity-list"><li v-for="candidate in candidates" :key="candidate.candidate_id" class="identity-card"><div class="identity-summary"><div><h4>{{ candidate.selector.login }} → {{ candidate.target.login }}</h4><p>{{ candidate.selector.realm_key }} · {{ candidate.target.instance_key }} · native account {{ candidate.target.account_id }}</p><p v-if="candidate.account_evidence">Gitea authentication source: {{ candidate.account_evidence.source_id ?? "not exposed" }} · authentication login: {{ candidate.account_evidence.login_name || "not exposed" }} (not a directory SID)</p><small>External ID {{ candidate.selector.external_id }}<span v-if="candidate.selector.ou_path"> · OU {{ candidate.selector.ou_path }}</span><span v-if="candidate.email"> · {{ candidate.email }}</span></small></div><span class="state">{{ candidate.status }}</span></div><p class="implications">Implications requested: {{ candidate.prerequisites.issue_author ? "issue author" : "no issue author" }} · {{ candidate.prerequisites.comment_author ? "comment author" : "no comment author" }} · {{ candidate.prerequisites.team_member ? "team member" : "no team member" }}</p><div class="actions"><button v-if="candidate.status === 'pending'" type="button" :disabled="saving" @click="decide(candidate, 'approved')">Approve</button><button v-if="candidate.status === 'pending'" type="button" :disabled="saving" @click="decide(candidate, 'rejected')">Reject</button><button v-if="candidate.status === 'conflict' || candidate.status === 'rejected'" type="button" :disabled="saving" @click="decide(candidate, 'pending')">Reopen</button><button type="button" :disabled="saving" @click="showEvents(candidate)">View events</button></div><ul v-if="events[candidate.candidate_id]" class="events" aria-label="Candidate events"><li v-for="(event, index) in events[candidate.candidate_id]" :key="String(event.event_id ?? event.created_at ?? index)">{{ event.decision ?? event.event_type ?? event.action ?? "Identity event" }}<span v-if="event.actor"> · actor {{ event.actor }}</span><span v-if="event.reason"> · {{ event.reason }}</span><span v-if="event.created_at"> · {{ event.created_at }}</span></li></ul></li></ul></section>
+          <section aria-labelledby="candidate-list-title"><h3 id="candidate-list-title">Candidates</h3><p v-if="!candidates.length" class="empty">No identity candidates yet.</p><ul v-else class="identity-list"><li v-for="candidate in candidates" :key="candidate.candidate_id" class="identity-card"><div class="identity-summary"><div><h4>{{ candidate.selector.login }} → {{ candidate.target.login }}</h4><p>{{ candidate.selector.realm_key }} · {{ candidate.target.instance_key }} · native account {{ candidate.target.account_id }}</p><p v-if="candidate.account_evidence">Gitea authentication source: {{ candidate.account_evidence.source_id ?? "not exposed" }} · authentication login: {{ candidate.account_evidence.login_name || "not exposed" }} (not a directory SID)</p><small>External ID {{ candidate.selector.external_id }}<span v-if="candidate.selector.ou_path"> · OU {{ candidate.selector.ou_path }}</span><span v-if="candidate.email"> · {{ candidate.email }}</span></small></div><span class="state">{{ candidate.status }}</span></div><p class="implications">Implications requested: {{ candidate.prerequisites.issue_author ? "issue author" : "no issue author" }} · {{ candidate.prerequisites.comment_author ? "comment author" : "no comment author" }} · {{ candidate.prerequisites.team_member ? "team member" : "no team member" }}</p><label v-if="candidate.status === 'pending' || candidate.status === 'conflict' || candidate.status === 'rejected'" :for="`credential-${candidate.candidate_id}`">Credential reference <span>(optional for approval or reopen)</span></label><input v-if="candidate.status === 'pending' || candidate.status === 'conflict' || candidate.status === 'rejected'" :id="`credential-${candidate.candidate_id}`" v-model="credentialRefs[candidate.candidate_id]" :disabled="saving" :aria-label="`Credential reference for ${candidate.selector.login}`" autocomplete="off"><div class="actions"><button v-if="candidate.status === 'pending'" type="button" :disabled="saving" @click="decide(candidate, 'approved')">Approve</button><button v-if="candidate.status === 'pending'" type="button" :disabled="saving" @click="decide(candidate, 'rejected')">Reject</button><button v-if="candidate.status === 'conflict' || candidate.status === 'rejected'" type="button" :disabled="saving" @click="decide(candidate, 'pending')">Reopen</button><button type="button" :disabled="saving" @click="showEvents(candidate)">View events</button></div><ul v-if="events[candidate.candidate_id]" class="events" aria-label="Candidate events"><li v-for="(event, index) in events[candidate.candidate_id]" :key="String(event.event_id ?? event.created_at ?? index)">{{ event.decision ?? event.event_type ?? event.action ?? "Identity event" }}<span v-if="event.actor"> · actor {{ event.actor }}</span><span v-if="event.reason"> · {{ event.reason }}</span><span v-if="eventCredentialEvidence(event)"> · {{ eventCredentialEvidence(event) }}</span><span v-if="event.created_at"> · {{ event.created_at }}</span></li></ul></li></ul></section>
     </template>
   </section>
 </template>

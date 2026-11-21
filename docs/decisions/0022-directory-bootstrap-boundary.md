@@ -33,6 +33,12 @@ host-local prerequisites, never authority supplied by a transport package. Creat
 Gitea server's local administrative access. Version, source identity, native login and effective
 permissions require separate readback/functional checks.
 
+The local invocation requires explicit work and custom directories. Its fingerprint binds
+their canonical paths and filesystem identities, binary and configuration bytes, CA, and the
+registered installation marker. The configured ROOT_URL must match that local registration.
+Inherited GITEA_* and CONF_ARG overrides are removed; fixed command flags select the checked
+context. This prevents ambient process configuration from silently selecting another server.
+
 SQLite schema 15 stores revisioned local directory configuration separately from the bootstrap
 journal. Authenticated REST and the desktop edit configuration; the host CLI invokes the same
 configuration service and a fixed-command target-local adapter. The journal shares the existing
@@ -41,6 +47,10 @@ are `prepared → executing → confirmed` or `outcome_unknown`; an abandoned `e
 unknown before another execution attempt. Conflicting intents cannot overwrite an uncertain row.
 No SQLite transaction is held across the external Gitea process. The native result and journal
 completion are committed together; this is not cross-system exactly-once execution.
+
+Prerequisites and source absence are checked again under the execution lease before marking
+the operation executing. A failure at this proven pre-dispatch point leaves it prepared.
+After dispatch, a missing completion remains unknown even if a later listing looks plausible.
 
 The isolated bootstrap fixture explicitly mounts the target server volume into a separate local
 administration context and uses the identical binary from the pinned Gitea image. File importer

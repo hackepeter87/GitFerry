@@ -61,11 +61,16 @@ class DirectoryBootstrapService:
     ) -> None:
         for label, value in (
             ("instance key", instance_key),
-            ("realm key", realm_key),
             ("source name", source_name),
         ):
             if not isinstance(value, str) or not _NAME.fullmatch(value):
                 raise ValueError(f"invalid directory bootstrap {label}")
+        if (
+            not isinstance(realm_key, str)
+            or not 1 <= len(realm_key) <= 128
+            or any(ord(character) < 32 or ord(character) == 127 for character in realm_key)
+        ):
+            raise ValueError("invalid directory bootstrap realm key")
         for label, value in (
             ("intent digest", intent_digest),
             ("config fingerprint", config_fingerprint),
@@ -240,6 +245,7 @@ class DirectoryBootstrapService:
         record: DirectoryBootstrapRecord,
         runner: Runner,
         verify: Verifier | None = None,
+        before_execute: Callable[[], None] | None = None,
     ) -> DirectoryBootstrapRecord:
         with OperationExecutor(self.state, f"directory-{record.instance_key}-{record.source_name}"):
             current = self.get(record.instance_key, record.source_name)
@@ -276,6 +282,8 @@ class DirectoryBootstrapService:
                 if not verified:
                     raise DirectoryBootstrapConflict("confirmed directory source readback changed")
                 return current
+            if before_execute is not None:
+                before_execute()
             executing = self._transition(current, "executing")
             try:
                 native_id = runner(executing)

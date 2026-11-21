@@ -78,6 +78,31 @@ def test_candidate_cannot_claim_another_reviewed_account(tmp_path, monkeypatch):
     assert app.decisions.list_candidates() == []
 
 
+def test_functional_credential_is_rechecked_and_only_boolean_evidence_persists(
+    tmp_path, monkeypatch
+):
+    app, request, _ = prepared(tmp_path, monkeypatch)
+    calls = remote(monkeypatch)
+    candidate = app.propose(request.model_copy(update={"credential_ref": "author"}))
+    result = app.decide(
+        candidate["candidate_id"],
+        IdentityAction(
+            expected_revision=1,
+            decision="approved",
+            profile_revision=1,
+            credential_ref="author",
+        ),
+        actor="operator",
+    )
+    assert result["status"] == "approved"
+    assert [path for _, path in calls] == ["user", "user"]
+    events = app.decisions.events(candidate["candidate_id"])
+    assert all(event["evidence"]["credential_checked"] is True for event in events)
+    serialized = json.dumps({"candidate": result, "events": events})
+    assert "synthetic-author-credential" not in serialized
+    assert "credential_ref" not in serialized
+
+
 def test_api_auth_csrf_local_actor_and_large_ids(tmp_path, monkeypatch):
     app, request, packages = prepared(tmp_path, monkeypatch)
     monkeypatch.setenv("GITFERRY_SECRET_DIR", str(packages.references.secrets))

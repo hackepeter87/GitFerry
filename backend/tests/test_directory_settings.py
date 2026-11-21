@@ -175,3 +175,35 @@ def test_directory_api_auth_csrf_and_no_server_authority(tmp_path):
                 "SELECT actor FROM directory_configuration_events"
             ).fetchone()[0]
             assert actor != "local-cli"
+
+
+def test_explicit_resave_refreshes_approved_profile_revision(tmp_path):
+    service = make_service(tmp_path / "state.sqlite3")
+    service.save("target", SOURCE, None)
+    with service.store.transaction() as connection:
+        connection.execute(
+            "UPDATE connection_profiles SET revision=2, credential_ref='rotated-ref' "
+            "WHERE instance_key='target'"
+        )
+    reviewed = service.save("target", SOURCE, 1)
+    assert reviewed["revision"] == 2
+    assert reviewed["profile_revision"] == 2
+    assert service.save("target", SOURCE, 2) == reviewed
+
+
+def test_simple_mode_cannot_use_bind_reference_to_bypass_required_fields(tmp_path):
+    service = make_service(tmp_path / "state.sqlite3")
+    invalid = {
+        key: value
+        for key, value in SOURCE.items()
+        if key not in {"userDn", "userFilter", "emailAttribute"}
+    }
+    invalid["bindSecretRef"] = "bind-reference"
+    with pytest.raises(DirectorySettingsError):
+        service.save("target", invalid, None)
+    service.save("target", SOURCE, None)
+    document = service.export("target", SOURCE["name"])
+    document["spec"]["authenticationSources"] = [invalid]
+    with pytest.raises(DirectorySettingsError):
+        service.import_blueprint("target", document, 1)
+    assert service.get("target", SOURCE["name"])["revision"] == 1

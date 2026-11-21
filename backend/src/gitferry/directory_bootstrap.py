@@ -64,7 +64,9 @@ def _reject_secret_like(value: Mapping[str, Any]) -> None:
                 raise DirectoryBootstrapError(f"secret-bearing field is not allowed: {key}")
 
 
-def _intent(source: Mapping[str, Any], expected_version: str) -> DirectoryBootstrapIntent:
+def parse_ldap_simple_source(
+    source: Mapping[str, Any], expected_version: str
+) -> DirectoryBootstrapIntent:
     if source.get("mode") != "simple":
         raise DirectoryBootstrapUnsupported(
             "LDAP BindDN bootstrap is not automated; add the source in Gitea's authenticated "
@@ -87,6 +89,25 @@ def _intent(source: Mapping[str, Any], expected_version: str) -> DirectoryBootst
         not isinstance(source.get(key), str) or not str(source[key]).strip() for key in required
     ):
         raise DirectoryBootstrapError("simple LDAP bootstrap has missing required fields")
+    limits = {
+        "name": 128,
+        "directoryRealm": 128,
+        "host": 253,
+        "userDn": 4096,
+        "userFilter": 4096,
+        "emailAttribute": 128,
+        "usernameAttribute": 128,
+    }
+    for field, limit in limits.items():
+        value = source.get(field)
+        if value is not None and (
+            not isinstance(value, str)
+            or len(value) > limit
+            or any(ord(char) < 32 or ord(char) == 127 for char in value)
+        ):
+            raise DirectoryBootstrapError("directory field is invalid or exceeds its limit")
+    if any(char.isspace() or char in "/\\?#@" for char in str(source["host"])):
+        raise DirectoryBootstrapError("directory host must be a hostname or IP address")
     name = str(source["name"])
     if not _SAFE_NAME.fullmatch(name):
         raise DirectoryBootstrapError("authentication source name contains unsafe characters")
@@ -131,7 +152,7 @@ def prepare_ldap_simple_bootstrap(
         raise DirectoryBootstrapError("target-local binary, config, and CA paths must be absolute")
     if gitea_binary.is_symlink() or gitea_config.is_symlink() or ca_path.is_symlink():
         raise DirectoryBootstrapError("target-local paths must not be symlinks")
-    intent = _intent(source, expected_version)
+    intent = parse_ldap_simple_source(source, expected_version)
     canonical = {
         "name": intent.name,
         "directoryRealm": intent.directory_realm,
@@ -188,4 +209,5 @@ __all__ = [
     "DirectoryBootstrapUnsupported",
     "DirectoryBootstrapIntent",
     "prepare_ldap_simple_bootstrap",
+    "parse_ldap_simple_source",
 ]

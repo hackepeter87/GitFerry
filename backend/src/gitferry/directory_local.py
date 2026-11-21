@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import configparser
 import hashlib
+import json
 import os
 import re
 import subprocess
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +82,8 @@ class LocalBootstrap:
         gitea_config: Path,
         ca_path: Path,
         *,
+        work_path: Path,
+        custom_path: Path,
         expected_version: str = "1.27.2",
     ) -> None:
         self.state = state
@@ -90,6 +94,8 @@ class LocalBootstrap:
         self.gitea_config = gitea_config
         self.ca_path = ca_path
         self.expected_version = expected_version
+        self.work_path = work_path
+        self.custom_path = custom_path
         self.journal = DirectoryBootstrapService(state)
 
     def _preflight(self) -> tuple[DirectoryBootstrapPreflight, str]:
@@ -116,8 +122,49 @@ class LocalBootstrap:
             raise DirectoryLocalError("LDAP-simple bootstrap preflight failed") from exc
         if self.source.get("directoryRealm") != self.realm_key:
             raise DirectoryLocalError("directory source realm does not match supplied realm key")
+        context = {}
+        for label, path in (("work", self.work_path), ("custom", self.custom_path)):
+            if not path.is_absolute() or path.is_symlink() or not path.is_dir():
+                raise DirectoryLocalError("explicit work/custom directory is unavailable")
+            resolved = path.resolve(strict=True)
+            stat = resolved.stat()
+            context[label] = {"path": str(resolved), "device": stat.st_dev, "inode": stat.st_ino}
+        installation = self.state.get_instance(self.instance_key)
+        parser = configparser.ConfigParser(interpolation=None, strict=True)
+        try:
+            parser.read_string("[DEFAULT]\n" + config_bytes.decode("utf-8"))
+            root_url = parser.get("server", "ROOT_URL").strip().strip('"')
+        except (ValueError, configparser.Error, UnicodeError) as exc:
+            raise DirectoryLocalError(
+                "explicit server ROOT_URL is required in Gitea config"
+            ) from exc
+        if root_url.rstrip("/") != installation.base_url.rstrip("/"):
+            raise DirectoryLocalError("Gitea config ROOT_URL differs from the registered target")
+        prefix = (
+            *preflight.command[:3],
+            "--work-path",
+            str(context["work"]["path"]),
+            "--custom-path",
+            str(context["custom"]["path"]),
+        )
+        preflight = replace(preflight, command=(*prefix, *preflight.command[3:]))
+        with self.gitea_binary.open("rb") as stream:
+            binary_digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        fingerprint = {
+            "config_sha256": hashlib.sha256(config_bytes).hexdigest(),
+            "config_path": str(self.gitea_config.resolve(strict=True)),
+            "binary_path": str(self.gitea_binary.resolve(strict=True)),
+            "binary_sha256": binary_digest,
+            "ca_path": str(self.ca_path.resolve(strict=True)),
+            "ca_sha256": hashlib.sha256(_file(self.ca_path, _MAX_CA, "CA")).hexdigest(),
+            "instance_key": installation.instance_key,
+            "installation_marker": installation.installation_marker,
+            "context": context,
+        }
         self._version(preflight)
-        return preflight, hashlib.sha256(config_bytes).hexdigest()
+        return preflight, hashlib.sha256(
+            json.dumps(fingerprint, sort_keys=True).encode()
+        ).hexdigest()
 
     def _stored(
         self,
@@ -135,7 +182,11 @@ class LocalBootstrap:
         return record
 
     def _environment(self, preflight: DirectoryBootstrapPreflight) -> dict[str, str]:
-        environment = dict(os.environ)
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GITEA_") and key != "CONF_ARG"
+        }
         environment.update(dict(preflight.environment))
         return environment
 
@@ -144,6 +195,7 @@ class LocalBootstrap:
             result = subprocess.run(  # noqa: S603 - executable path is validated locally
                 list(argv),
                 env=self._environment(preflight),
+                cwd=self.work_path,
                 check=False,
                 capture_output=True,
                 text=True,
@@ -163,9 +215,7 @@ class LocalBootstrap:
 
     def _list(self, preflight: DirectoryBootstrapPreflight) -> dict[str, LocalAuthSource]:
         argv = (
-            os.fspath(self.gitea_binary),
-            "--config",
-            os.fspath(self.gitea_config),
+            *preflight.command[: preflight.command.index("admin")],
             "admin",
             "auth",
             "list",
@@ -238,15 +288,17 @@ class LocalBootstrap:
             config_fingerprint,
         )
 
-        def runner(_: DirectoryBootstrapRecord) -> str:
-            current_config = hashlib.sha256(
-                _file(self.gitea_config, _MAX_CONFIG, "Gitea config")
-            ).hexdigest()
-            if current_config != config_fingerprint:
-                raise DirectoryLocalError("Gitea config changed before local create")
-            before_create = self._list(preflight)
+        before_create: dict[str, LocalAuthSource] = {}
+
+        def before_execute() -> None:
+            _, current_fingerprint = self._preflight()
+            if current_fingerprint != config_fingerprint:
+                raise DirectoryLocalError("Gitea execution context changed before local create")
+            before_create.update(self._list(preflight))
             if name in before_create:
                 raise DirectoryLocalError("authentication source name appeared before create")
+
+        def runner(_: DirectoryBootstrapRecord) -> str:
             self._run(preflight.command, preflight)
             after = self._list(preflight)
             created = after.get(name)
@@ -274,7 +326,7 @@ class LocalBootstrap:
                 and observed.enabled
             )
 
-        return self.journal.apply(record, runner, verify=verify)
+        return self.journal.apply(record, runner, verify=verify, before_execute=before_execute)
 
     def status(self) -> DirectoryBootstrapRecord | None:
         preflight, _ = self._preflight()

@@ -36,37 +36,46 @@ test("checks an account before submitting a qualified candidate and keeps implic
   await page.getByLabel("Comment author").uncheck();
   await page.getByRole("button", { name: "Submit for approval" }).click();
   await expect(page.getByRole("heading", { name: "source.alice → target.alice" })).toBeVisible();
+  await expect(page.getByLabel("Credential reference for source.alice")).toHaveValue("cred.synthetic");
   expect(checkBody).toMatchObject({ target_instance_key: target.instance_key, profile_revision: 3, target_login: "target.alice", credential_ref: "cred.synthetic" });
-  expect(candidateBody).toMatchObject({ target_instance_key: target.instance_key, profile_revision: 3, authority_digest: candidate.authority_digest, target_account_id: "9001", target_login: "target.alice", prerequisites: { issue_author: true, comment_author: false, team_member: true } });
+  expect(candidateBody).toMatchObject({ target_instance_key: target.instance_key, profile_revision: 3, authority_digest: candidate.authority_digest, target_account_id: "9001", target_login: "target.alice", credential_ref: "cred.synthetic", prerequisites: { issue_author: true, comment_author: false, team_member: true } });
 });
 
 test("binds decisions to the current revision and exposes event history", async ({ page }) => {
   let decisionBody: Record<string, unknown> | undefined;
   await page.route("**/api/v1/identities/*/decision", async (route) => { decisionBody = route.request().postDataJSON(); await route.fulfill({ json: { ...candidate, status: "approved", revision: 2 } }); });
-  await page.route("**/api/v1/identities/*/events", (route) => route.fulfill({ json: [{ event_id: "event-1", event_type: "approved", created_at: "2026-01-01T01:00:00Z" }] }));
+  await page.route("**/api/v1/identities/*/events", (route) => route.fulfill({ json: [{ event_id: "event-1", event_type: "approved", evidence: { credential_checked: true }, created_at: "2026-01-01T01:00:00Z" }] }));
   await open(page, [candidate]);
+  await page.getByLabel("Credential reference for source.alice").fill("cred.approval");
   await page.getByRole("button", { name: "Approve" }).click();
-  expect(decisionBody).toMatchObject({ expected_revision: 1, decision: "approved", profile_revision: 3 });
+  expect(decisionBody).toMatchObject({ expected_revision: 1, decision: "approved", profile_revision: 3, credential_ref: "cred.approval" });
   await expect(page.getByText("approved", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "View events" }).click();
-  await expect(page.getByText(/approved · 2026-01-01/)).toBeVisible();
+  await expect(page.getByText(/approved · credential checked yes · 2026-01-01/)).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "Manage identities" }).click();
+  await expect(page.getByLabel("Credential reference for source.alice")).toHaveValue("");
 });
 
 test("reopens a conflict before approval and keeps the optional email empty", async ({ page }) => {
   const conflict = { ...candidate, status: "conflict" };
-  const decisions: string[] = [];
+  const decisions: Array<Record<string, unknown>> = [];
   await page.route("**/api/v1/identities/*/decision", async (route) => {
     const body = route.request().postDataJSON() as { decision: string; expected_revision: number };
-    decisions.push(body.decision);
+    decisions.push(body);
     await route.fulfill({ json: { ...candidate, status: body.decision === "pending" ? "pending" : "approved", revision: body.expected_revision + 1 } });
   });
   await open(page, [conflict]);
   await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
+  await page.getByLabel("Credential reference for source.alice").fill("cred.reopen");
   await page.getByRole("button", { name: "Reopen" }).click();
   await expect(page.getByText("Candidate pending.")).toBeVisible();
   await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByText("Candidate approved.")).toBeVisible();
-  expect(decisions).toEqual(["pending", "approved"]);
+  expect(decisions).toEqual([
+    expect.objectContaining({ decision: "pending", credential_ref: "cred.reopen" }),
+    expect.objectContaining({ decision: "approved", credential_ref: "cred.reopen" }),
+  ]);
   expect(await page.getByLabel("Email (optional, informational)").inputValue()).toBe("");
   await page.getByLabel("Source login").focus();
   await page.keyboard.press("Tab");
@@ -90,6 +99,7 @@ test("keeps rejection available for a retired target and shows immutable account
   expect(decisionBody).toBeUndefined();
   await page.getByRole("button",{name:"Reject",exact:true}).click();
   expect(decisionBody).toMatchObject({decision:"rejected",expected_revision:1,profile_revision:3});
+  expect(decisionBody).not.toHaveProperty("credential_ref");
   await page.getByRole("button",{name:"View events"}).click();
   await expect(page.getByLabel("Candidate events")).toContainText("actor local-admin-id");
   await expect(page.getByLabel("Candidate events")).toContainText("explicit-decision");

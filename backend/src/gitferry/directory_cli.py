@@ -46,6 +46,8 @@ def configure(parser: argparse.ArgumentParser, database_default: str | None) -> 
         action.add_argument("--gitea-binary", type=Path, required=True)
         action.add_argument("--gitea-config", type=Path, required=True)
         action.add_argument("--ca-file", type=Path, required=True)
+        action.add_argument("--work-path", type=Path, required=True)
+        action.add_argument("--custom-path", type=Path, required=True)
 
 
 def _input(path: Path) -> dict[str, Any]:
@@ -84,6 +86,8 @@ def _bootstrap(
         args.gitea_binary,
         args.gitea_config,
         args.ca_file,
+        work_path=args.work_path,
+        custom_path=args.custom_path,
     )
 
 

@@ -32,7 +32,9 @@ def _setup(tmp_path: Path, *, listing: list[list[str]] | None = None):
     state.register_instance("instance-a", "Synthetic A", "http://a.invalid", "install-a")
     state.register_realm("realm-a", "Synthetic LDAP", "realm-marker-a")
     config = tmp_path / "app.ini"
-    config.write_text("[server]\nAPP_NAME = Synthetic\n", encoding="utf-8")
+    config.write_text(
+        "[server]\nROOT_URL = http://a.invalid\nAPP_NAME = Synthetic\n", encoding="utf-8"
+    )
     ca = tmp_path / "ca.pem"
     ca.write_text("synthetic-ca\n", encoding="utf-8")
     listing_path = tmp_path / "listing.json"
@@ -70,6 +72,8 @@ def _setup(tmp_path: Path, *, listing: list[list[str]] | None = None):
         binary,
         config,
         ca,
+        work_path=tmp_path,
+        custom_path=tmp_path,
     )
 
 
@@ -101,7 +105,9 @@ def test_apply_creates_and_confirmed_replay_only_reads_back(tmp_path: Path) -> N
 def test_changed_config_cannot_be_reported_as_confirmed(tmp_path: Path) -> None:
     _, bootstrap = _setup(tmp_path)
     confirmed = bootstrap.apply()
-    bootstrap.gitea_config.write_text("[server]\nAPP_NAME = Changed\n", encoding="utf-8")
+    bootstrap.gitea_config.write_text(
+        "[server]\nROOT_URL = http://a.invalid\nAPP_NAME = Changed\n", encoding="utf-8"
+    )
     with pytest.raises(DirectoryBootstrapConflict, match="intent or config"):
         bootstrap.status()
     with pytest.raises(DirectoryBootstrapConflict, match="intent or config"):
@@ -136,6 +142,8 @@ def test_version_mismatch_is_rejected(tmp_path: Path) -> None:
         default_bootstrap.gitea_binary,
         default_bootstrap.gitea_config,
         default_bootstrap.ca_path,
+        work_path=tmp_path,
+        custom_path=tmp_path,
         expected_version="1.27.3",
     )
     with pytest.raises(DirectoryLocalError, match="version"):
@@ -166,3 +174,72 @@ def test_oversized_config_is_rejected(tmp_path: Path) -> None:
     bootstrap.gitea_config.write_bytes(b"x" * (2 * 1024 * 1024 + 1))
     with pytest.raises(DirectoryLocalError, match="size limit"):
         bootstrap.plan()
+
+
+@pytest.mark.parametrize(
+    "field", ["host", "userDn", "userFilter", "emailAttribute", "usernameAttribute"]
+)
+def test_control_characters_never_start_or_poison_journal(tmp_path, field):
+    state, bootstrap = _setup(tmp_path)
+    bootstrap.source[field] = "invalid\x00field"
+    with pytest.raises(DirectoryLocalError, match="preflight"):
+        bootstrap.apply()
+    assert bootstrap.journal.get("instance-a", SOURCE["name"]) is None
+    with state.read_connection() as connection:
+        assert (
+            connection.execute("SELECT count(*) FROM directory_bootstrap_events").fetchone()[0] == 0
+        )
+
+
+def test_context_override_is_scrubbed_and_explicit_context_change_conflicts(tmp_path, monkeypatch):
+    _, bootstrap = _setup(tmp_path)
+    plan = bootstrap.plan()
+    monkeypatch.setenv("GITEA_WORK_DIR", "/unreviewed/server")
+    monkeypatch.setenv("GITEA_CUSTOM", "/unreviewed/custom")
+    monkeypatch.setenv("GITEA__database__PATH", "/unreviewed/database")
+    monkeypatch.setenv("CONF_ARG", "--config /unreviewed/config")
+    assert bootstrap.plan().config_fingerprint == plan.config_fingerprint
+    env = bootstrap._environment(plan.preflight)
+    assert not any(key.startswith("GITEA_") or key == "CONF_ARG" for key in env)
+    confirmed = bootstrap.apply()
+    changed = tmp_path / "different-work"
+    changed.mkdir()
+    bootstrap.work_path = changed
+    with pytest.raises(DirectoryBootstrapConflict):
+        bootstrap.apply()
+    assert bootstrap.journal.get("instance-a", SOURCE["name"]) == confirmed
+
+
+def test_target_root_url_mismatch_stops_before_execution(tmp_path):
+    _, bootstrap = _setup(tmp_path)
+    bootstrap.gitea_config.write_text("[server]\nROOT_URL=https://other.invalid\n")
+    with pytest.raises(DirectoryLocalError, match="registered target"):
+        bootstrap.apply()
+    assert bootstrap.journal.get("instance-a", SOURCE["name"]) is None
+
+
+@pytest.mark.parametrize("failure", ["listing", "changed-config"])
+def test_definite_prerequisite_failure_remains_prepared(tmp_path, monkeypatch, failure):
+    _, bootstrap = _setup(tmp_path)
+    original = bootstrap._list
+    calls = 0
+
+    def listing(preflight):
+        nonlocal calls
+        calls += 1
+        if calls == 1 and failure == "changed-config":
+            with bootstrap.gitea_config.open("a") as stream:
+                stream.write("\n# changed before the write lease\n")
+        if calls == 2 and failure == "listing":
+            raise DirectoryLocalError("synthetic readback unavailable")
+        return original(preflight)
+
+    monkeypatch.setattr(bootstrap, "_list", listing)
+    with pytest.raises(DirectoryLocalError):
+        bootstrap.apply()
+    row = bootstrap.journal.get("instance-a", SOURCE["name"])
+    assert row.status == "prepared"
+    assert [
+        event["to_status"] for event in bootstrap.journal.events("instance-a", SOURCE["name"])
+    ] == ["prepared"]
+    assert json.loads((tmp_path / "listing.json").read_text()) == []

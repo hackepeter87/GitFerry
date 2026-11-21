@@ -17,6 +17,7 @@ from typing import Any
 
 from gitferry.blueprints import BlueprintValidationError, validate_document
 from gitferry.connection_profiles import ConnectionProfile, ProfileService
+from gitferry.directory_bootstrap import DirectoryBootstrapError, parse_ldap_simple_source
 from gitferry.state_store import StateStore
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -129,12 +130,10 @@ class DirectorySettingsService:
                 "unsupported-automation",
                 ["Add this BindDN source in Gitea's authenticated admin UI over HTTPS."],
             )
-        if source.get("type") == "ldap" and source.get("securityProtocol") != "starttls":
-            raise DirectorySettingsError("LDAP simple sources require securityProtocol=starttls")
-        if source.get("type") == "ldaps" and source.get("securityProtocol", "ldaps") != "ldaps":
-            raise DirectorySettingsError("LDAPS simple sources require TLS")
-        if not isinstance(source.get("caSecretRef"), str) or not source["caSecretRef"]:
-            raise DirectorySettingsError("simple sources require caSecretRef")
+        try:
+            parse_ldap_simple_source(source, "1.27.2")
+        except DirectoryBootstrapError as exc:
+            raise DirectorySettingsError("simple source prerequisites are invalid") from exc
         return "ready-for-target-local-bootstrap", [
             "target-local Gitea server access",
             "TLS with the configured CA",
@@ -216,7 +215,7 @@ class DirectorySettingsService:
                     raise DirectorySettingsConflict("configuration changed; reload before editing")
                 if row["directory_realm"] != clean["directoryRealm"]:
                     raise DirectorySettingsConflict("source identity cannot be redirected")
-                if row["source_sha256"] != digest:
+                if row["source_sha256"] != digest or row["profile_revision"] != profile.revision:
                     revision = current + 1
                     connection.execute(
                         "UPDATE directory_configurations SET directory_realm=?,source_json=?,"

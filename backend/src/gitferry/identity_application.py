@@ -78,6 +78,7 @@ class IdentityApplication:
             email=request.email,
             prerequisites=request.prerequisites,
             account_evidence=observed["account_evidence"],
+            credential_checked=observed["credential_checked"],
             authority_digest=request.authority_digest,
             profile_revision=request.profile_revision,
         )
@@ -123,6 +124,7 @@ class IdentityApplication:
                 actor=actor,
                 authority_digest=observed["authority_digest"],
                 profile_revision=request.profile_revision,
+                credential_checked=observed["credential_checked"],
             )
 
         def bind(record: dict[str, Any], connection: sqlite3.Connection) -> None:
@@ -189,4 +191,5 @@ class IdentityApplication:
             decision=request.decision,
             actor=actor,
             binder=bind if observed else None,
+            credential_checked=bool(observed and observed["credential_checked"]),
         )

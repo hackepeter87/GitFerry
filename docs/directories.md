@@ -22,14 +22,19 @@ bootstrap through its target administrator; it cannot report the source as confi
 ```text
 gitferry directories --database STATE list
 gitferry directories --database STATE bootstrap-plan --instance TARGET --source-name SOURCE \
-  --gitea-binary /usr/local/bin/gitea --gitea-config /etc/gitea/app.ini --ca-file /run/trust/directory.pem
+  --gitea-binary /usr/local/bin/gitea --gitea-config /etc/gitea/app.ini --ca-file /run/trust/directory.pem \
+  --work-path /var/lib/gitea --custom-path /var/lib/gitea/custom
 gitferry directories --database STATE bootstrap-apply --instance TARGET --source-name SOURCE \
-  --gitea-binary /usr/local/bin/gitea --gitea-config /etc/gitea/app.ini --ca-file /run/trust/directory.pem
+  --gitea-binary /usr/local/bin/gitea --gitea-config /etc/gitea/app.ini --ca-file /run/trust/directory.pem \
+  --work-path /var/lib/gitea --custom-path /var/lib/gitea/custom
 gitferry directories --database STATE inspect-bootstrap --instance TARGET --source-name SOURCE
 ```
 
 These paths are illustrative deployment paths, not values supplied by an exported blueprint.
-Planning checks the binary version, local files, stored intent and source-name collisions.
+Planning checks the binary version, local files, explicit work/custom directories, stored intent
+and source-name collisions. The actual server `ROOT_URL` must match the registered target URL.
+Ambient `GITEA_*` and wrapper `CONF_ARG` overrides are removed. The journal binds canonical
+execution paths, directory identities, binary/configuration/CA hashes and the installation marker.
 Application journals intent before the supported `gitea admin auth add-ldap-simple` call.
 Confirmed replay checks the same native source ID/name/type/activation and sends no second
 creation. This readback does **not** expose or prove the complete remote filter/DN/CA configuration.

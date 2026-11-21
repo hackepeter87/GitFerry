@@ -48,9 +48,9 @@
               "bindSecretRef": {"$ref": "#/$defs/secretRef"},
               "caSecretRef": {"$ref": "#/$defs/secretRef"}
             },
-            "anyOf": [
-              {"required": ["bindSecretRef"]},
-              {"required": ["mode", "userDn", "userFilter", "emailAttribute", "caSecretRef"]}
+            "oneOf": [
+              {"required": ["bindSecretRef"], "not": {"required": ["mode"]}},
+              {"required": ["mode", "userDn", "userFilter", "emailAttribute", "caSecretRef"], "not": {"required": ["bindSecretRef"]}}
             ],
             "allOf": [
               {
