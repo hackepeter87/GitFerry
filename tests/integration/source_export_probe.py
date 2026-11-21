@@ -41,6 +41,8 @@ ASSERTIONS = frozenset(
         "package_admission_database_independent",
         "no_user_preparation_blocks_metadata",
         "package_replay_process_restart_no_extra_posts_or_objects",
+        "api_queue_background_download",
+        "api_restart_replay_no_source_access",
     }
 )
 
@@ -75,10 +77,17 @@ compile(TARGET_REPLAY_PROGRAM, "<target-replay>", "exec")
 
 def _worker(mode: str) -> dict[str, Any]:
     result = docker_service_exec(
-        "gitferry-a", ["python", "/probe/source_export_worker.py", mode], timeout=180
+        "gitferry-a", ["python", "/probe/source_export_worker.py", mode], timeout=240, check=False
     )
     if result.returncode:
-        raise ProbeFailure(f"source export worker {mode} failed with exit {result.returncode}")
+        evidence = {"mode": mode, "exit_code": result.returncode}
+        for line in result.stderr.splitlines():
+            if line.startswith("GITFERRY_PROBE_ERROR "):
+                evidence.update(json.loads(line.removeprefix("GITFERRY_PROBE_ERROR ")))
+        (WORK / "source-export-worker-failure.json").write_text(json.dumps(evidence, indent=2))
+        raise ProbeFailure(
+            f"source export worker {mode} failed; see source-export-worker-failure.json"
+        )
     return json.loads(result.stdout)
 
 
@@ -199,8 +208,24 @@ def run_source_export_probe() -> dict[str, Any]:
         "source_context_cannot_target_or_external": captured["source_target_unreachable"]
         and captured["source_external_unreachable"],
         "capture_has_no_api_writes": not api_writes and bool(captured["git_upload_pack_posts"]),
-        "offline_replay_exact": replay
-        == {"status": "captured", "package_digest": captured["package_digest"], "unchanged": True},
+        "offline_replay_exact": replay["status"] == "captured"
+        and replay["package_digest"] == captured["package_digest"]
+        and replay["unchanged"],
+        "api_queue_background_download": (
+            captured["api_queue_status"] in {"queued", "running", "ready"}
+            and captured["api_queue_export_id"] == "source-export-real"
+            and captured["api_delivery"]["status"] == "ready"
+            and captured["api_delivery"]["capture_status"] == "captured"
+            and captured["api_download"]["archive_sha256"] == captured["archive_sha256"]
+            and captured["api_download"]["header_sha256"] == captured["archive_sha256"]
+            and captured["api_download"]["archive_bytes"] == captured["archive_bytes"]
+            and captured["api_download"]["header_bytes"] == captured["archive_bytes"]
+        ),
+        "api_restart_replay_no_source_access": (
+            replay["api_status"] == "ready"
+            and replay["archive_sha256"] == captured["archive_sha256"]
+            and replay["no_source_access"]
+        ),
         "target_only_archive_verified": received.document["format"]
         == "gitferry.application-package"
         and target_probe.returncode == 0,

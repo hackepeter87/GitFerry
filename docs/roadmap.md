@@ -50,8 +50,10 @@ now active for the complete first-import workflow. Source selection and the pack
 are integrated (PRs #51 and #52). The source-export slice now connects selected source reads and
 Git bundles to that package without changing metadata v1/v2 bytes. PR #53 is integrated as
 `5c7d303` with hosted-main run `44862775964` passing all 23 mandatory checks. Local
-receipt/admission and translation into the existing durable plan are in development; local
-identity decisions and the complete wizard remain
+receipt/admission and translation into the existing durable plan are integrated through PR #54,
+main `9e6b2f4`, with hosted-main run `44866950765` passing all 23 mandatory checks. Guided source
+capture and verified download are the current delivery slice; target intake, local identity
+decisions and the complete wizard remain
 open acceptance work; this does not close Issue #10 or milestone 0.2.
 The [plan guide](transfer-plans.md) describes the current boundary without claiming a complete
 first-import wizard.

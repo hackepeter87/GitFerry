@@ -1,8 +1,10 @@
 # Selected source export
 
-The current operator CLI captures a bounded selection from a locally approved Gitea source into
-an owned application package. It is an application-core building block for Issue #10, not yet
-the completed browser-based first-import workflow. See [ADR 0014](decisions/0014-read-only-source-capture.md).
+The source-selection screen and operator CLI capture a bounded selection from a locally approved
+Gitea source into an owned application package. Source export is a building block for Issue #10;
+the complete browser-based target intake and first-import workflow remain separate acceptance
+work. See [ADR 0014](decisions/0014-read-only-source-capture.md) and
+[ADR 0016](decisions/0016-durable-source-downloads.md).
 
 ## Prerequisites
 
@@ -15,7 +17,28 @@ The configured `GITFERRY_STATE_DB`, `GITFERRY_PACKAGE_DIR` and `GITFERRY_WORK_DI
 owned local paths. Existing credential and CA references stay local. No secrets are included
 in the package, request record or CLI result.
 
-## Capture and inspect
+## Export through the application
+
+Sign in as administrator, select an approved source connection, browse its organizations and
+select repositories. Choose the recipient registration and the metadata/member options, then
+create and queue the export. The saved command binds the selected repository IDs and source
+profile revision. A later changed profile requires a fresh selection; it cannot silently change
+the saved command. Recipient registration is local context, not target approval.
+
+Saved exports survive page reload and process restart. The background worker continues without
+an open browser. `prepared, not queued` requires Start; `failed` requires investigation and an
+explicit retry. `ready` exposes a verified archive download, byte size and SHA-256. These states
+describe source packaging, not successful target migration. Refresh exports to retrieve current
+status if automatic polling has stopped. An uncertain create response must be retried with the
+same saved request ID, not treated as proof that no command exists.
+
+The protected `/api/v1/exports` endpoints provide list/create, recipient registrations, status,
+explicit queueing and download. Writes require the existing admin session and CSRF header.
+Download streams from owned persistent storage; it does not load the full package into browser
+JavaScript memory. The work directory retains both download evidence and the ZIP. Do not delete
+or replace confirmed files as a retry procedure.
+
+## CLI capture and inspect
 
 For a synthetic locally approved source at profile revision 1 and a selected repository with
 native ID 7:

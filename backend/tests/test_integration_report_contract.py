@@ -59,6 +59,8 @@ def complete_probe_report() -> dict[str, object]:
                     "package_admission_database_independent",
                     "no_user_preparation_blocks_metadata",
                     "package_replay_process_restart_no_extra_posts_or_objects",
+                    "api_queue_background_download",
+                    "api_restart_replay_no_source_access",
                 ),
                 True,
             ),
@@ -526,6 +528,8 @@ def test_application_plan_assertion_is_required(tmp_path: Path, assertion: str) 
         "package_admission_database_independent",
         "no_user_preparation_blocks_metadata",
         "package_replay_process_restart_no_extra_posts_or_objects",
+        "api_queue_background_download",
+        "api_restart_replay_no_source_access",
     ],
 )
 def test_source_capture_assertion_is_required(tmp_path: Path, assertion: str) -> None:
