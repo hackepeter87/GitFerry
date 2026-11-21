@@ -184,3 +184,26 @@ def test_archive_output_cannot_add_an_undeclared_file_to_its_source(
     with pytest.raises(package_archive.PackageError, match="outside"):
         package_archive.write_package_archive(source, source / "export.zip")
     assert [path.name for path in source.iterdir()] == ["payload"]
+
+
+def test_writer_rejects_replaced_fifo_without_waiting_for_a_writer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import os
+
+    source = tmp_path / "package"
+    source.mkdir()
+    payload = source / "payload"
+    payload.write_bytes(b"original")
+
+    def replace_payload(directory: Path) -> package_archive.PackageArtifact:
+        artifact = _artifact(directory)
+        payload.unlink()
+        os.mkfifo(payload)
+        return artifact
+
+    monkeypatch.setattr(package_archive, "inspect_package", replace_payload)
+    with pytest.raises(package_archive.PackageError, match="changed while archiving"):
+        package_archive.write_package_archive(source, tmp_path / "archive.zip")
+    assert not (tmp_path / "archive.zip").exists()
+    assert not list(tmp_path.glob(".archive.zip.*.part"))

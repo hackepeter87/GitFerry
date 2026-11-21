@@ -11,6 +11,7 @@ import errno
 import hashlib
 import os
 import shutil
+import stat
 import tempfile
 import uuid
 import zipfile
@@ -115,12 +116,25 @@ def write_package_archive(directory: Path, destination: Path) -> None:
                 info.compress_type = zipfile.ZIP_STORED
                 size = 0
                 digest = hashlib.sha256()
+                source_path = artifact.directory / PurePosixPath(name)
+                source_fd = os.open(
+                    source_path,
+                    os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+                )
                 with (
-                    (artifact.directory / PurePosixPath(name)).open("rb") as source,
+                    os.fdopen(source_fd, "rb") as source,
                     archive.open(info, "w", force_zip64=True) as target,
                 ):
+                    details = os.fstat(source.fileno())
+                    if (
+                        not stat.S_ISREG(details.st_mode)
+                        or details.st_size != artifact.files[name][0]
+                    ):
+                        raise PackageError("package file changed while archiving")
                     for chunk in iter(lambda: source.read(_CHUNK), b""):
                         size += len(chunk)
+                        if size > artifact.files[name][0]:
+                            raise PackageError("package file grew while archiving")
                         digest.update(chunk)
                         target.write(chunk)
                 if (size, digest.hexdigest()) != artifact.files[name]:

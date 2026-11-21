@@ -63,7 +63,9 @@ def _file(directory: Path, member: str) -> Path:
 
 
 def _digest(path: Path, *, limit: int | None = None) -> tuple[int, str]:
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    descriptor = os.open(
+        path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    )
     digest = hashlib.sha256()
     size = 0
     with os.fdopen(descriptor, "rb") as stream:
@@ -78,6 +80,19 @@ def _digest(path: Path, *, limit: int | None = None) -> tuple[int, str]:
                 raise PackageError("package member exceeds its size limit")
             digest.update(chunk)
     return size, digest.hexdigest()
+
+
+def _read_bounded(path: Path, limit: int) -> bytes:
+    descriptor = os.open(
+        path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    )
+    with os.fdopen(descriptor, "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise PackageError("package member is not a regular file")
+        raw = stream.read(limit + 1)
+    if len(raw) > limit:
+        raise PackageError("package member exceeds its size limit")
+    return raw
 
 
 def _schema() -> dict[str, Any]:
@@ -200,6 +215,8 @@ def _contents(directory: Path, document: dict[str, Any]) -> dict[str, tuple[int,
     scopes = {item["repository"] for item in document["repositories"]}
     if not {item["repository"] for item in data["selected_repositories"]}.issubset(scopes):
         raise PackageError("metadata selects a repository outside the package")
+    if any(item["origin"]["repository"] not in scopes for item in data["objects"]):
+        raise PackageError("metadata object origin is outside the selected repositories")
     authors = {_issue_key(item["origin"]): item["author"] for item in reference["issue_authors"]}
     issues = {
         _issue_key(item["origin"])
@@ -229,15 +246,13 @@ def inspect_package(directory: Path) -> PackageArtifact:
     if directory.is_symlink() or not directory.is_dir():
         raise PackageError("package root must be a regular directory")
     path = _file(directory, PACKAGE_NAME)
-    with path.open("rb") as stream:
-        raw = stream.read(MAX_MANIFEST_BYTES + 1)
-    if len(raw) > MAX_MANIFEST_BYTES:
-        raise PackageError("package descriptor exceeds its size limit")
+    raw = _read_bounded(path, MAX_MANIFEST_BYTES)
     facts = (len(raw), hashlib.sha256(raw).hexdigest())
     digest_path = _file(directory, DIGEST_NAME)
-    digest_facts = _digest(digest_path, limit=65)
+    digest_raw = _read_bounded(digest_path, 65)
+    digest_facts = (len(digest_raw), hashlib.sha256(digest_raw).hexdigest())
     try:
-        if digest_path.read_bytes() != (facts[1] + "\n").encode("ascii"):
+        if digest_raw != (facts[1] + "\n").encode("ascii"):
             raise PackageError("package byte digest mismatch")
         document = _parse(raw)
     except ManifestValidationError as exc:

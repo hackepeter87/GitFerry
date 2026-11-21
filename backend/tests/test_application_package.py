@@ -267,3 +267,21 @@ def test_existing_package_cannot_be_rewritten(tmp_path: Path) -> None:
     with pytest.raises(PackageError, match="differs"):
         write_package(tmp_path, document)
     assert inspect_package(tmp_path).digest_sha256 == first.digest_sha256
+
+
+def test_embedded_objects_cannot_escape_declared_selection(tmp_path: Path) -> None:
+    document, raw = with_metadata(tmp_path, 2)
+    manifest = json.loads(raw)
+    for item in manifest["objects"]:
+        item["origin"]["repository"] = "outside/unselected"
+        if "parent_issue_origin" in item["origin"]:
+            item["origin"]["parent_issue_origin"]["repository"] = "outside/unselected"
+    document["metadata"]["issue_authors"][0]["origin"]["repository"] = "outside/unselected"
+    changed = json.dumps(manifest).encode()
+    digest = hashlib.sha256(changed).hexdigest()
+    (tmp_path / "metadata/manifest.json").write_bytes(changed)
+    (tmp_path / "metadata/manifest.json.sha256").write_text(digest + "\n")
+    document["metadata"]["digest_sha256"] = digest
+    with pytest.raises(PackageError, match="object origin is outside"):
+        write_package(tmp_path, document)
+    assert not (tmp_path / "package.json").exists()

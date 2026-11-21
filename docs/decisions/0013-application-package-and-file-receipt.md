@@ -20,6 +20,9 @@ with its original sidecar. The package references its exact ID and byte digest a
 matching sender, recipient, forward mode and transfer round. Included issue origins have
 exactly one explicit author relation; v2 comment authors remain in their existing manifest.
 A realm description is data, not a working LDAP/AD integration or permission to create a realm.
+Every embedded object origin must name a selected repository scope; merely listing the right
+repository in the manifest selection is insufficient. Cross-scope repository renaming is not
+implemented in this first-import package slice and never invents a replacement origin.
 
 `package.json` uses UTF-8, sorted keys, compact JSON separators and one trailing newline when
 written by GitFerry. `package.sha256` contains lowercase SHA-256 of those exact stored bytes
