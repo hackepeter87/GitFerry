@@ -54,6 +54,93 @@ def complete_probe_report() -> dict[str, object]:
             },
             "source_writes_during_collection": 0,
         },
+        "native_payloads": {
+            "status": "passed",
+            "gitea_version": "1.27.2",
+            "assertions": {key: True for key in report_contract().NATIVE_PAYLOAD_ASSERTIONS},
+            "cases": {
+                "normal": {
+                    "source": {"inventory_status": "ready"},
+                    "applied": {
+                        "wiki_refs_and_content_match": True,
+                        "lfs_remote_bytes_verified": True,
+                    },
+                    "replay": {
+                        "source_state_absent": True,
+                        "isolation_checked": True,
+                        "plan_status": "confirmed",
+                        "operations": {"upload_lfs_object": "confirmed"},
+                        "remote_writes": 0,
+                        "lfs_uploads": 1,
+                    },
+                    "repackaged": {
+                        "remote_writes": 0,
+                        "lfs_uploads": 1,
+                        "operations": {"upload_lfs_object": "confirmed"},
+                    },
+                },
+                "crash": {
+                    "source": {"inventory_status": "ready"},
+                    "applied": {"exit_code": 88},
+                    "replay": {
+                        "source_state_absent": True,
+                        "isolation_checked": True,
+                        "after_remote_crash_marker": True,
+                        "lfs_remote_bytes_verified": True,
+                        "operations": {"upload_lfs_object": "outcome_unknown"},
+                        "remote_writes": 0,
+                        "lfs_uploads": 1,
+                    },
+                    "repackaged": {
+                        "remote_writes": 0,
+                        "lfs_uploads": 1,
+                        "operations": {"upload_lfs_object": "outcome_unknown"},
+                    },
+                    "resolved": {"plan_status": "confirmed", "lfs_uploads": 1},
+                },
+                "lost": {
+                    "source": {"inventory_status": "ready"},
+                    "applied": {"response_lost_marker": True},
+                    "replay": {
+                        "source_state_absent": True,
+                        "isolation_checked": True,
+                        "operations": {"upload_lfs_object": "outcome_unknown"},
+                        "remote_writes": 0,
+                        "lfs_uploads": 1,
+                    },
+                    "repackaged": {
+                        "remote_writes": 0,
+                        "lfs_uploads": 1,
+                        "operations": {"upload_lfs_object": "outcome_unknown"},
+                    },
+                    "resolved": {"plan_status": "confirmed", "lfs_uploads": 1},
+                },
+            },
+            "negatives": {
+                "status": "passed",
+                "assertions": {key: True for key in report_contract().NATIVE_NEGATIVE_ASSERTIONS},
+            },
+            "return_export": {
+                "status": "passed",
+                "application_return_blocked": True,
+                "files": {
+                    "lfs": {"oid": "c" * 64, "size": 128},
+                    "refs": {"refs/heads/main": "d" * 40},
+                },
+            },
+            "return_import": {
+                "status": "passed",
+                "scope": "native adapter feasibility only",
+                "control_refs_unchanged": True,
+                "application_return_implemented": False,
+                "isolation_checked": True,
+                "lfs_sha256": "c" * 64,
+                "a_baseline": {"refs/heads/main": "a" * 40},
+                "returned_refs": {"refs/heads/main": "b" * 40},
+                "drift_preserved": {"refs/heads/main": "e" * 40},
+                "confirmation": {"refs": {"refs/heads/main": "b" * 40}},
+            },
+        },
         "directory": {
             "status": "passed",
             "application_claim_reader": {
@@ -154,6 +241,15 @@ def complete_probe_report() -> dict[str, object]:
         },
         "source_exports": {
             "status": "passed",
+            "source_browser": {"inventory_request_version": 3},
+            "native_payloads": {
+                "status": "passed",
+                "lfs": {"a" * 64: 128, "b" * 64: 256},
+                "wiki": {
+                    "source-export-lab/selected": {"refs/heads/master": "c" * 40},
+                    "source-export-lab/selected-extra": {"refs/heads/master": "d" * 40},
+                },
+            },
             "ad_identity_recovery": {
                 "status": "passed",
                 "assertions": dict.fromkeys(
@@ -984,5 +1080,69 @@ def test_inventory_partial_or_mismatched_evidence_cannot_pass(change: str) -> No
         item
         for item in report_contract().evidence_catalog(report, True)
         if item["id"] == "selected_content_inventory_and_portable_plan"
+    )
+    assert entry["status"] == "failed"
+
+
+@pytest.mark.parametrize("mutation", ["missing", "false"])
+def test_native_payload_assertion_is_mandatory(tmp_path: Path, mutation: str) -> None:
+    report = complete_probe_report()
+    assertions = report["native_payloads"]["assertions"]
+    if mutation == "missing":
+        del assertions["explicit_digest_reconciliation"]
+    else:
+        assertions["explicit_digest_reconciliation"] = False
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "native_payload_capture_and_restart_safety"
+    )
+    assert entry["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["wrong_crash_exit", "unknown_bypassed", "repeated_replay_upload", "failed_resolve"],
+)
+def test_native_payload_faults_cannot_pass(tmp_path: Path, mutation: str) -> None:
+    report = complete_probe_report()
+    native = report["native_payloads"]
+    if mutation == "wrong_crash_exit":
+        native["cases"]["crash"]["applied"]["exit_code"] = 87
+    elif mutation == "unknown_bypassed":
+        native["cases"]["lost"]["replay"]["operations"]["upload_lfs_object"] = "confirmed"
+    elif mutation == "repeated_replay_upload":
+        native["cases"]["normal"]["replay"]["lfs_uploads"] = 2
+    else:
+        native["cases"]["crash"]["resolved"]["plan_status"] = "failed"
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "native_payload_capture_and_restart_safety"
+    )
+    assert entry["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["repackaged", "negative", "return_export", "return_import"],
+)
+def test_native_payload_subevidence_cannot_be_omitted_or_downgraded(
+    tmp_path: Path, mutation: str
+) -> None:
+    report = complete_probe_report()
+    native = report["native_payloads"]
+    if mutation == "repackaged":
+        del native["cases"]["normal"]["repackaged"]
+    elif mutation == "negative":
+        native["negatives"]["assertions"].pop("corrupt_lfs_payload_rejected")
+    elif mutation == "return_export":
+        native["return_export"]["files"].pop("lfs")
+    else:
+        native["return_import"]["application_return_implemented"] = True
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "native_payload_capture_and_restart_safety"
     )
     assert entry["status"] == "failed"

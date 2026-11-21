@@ -10,6 +10,7 @@ services:
       GITEA__server__HTTP_PORT: "3000"
       GITEA__server__OFFLINE_MODE: "true"
       GITEA__server__ROOT_URL: http://source:3000/
+      GITEA__server__LFS_START_SERVER: "true"
       GITEA__log__MODE: console
       GITEA__log__LEVEL: warn
     ports:
@@ -30,6 +31,7 @@ services:
     environment:
       <<: *gitea-environment
       GITEA__server__ROOT_URL: http://target:3000/
+      GITEA__server__LFS_START_SERVER: "true"
       SSL_CERT_FILE: /run/directory-ca/ca.pem
       GITEA__migrations__ALLOWED_DOMAINS: source
       GITEA__migrations__ALLOW_LOCALNETWORKS: "true"
@@ -110,6 +112,7 @@ services:
       disable: true
     environment:
       GITFERRY_SIDE: A
+      GITFERRY_IT_ADMIN_PASSWORD: ${GITFERRY_IT_ADMIN_PASSWORD}
       GITFERRY_GITEA_URL: http://source:3000
       GITFERRY_IT_USER_PASSWORD: ${GITFERRY_IT_USER_PASSWORD}
       GITFERRY_IT_INSTANCE_NONCE: ${GITFERRY_IT_INSTANCE_NONCE}

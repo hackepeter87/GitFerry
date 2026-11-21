@@ -120,6 +120,8 @@ test("phase0 selects an approved repository and downloads its export", async ({ 
   }
   await choose(page, page.getByLabel("Recipient registration"), "target");
   await check(page, page.getByLabel("Include membership records"));
+  await check(page, page.getByLabel("Include Git LFS objects"));
+  await check(page, page.getByLabel("Include native wiki history"));
   const inventoryQueuedResponse = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/v1/inventories");
   await activate(page, page.getByRole("button", { name: "Inspect selected content" }));
   const inventoryQueued = await inventoryQueuedResponse;
@@ -139,7 +141,9 @@ test("phase0 selects an approved repository and downloads its export", async ({ 
   const queued = await queuedResponse;
   expect(queued.ok()).toBeTruthy();
   const queuedJob = await queued.json();
-  expect(queuedJob.request.version).toBe(2);
+  expect(queuedJob.request.version).toBe(3);
+  expect(queuedJob.request.include_lfs).toBe(true);
+  expect(queuedJob.request.include_wiki).toBe(true);
   expect(queuedJob.request.inventory_digest).toMatch(/^[0-9a-f]{64}$/);
   const row = page.locator(".export-list li").last();
   await expect(row.locator(".export-status")).toHaveText("ready", { timeout: 60_000 });

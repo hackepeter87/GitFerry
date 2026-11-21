@@ -32,6 +32,7 @@ from gitferry.plan_runner import PlanRunner
 from gitferry.runtime import RuntimePaths
 from gitferry.state_store import StateStore
 from gitferry.transfer_plans import PlanService
+from native_browser_fixture import verify as verify_native_browser
 
 ROOT = Path("/state/package-admission")
 DATABASE = ROOT / "state" / "state.sqlite3"
@@ -218,7 +219,7 @@ def _initialize() -> tuple[PackageAdmissions, str, dict[str, Any]]:
     )
     plan_worker.ROOT = ROOT
     plan_worker.URL = URL
-    with plan_worker.proxy():
+    with plan_worker.proxy(preserve_origin=True):
         evidence = probe_connection(profiles, TARGET, expected_revision=1, references=_references())
     approve_connection(
         profiles, TARGET, expected_revision=1, evidence_digest=evidence["evidence_digest"]
@@ -531,7 +532,7 @@ def initial() -> dict[str, Any]:
     paths = service.paths
     plan_worker.ROOT = ROOT
     plan_worker.URL = URL
-    with plan_worker.proxy():
+    with plan_worker.proxy(preserve_origin=True):
         result = PlanRunner(
             plans,
             lambda _: GiteaPlanAdapter(service.state, paths, _references()),
@@ -628,7 +629,7 @@ def serve_browser() -> None:
         }
     )
     plan_worker.ROOT, plan_worker.URL = ROOT, URL
-    with plan_worker.proxy():
+    with plan_worker.proxy(preserve_origin=True):
         serve(ROOT)
 
 
@@ -860,6 +861,12 @@ def browser_result() -> dict[str, Any]:
             raise
     else:
         raise RuntimeError("unselected source repository was transferred")
+    native_payloads = verify_native_browser(
+        ROOT,
+        ROOT / "packages" / PACKAGE_REF,
+        (ROOT / "secrets" / "gitferry-admin").read_text().strip(),
+        service.artifact(PACKAGE_REF).document,
+    )
     bundle_refs = transferred["source-export-lab/selected"]["refs"]
     events = (ROOT / "remote-events.jsonl").read_text(encoding="utf-8").splitlines()
     with service.state.read_connection() as connection:
@@ -867,6 +874,7 @@ def browser_result() -> dict[str, Any]:
             0
         ]
     return {
+        "native_payloads": native_payloads,
         "selected_repositories": transferred,
         "unselected_absent": True,
         "status": result["status"],

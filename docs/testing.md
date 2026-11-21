@@ -851,7 +851,7 @@ reaction null semantics, parent relationships, binary size facts and an unchange
 control repository. Collection performs only GET requests.
 
 The required report entry `selected_content_inventory_and_portable_plan` combines these facts
-with the actual desktop inventory review, inventory-bound application-package v2 export and
+with the actual desktop inventory review, inventory-bound application-package export and
 existing isolated file-first-import flow. Missing assertions or counts fail the report contract.
 The TLS test proxy preserves Gitea pagination headers; dropping them must block collection.
 
@@ -877,3 +877,36 @@ enumeration: Gitea creates PR refs asynchronously. It retains per-class expected
 collected, and independently re-read counts in `inventory-counts.json`; any
 difference fails the run. Queue completion is bounded and recorded, including
 failure and timeout. This fixture boundary does not alter production drift rules.
+
+
+## Native LFS and wiki first import (Issue #18)
+
+The common `make test-integration` run includes `native_payload_probe.py` and the
+existing production-image desktop first-import workflow. The latter selects LFS
+and wiki content explicitly: two wiki histories and two distinct LFS objects,
+including a pointer reachable only through an earlier revision. Target native
+bytes, wiki refs and page content are checked independently after UI execution.
+Manifest v1/v2 and application-package v1/v2 compatibility tests remain unchanged.
+
+`native_payload_worker.py` uses independent source/target SQLite volumes and only
+the copied archive. Its actual contexts test opposite-instance/public-network
+isolation. Normal replay, process exit 88 after successful upload but before local
+commit, and a proxy dropping an already-successful LFS PUT response run in separate
+cases. Replay and new package IDs must retain the same operation identities and
+produce no second upload. Explicit reconciliation verifies target bytes before
+resuming the original plan. A passing interruption assertion leaves the operation
+`outcome_unknown` until that explicit step; it is not a successful migration.
+
+The negative worker tests unavailable pointers, missing/corrupt packaged objects,
+and disabled/uninitialized source wikis. API/Git errors never establish empty wiki
+history. Unit tests additionally cover path traversal, hardlinks/symlinks, byte and
+count bounds, ref-name credential-word false positives, immutable changed intents,
+and confirmation/reconciliation of 10,000 refs without oversized journal evidence.
+
+The bounded return worker copies a new B LFS object and changed wiki bundle back to
+A. A reads its original wiki comparison refs from its own export, verifies returned
+Git-history pointers and LFS bytes, and rejects a subsequent ref-specific A drift.
+This is native-adapter feasibility only: no application return plan, deletion,
+branch conversion, wiki authorization transfer or general merge capability follows.
+Exact commits, runs, failure diagnostics and final acceptance belong to #18/its PR
+and the common Actions report rather than a separate evidence-only commit chain.

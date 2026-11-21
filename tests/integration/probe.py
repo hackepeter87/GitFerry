@@ -17,6 +17,7 @@ from connection_profile_probe import run_connection_profile_probe
 from content_inventory_probe import run_content_inventory_probe
 from directory_probe import run_directory_probe
 from metadata_roundtrip_probe import run_metadata_roundtrip_probe
+from native_payload_probe import run_native_payload_probe
 from oci_runtime_probe import run_oci_runtime_probe
 from openapi_migration_probe import run_openapi_migration_probe
 from permissions_probe import run_permissions_probe
@@ -316,6 +317,7 @@ def main() -> None:
         "content_inventory": run_content_inventory_probe(),
         "application_plans": run_application_plan_probe(),
         "source_exports": run_source_export_probe(),
+        "native_payloads": run_native_payload_probe(),
         "git_bundle": git_bundle_probe(),
         "metadata": metadata_probe(source_users, target_users),
         "identity_and_permissions": permissions,

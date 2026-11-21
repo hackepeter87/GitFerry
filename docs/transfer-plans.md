@@ -112,3 +112,28 @@ transaction. Other writers can still change remote data between checks, includin
 comment-read/PATCH gap. There is no general exactly-once guarantee, timestamp restoration, or
 atomic PATCH contract. Replay is safe for confirmed reads and writes; an unknown write remains
 blocked until explicit reconciliation.
+
+## LFS and wiki unknown outcomes
+
+Native payload steps use the same durable plan and writer lock. An interrupted LFS
+upload, wiki initialization or wiki push must not be retried under another package
+ID to bypass `outcome_unknown`. Inspect the operation and the mapped target first.
+The bounded operator reconciliation command is:
+
+```sh
+gitferry plans resolve-native --operation-id OPERATION_ID \
+  --evidence "Reason for the explicit target verification"
+```
+
+Use the configured `GITFERRY_STATE_DB` or supply `--database`. Target connection, CA
+and credentials remain locally approved references. LFS verification reads and
+hashes the actual target object; wiki publication requires exact remote refs.
+For unknown wiki bootstrap also supply `--wiki-commit SHA`: the mapped repository,
+page, sole root commit and technical content must agree. The command performs no
+remote write and cannot confirm unrelated history. Recheck and queue the existing
+plan after successful resolution. UI-based general conflict/reconciliation flows
+remain in the return milestone.
+
+Wiki pushes record compact ref-count/digest confirmation, with full ref facts kept
+in the immutable intent. A changed bundle path, size or digest cannot inherit a
+prior completion, even when its ref map looks the same.

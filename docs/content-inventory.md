@@ -65,3 +65,24 @@ Inventory facts are untrusted source observations. They do not approve identitie
 permissions, authenticate a sender, or authorize execution. Re-review a ready inventory before
 using it in an export or package plan.
 
+
+## Explicit native payload selection
+
+The desktop export options **Include Git LFS objects** and **Include native wiki
+history** invalidate prior inventory approval. Select them before inspecting and
+reviewing the inventory. They use source request v3, inventory v2 and application
+package v3; these versions are independent of transport manifest v1/v2 and SQLite.
+
+LFS discovery includes standard v1 pointers in all selected reachable history, not
+only the current checkout. Every required object must be available; export then
+streams and verifies its bytes. Native wiki selection carries its separate Git
+history/ref set. Disabled, external and uninitialized wikis currently block this
+selection; an absent API result is not proof that the wiki is empty. The plan shows
+these limitations before export. Do not omit a required content class to call an
+incomplete transfer complete.
+
+The target must enable HTTP Git and LFS where selected. Wiki bootstrap also checks
+the newly created/mapped target repository's actual default branch before its
+POST; that branch must exist in the selected wiki refs. A blocked native step may
+leave already-confirmed organization/repository setup intact. It does not authorize
+ref deletion or automatic branch renaming.

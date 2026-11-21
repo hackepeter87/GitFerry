@@ -91,6 +91,34 @@ INVENTORY_OBSERVED = frozenset(
     }
 )
 
+NATIVE_PAYLOAD_ASSERTIONS = frozenset(
+    {
+        "source_inventory_and_v3_capture",
+        "independent_state_file_only_transfer",
+        "native_lfs_digest_and_wiki_history",
+        "confirmed_restart_zero_writes",
+        "remote_success_before_crash",
+        "lost_success_response_persistent_unknown",
+        "unknown_restart_no_second_upload",
+        "explicit_digest_reconciliation",
+        "new_package_preserves_operation_identity",
+        "negative_payload_prerequisites",
+        "native_return_and_selected_ref_conflict",
+    }
+)
+
+NATIVE_NEGATIVE_ASSERTIONS = frozenset(
+    {
+        "missing_lfs_is_blocked_unknown",
+        "missing_lfs_export_refuses_blocked_inventory",
+        "uninitialized_wiki_blocks_without_false_empty_claim",
+        "disabled_wiki_is_blocked_unknown",
+        "missing_lfs_payload_rejected",
+        "corrupt_lfs_payload_rejected",
+        "source_observation_is_write_free",
+    }
+)
+
 
 def _inventory_evidence(report: dict[str, Any]) -> bool:
     counts = _value(report, "content_inventory.counts")
@@ -106,6 +134,146 @@ def _inventory_evidence(report: dict[str, Any]) -> bool:
         and counts.get("other_content") is None
         and _value(report, "content_inventory.source_writes_during_collection") == 0
     )
+
+
+def _native_payload_evidence(report: dict[str, Any]) -> bool:
+    """Require the live native payload probe's complete, bounded result shape."""
+
+    evidence = _value(report, "native_payloads")
+    browser = _value(report, "source_exports.native_payloads")
+    browser_request_version = _value(
+        report, "source_exports.source_browser.inventory_request_version"
+    )
+    if not (
+        isinstance(evidence, dict)
+        and evidence.get("status") == "passed"
+        and evidence.get("gitea_version") == "1.27.2"
+        and _all_required_true(report, "native_payloads.assertions", NATIVE_PAYLOAD_ASSERTIONS)
+        and set(evidence.get("assertions", {})) == NATIVE_PAYLOAD_ASSERTIONS
+        and isinstance(browser, dict)
+        and browser.get("status") == "passed"
+        and isinstance(browser.get("lfs"), dict)
+        and len(browser["lfs"]) == 2
+        and all(
+            isinstance(oid, str)
+            and re.fullmatch(r"[0-9a-f]{64}", oid)
+            and type(size) is int
+            and size > 0
+            for oid, size in browser["lfs"].items()
+        )
+        and isinstance(browser.get("wiki"), dict)
+        and len(browser["wiki"]) == 2
+        and all(
+            isinstance(scope, str) and isinstance(refs, dict)
+            for scope, refs in browser["wiki"].items()
+        )
+        and all(
+            refs
+            and all(
+                isinstance(ref, str)
+                and ref.startswith("refs/")
+                and isinstance(sha, str)
+                and re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", sha)
+                for ref, sha in refs.items()
+            )
+            for refs in browser["wiki"].values()
+        )
+        and isinstance(browser_request_version, int)
+        and browser_request_version == 3
+    ):
+        return False
+    negatives = evidence.get("negatives")
+    return_export = evidence.get("return_export")
+    return_import = evidence.get("return_import")
+    if not (
+        isinstance(negatives, dict)
+        and negatives.get("status") == "passed"
+        and isinstance(negatives.get("assertions"), dict)
+        and set(negatives["assertions"]) == NATIVE_NEGATIVE_ASSERTIONS
+        and all(value is True for value in negatives["assertions"].values())
+        and isinstance(return_export, dict)
+        and return_export.get("status") == "passed"
+        and return_export.get("application_return_blocked") is True
+        and isinstance(return_export.get("files"), dict)
+        and isinstance(return_export["files"].get("lfs"), dict)
+        and isinstance(return_export["files"]["lfs"].get("oid"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", return_export["files"]["lfs"]["oid"])
+        and type(return_export["files"]["lfs"].get("size")) is int
+        and return_export["files"]["lfs"]["size"] > 0
+        and isinstance(return_export["files"].get("refs"), dict)
+        and return_export["files"]["refs"]
+        and isinstance(return_import, dict)
+        and return_import.get("status") == "passed"
+        and return_import.get("scope") == "native adapter feasibility only"
+        and return_import.get("application_return_implemented") is False
+        and return_import.get("isolation_checked") is True
+        and return_import.get("control_refs_unchanged") is True
+        and isinstance(return_import.get("lfs_sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", return_import["lfs_sha256"])
+        and isinstance(return_import.get("a_baseline"), dict)
+        and isinstance(return_import.get("returned_refs"), dict)
+        and isinstance(return_import.get("drift_preserved"), dict)
+        and return_import["returned_refs"] != return_import["drift_preserved"]
+        and isinstance(return_import.get("confirmation"), dict)
+    ):
+        return False
+    cases = evidence.get("cases")
+    if not isinstance(cases, dict) or set(cases) != {"normal", "crash", "lost"}:
+        return False
+    for case_name, case in cases.items():
+        if not isinstance(case, dict):
+            return False
+        source = case.get("source")
+        applied = case.get("applied")
+        replay = case.get("replay")
+        repackaged = case.get("repackaged")
+        if not (
+            isinstance(source, dict)
+            and source.get("inventory_status") == "ready"
+            and isinstance(applied, dict)
+            and isinstance(replay, dict)
+            and isinstance(repackaged, dict)
+            and replay.get("source_state_absent") is True
+            and replay.get("isolation_checked") is True
+            and replay.get("remote_writes") == 0
+            and replay.get("lfs_uploads") == 1
+        ):
+            return False
+        if not (
+            repackaged.get("remote_writes") == 0
+            and repackaged.get("lfs_uploads") == 1
+            and repackaged.get("operations") == replay.get("operations")
+        ):
+            return False
+        if case_name == "normal":
+            if not (
+                applied.get("wiki_refs_and_content_match") is True
+                and applied.get("lfs_remote_bytes_verified") is True
+                and replay.get("plan_status") == "confirmed"
+            ):
+                return False
+        elif case_name == "crash":
+            if not (
+                applied.get("exit_code") == 88
+                and replay.get("after_remote_crash_marker") is True
+                and replay.get("lfs_remote_bytes_verified") is True
+            ):
+                return False
+        else:
+            if applied.get("response_lost_marker") is not True:
+                return False
+        if case_name != "normal":
+            operations = replay.get("operations")
+            resolved = case.get("resolved")
+            if not (
+                isinstance(operations, dict)
+                and operations.get("upload_lfs_object") == "outcome_unknown"
+                and isinstance(resolved, dict)
+                and resolved.get("plan_status") == "confirmed"
+                and resolved.get("lfs_uploads") == 1
+            ):
+                return False
+    return True
 
 
 def _run(args: list[str]) -> str:
@@ -388,6 +556,12 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
             is True,
             "tests/integration/content_inventory_probe.py",
             "content_inventory",
+        ),
+        (
+            "native_payload_capture_and_restart_safety",
+            _native_payload_evidence(report),
+            "tests/integration/native_payload_probe.py",
+            "native_payloads",
         ),
         (
             "separate_samba_ad_claim_qualification",
