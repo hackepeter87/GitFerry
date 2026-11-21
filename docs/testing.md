@@ -52,8 +52,13 @@ commit does not approve a later correction or merge commit.
 The plan core now connects to the fixed Gitea adapter and protected API/local CLI. Local tests
 cover immutable plans, atomic publication, original baseline preservation, writer exclusion,
 real child-process recovery with a simulated remote, exact author bindings and parent ordering.
-A managed-worker test closes the HTTP client while a simulated write is in progress and confirms
-completion without keeping that client alive. This is not a browser acceptance claim.
+A managed-worker test closes the HTTP client while a simulated write is in progress. The
+Chromium suite now adds a real-backend browser test: queue with the keyboard, wait for the
+simulated remote-write synchronization point, close the page, release the write, reopen and
+observe the same confirmed journal operation. It also prepares a new draft through the UI
+without changing that operation identity. All 14 browser tests passed; mocked API cases cover
+review/queue/cancel, empty state, unknown-parent distinctions and delayed-response selection.
+The browser remote is simulated; the independent Gitea probe below supplies remote evidence.
 
 Local integration run `e5b4cbd772c74829` passed all 21 required report checks. Its new
 `application_plans` section passed 14 assertions in the target-only Linux/arm64 container:
@@ -71,10 +76,14 @@ authentication challenge for Git; diagnostic artifacts and cleanup worked. The p
 forwards that challenge. Existing manifest-v1/v2 and separate-state roundtrip regressions passed.
 
 The final local quality gate passed 270 backend tests plus lint, formatting, MyPy and frontend
-build. The controlled failure contract and `make test-clean` also passed. The current
-application-plan changes have not yet completed hosted CI or exact-head review.
-Earlier hosted run `44845305520` passed only the preceding core commit `20087ff`.
-Issue #9 remains open for plan UI/browser acceptance and final review/integration. The bounded
+build. The controlled failure contract and `make test-clean` also passed. Hosted run `44847979869` passed the backend/adapter source commit `79f25db` on Linux x86_64
+with Docker Linux/amd64 28.0.4 and no emulation. Its tested PR merge checkout was `0f069e6`;
+the report records both identities, all 22 mandatory checks including workflow cleanup, and
+all 14 application-plan assertions. Both Gitea containers resolved to image ID
+`sha256:e8be8e1f776fe453b811d88887306b1d7bdf83577789465e5d186924014a57a6`.
+The controlled failure report correctly remains failed with exit 86 and successful cleanup.
+The subsequent UI slice still requires its own hosted CI and final exact-head review.
+Issue #9 remains open for final requirement review and integration. The bounded
 selection probe is not proof of a complete inventory or guided source-to-target import wizard.
 See [the operator boundary](transfer-plans.md) and [ADR 0012](decisions/0012-durable-transfer-plans.md).
 

@@ -8,10 +8,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import uvicorn
-
+from gitferry import api as api_module
 from gitferry.api import create_app
 from gitferry.auth import AuthService
 from gitferry.state_store import StateStore
+from plan_fixture import BrowserPlanAdapter, attach_plan_fixture
 
 
 class MutableClock:
@@ -38,6 +39,7 @@ def main() -> None:
     database = runtime_root / "state.sqlite3"
     clock = MutableClock()
     auth = AuthService(StateStore(database), clock=clock)
+    database.chmod(0o600)
     if args.mode == "bootstrapped" and not auth.bootstrap_completed():
         auth.bootstrap_admin("synthetic.admin", "correct synthetic passphrase")
         for name, value in (
@@ -47,7 +49,19 @@ def main() -> None:
             path = runtime_root / name
             path.write_text(value + "\n", encoding="utf-8")
             path.chmod(0o600)
+    os.environ.update(
+        {
+            "GITFERRY_RUNTIME_MANAGED": "1",
+            "GITFERRY_STATE_DB": str(database),
+            "GITFERRY_PACKAGE_DIR": str(runtime_root.with_name(args.mode + "-packages")),
+            "GITFERRY_WORK_DIR": str(runtime_root.with_name(args.mode + "-work")),
+        }
+    )
+    # Only this synthetic test server substitutes a controlled remote adapter.
+    # The production worker/journal and HTTP routes remain unchanged.
+    api_module.GiteaPlanAdapter = BrowserPlanAdapter
     application = create_app(auth_service=auth, session_cookie_secure=False)
+    attach_plan_fixture(application, auth.state)
 
     @application.post("/__test__/expire-sessions")
     def expire_sessions() -> dict[str, bool]:

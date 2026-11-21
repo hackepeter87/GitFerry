@@ -2,7 +2,9 @@
 
 The local application planner composes the existing organization, repository, team, Git-bundle,
 issue and normal-comment operations. It does not introduce another mapping store or journal.
-The full import wizard is not yet available. This interface currently accepts an explicit
+The plan panel can review, start, refresh and cancel local plans, and prepare another draft
+from a saved selection without editing JSON. This preserves the original comparison facts and
+operation IDs. The full source-selection/import wizard is not yet available. This interface currently accepts an explicit
 selection of locally registered origins and confirmed identity bindings; it is not a complete
 inventory of a source instance or a replacement for transport-manifest validation.
 
@@ -48,8 +50,8 @@ Equivalent local operator commands are `gitferry plans prepare --input selection
 and `run --plan-id ID`. Each command accepts `--database PATH`; `GITFERRY_STATE_DB` supplies
 the default. `run` without an ID selects the next queued or interrupted plan. Package and work
 roots use `GITFERRY_PACKAGE_DIR` and `GITFERRY_WORK_DIR`; credentials and CAs use the existing
-local reference directories. Execution requires these directories to exist. This CLI is an
-operator boundary while the ordinary guided UI is still being completed.
+local reference directories. Execution requires these directories to exist. The plan UI uses these same endpoints. The ordinary guided first-import selection flow is
+still being completed under Issue #10.
 
 ## Recovery
 

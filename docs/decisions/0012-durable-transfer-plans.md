@@ -52,7 +52,9 @@ background plan workflow.
 The application planner, fixed Gitea/bundle composition, API/CLI boundaries and real-Gitea
 restart/crash/lost-response probes are now implemented and locally exercised. The protected
 server starts its worker using the same runtime store and paths. Issue #9 remains open for
-plan UI/browser acceptance and final review/integration. The existing
+final review/integration. The plan panel uses the same persisted state and supports reviewed
+execution and draft creation from saved local selections. Chromium tests distinguish the real
+worker with a simulated remote from the separate real-Gitea interruption proof. The existing
 integration suite remains the regression baseline. Manifest v1/v2 versions and bytes do not
 change; local schema migration 7 is independent of their transport versions.
 
