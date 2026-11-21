@@ -36,6 +36,7 @@ export interface IdentityCandidate {
   prerequisites: IdentityPrerequisites;
   status: IdentityStatus;
   revision: number;
+  account_evidence?: { source_id: string | null; login_name: string | null };
   authority_digest: string;
   profile_revision: number;
   created_at: string;

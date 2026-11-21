@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -552,5 +552,8 @@ CREATE TABLE identity_decision_events (
 
 CREATE INDEX identity_candidates_status ON identity_candidates(status, updated_at);
 CREATE INDEX identity_decision_events_candidate ON identity_decision_events(candidate_id, event_id);
+""",
+    14: """
+ALTER TABLE identity_candidates ADD COLUMN target_account_evidence TEXT NOT NULL DEFAULT '{}';
 """,
 }

@@ -213,6 +213,7 @@ class PackageDecisions:
             "authority_digest": authority,
             "target_login": request.target_login,
             "target_account_id": observed["target_account_id"],
+            "account_evidence": observed["account_evidence"],
             "credential_checked": request.credential_ref is not None,
         }
 
@@ -256,6 +257,7 @@ class PackageDecisions:
             candidate = known[0]
             if (
                 candidate["target"]["login"] != request.target_login
+                or candidate["account_evidence"] != observed["account_evidence"]
                 or candidate["authority_digest"] != observed["authority_digest"]
                 or candidate["profile_revision"] != request.profile_revision
             ):

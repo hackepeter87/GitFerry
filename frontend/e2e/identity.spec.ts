@@ -72,3 +72,25 @@ test("reopens a conflict before approval and keeps the optional email empty", as
   await page.keyboard.press("Tab");
   await expect(page.getByLabel("External ID")).toBeFocused();
 });
+
+test("keeps rejection available for a retired target and shows immutable account/audit evidence", async ({ page }) => {
+  const retired = { ...candidate, target: { ...candidate.target, account_id: "9007199254740993", instance_key: "retired-target" } };
+  let decisionBody: Record<string, unknown> | undefined;
+  await page.route("**/api/v1/identities/*/decision", async route => {
+    decisionBody = route.request().postDataJSON();
+    await route.fulfill({json:{...retired,status:"rejected",revision:2}});
+  });
+  await page.route("**/api/v1/identities/*/events", route => route.fulfill({json:[{
+    revision:2,decision:"rejected",actor:"local-admin-id",reason:"explicit-decision",created_at:"2026-01-01T01:00:00Z",
+  }]}));
+  await open(page,[retired]);
+  await expect(page.getByText(/native account 9007199254740993/)).toBeVisible();
+  await page.getByRole("button",{name:"Approve",exact:true}).click();
+  await expect(page.getByRole("alert")).toContainText("connection is disabled");
+  expect(decisionBody).toBeUndefined();
+  await page.getByRole("button",{name:"Reject",exact:true}).click();
+  expect(decisionBody).toMatchObject({decision:"rejected",expected_revision:1,profile_revision:3});
+  await page.getByRole("button",{name:"View events"}).click();
+  await expect(page.getByLabel("Candidate events")).toContainText("actor local-admin-id");
+  await expect(page.getByLabel("Candidate events")).toContainText("explicit-decision");
+});

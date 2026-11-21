@@ -77,6 +77,7 @@ class IdentityApplication:
             },
             email=request.email,
             prerequisites=request.prerequisites,
+            account_evidence=observed["account_evidence"],
             authority_digest=request.authority_digest,
             profile_revision=request.profile_revision,
         )
@@ -113,6 +114,7 @@ class IdentityApplication:
             if (
                 observed is None
                 or str(candidate["target"]["account_id"]) != observed["target_account_id"]
+                or candidate["account_evidence"] != observed["account_evidence"]
             ):
                 raise BindingConflict("target account changed; cannot reopen this candidate")
             return self.decisions.refresh_review(
@@ -125,13 +127,19 @@ class IdentityApplication:
 
         def bind(record: dict[str, Any], connection: sqlite3.Connection) -> None:
             target, selector = record["target"], record["selector"]
+            try:
+                current_authority = _authority(
+                    connection, target["instance_key"], request.profile_revision
+                )
+            except (PackageAdmissionConflict, PlanConflict):
+                raise BindingConflict("target approval changed before local commit") from None
             if (
                 observed is None
                 or str(target["account_id"]) != observed["target_account_id"]
+                or record["account_evidence"] != observed["account_evidence"]
                 or record["profile_revision"] != request.profile_revision
                 or record["authority_digest"] != observed["authority_digest"]
-                or _authority(connection, target["instance_key"], request.profile_revision)
-                != observed["authority_digest"]
+                or current_authority != observed["authority_digest"]
             ):
                 raise BindingConflict("target account or local approval changed")
             binding_id = (

@@ -18,6 +18,7 @@ from gitferry.gitea_provisioning import (
     verify_account,
     verify_technical_administrator,
 )
+from gitferry.identity_observations import require_current_account
 from gitferry.issue_operations import execute_issue_operation, preflight_issue_operation
 from gitferry.operations import OperationExecutor
 from gitferry.plan_application import PlanRequest, parse_plan_request
@@ -150,11 +151,13 @@ class GiteaPlanAdapter:
             )
             self.resources.callback(issue_client.close)
             self.check = PreflightCheck.AUTHOR_IDENTITY
+            account = issue_client.get_authenticated_user()
             verify_account(
-                issue_client.get_authenticated_user(),
+                account,
                 binding.target_login,
                 binding.target_account_id,
             )
+            require_current_account(self.state, binding, account)
             self.issues[binding_id] = issue_client
             self.comments[binding_id] = self.resources.enter_context(
                 GiteaCommentClient(

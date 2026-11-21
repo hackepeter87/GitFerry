@@ -80,6 +80,14 @@ def check_target_account(
     if type(identifier) is not int or not 0 < identifier <= 2**63 - 1:
         raise PackageAdmissionConflict("invalid native account ID")
     verify_account(account, target_login, identifier)
+    if account.get("prohibit_login") is True or account.get("active") is False:
+        raise PackageAdmissionConflict("target account is disabled")
+    source_id = account.get("source_id")
+    login_name = account.get("login_name")
+    if source_id is not None and (type(source_id) is not int or source_id < 0):
+        raise PackageAdmissionConflict("invalid native authentication source")
+    if login_name is not None and (not isinstance(login_name, str) or len(login_name) > 1024):
+        raise PackageAdmissionConflict("invalid native authentication login")
     with state.read_connection() as connection:
         if _authority(connection, target_instance_key, profile_revision) != authority:
             raise PackageAdmissionConflict("target approval changed during account check")
@@ -88,4 +96,8 @@ def check_target_account(
         "target_login": target_login,
         "target_account_id": str(identifier),
         "credential_checked": credential_ref is not None,
+        "account_evidence": {
+            "source_id": str(source_id) if source_id is not None else None,
+            "login_name": login_name,
+        },
     }

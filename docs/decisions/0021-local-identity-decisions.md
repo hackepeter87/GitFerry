@@ -9,7 +9,8 @@ records. A separate review record does not grant access or rewrite an author. It
 qualified source selector, a proposed native target account, optional informational email,
 intended issue/comment/team prerequisites, and locally approved connection evidence.
 
-SQLite migration 13 adds candidates and append-only decision events. Candidate account IDs
+SQLite migration 13 adds candidates and append-only decision events. Migration 14 adds the
+observed native Gitea authentication-source ID and login name as separate account evidence. Candidate account IDs
 are transported to the browser as decimal strings. Source identity, target instance and native
 account are immutable. Multiple explicit candidates may be inspected without choosing one by
 name or email. The existing unique binding constraints still permit only one binding per
@@ -29,7 +30,7 @@ bindings remain compatible; no manifest or application-package format changes ar
 ## Limits
 
 A typed SID/external ID or OU is a local claim, not proof of LDAP/AD authentication. Verified
-native account ID/login and non-admin status are separate from directory qualification. Live
+native account ID/login and non-admin status are separate from directory qualification. A changed native authentication-source ID/login name or disabled account blocks approval. Live
 account checks are not an atomic Gitea version precondition; another administrator can change
 an account afterwards. Transfer operations retain their own prerequisite checks and journal.
 

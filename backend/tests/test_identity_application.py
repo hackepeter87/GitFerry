@@ -233,3 +233,89 @@ def test_cli_uses_same_decisions_and_rejects_embedded_approval(tmp_path, monkeyp
     )
     assert identity_cli.execute(args) == 2
     assert json.loads(capsys.readouterr().out)["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"source_id": 8, "login_name": "same-user"},
+        {"source_id": 7, "login_name": "replacement-user"},
+        {"source_id": 7, "login_name": "same-user", "prohibit_login": True},
+    ],
+)
+def test_native_authentication_source_change_blocks_approval(tmp_path, monkeypatch, changed):
+    app, request, _ = prepared(tmp_path, monkeypatch)
+    remote(
+        monkeypatch,
+        {
+            "id": 9007199254740993,
+            "login": "target.author",
+            "is_admin": False,
+            "source_id": 7,
+            "login_name": "same-user",
+            "prohibit_login": False,
+        },
+    )
+    candidate = app.propose(request)
+    assert candidate["account_evidence"] == {"source_id": "7", "login_name": "same-user"}
+    remote(
+        monkeypatch,
+        {"id": 9007199254740993, "login": "target.author", "is_admin": False, **changed},
+    )
+    result = app.decide(
+        candidate["candidate_id"],
+        IdentityAction(expected_revision=1, decision="approved", profile_revision=1),
+        actor="operator",
+    )
+    assert result["status"] == "conflict"
+    with app.state.read_connection() as c:
+        assert c.execute("SELECT count(*) FROM identity_bindings").fetchone()[0] == 0
+
+
+def test_preflight_authentication_drift_remains_blocked_when_reopened(tmp_path, monkeypatch):
+    from gitferry.identity_observations import require_current_account
+    from gitferry.state_store import OperationBlocked
+
+    app, request, _ = prepared(tmp_path, monkeypatch)
+    account = {
+        "id": 9007199254740993,
+        "login": "target.author",
+        "is_admin": False,
+        "source_id": 7,
+        "login_name": "directory-user",
+        "prohibit_login": False,
+    }
+    remote(monkeypatch, account)
+    candidate = app.propose(request)
+    app.decide(
+        candidate["candidate_id"],
+        IdentityAction(expected_revision=1, decision="approved", profile_revision=1),
+        actor="operator",
+    )
+    binding = app.state.find_identity_binding(
+        source_realm_key=request.selector.realm_key,
+        source_login=request.selector.login,
+        source_external_id=request.selector.external_id,
+        source_ou_path=request.selector.ou_path,
+        target_instance_key="b",
+    )
+    require_current_account(app.state, binding, account)
+    with pytest.raises(OperationBlocked):
+        require_current_account(app.state, binding, {**account, "source_id": 8})
+    assert app.decisions.get_candidate(candidate["candidate_id"])["status"] == "conflict"
+    # Even restoring the old native fact does not silently resolve a local conflict.
+    with pytest.raises(OperationBlocked):
+        require_current_account(app.state, binding, account)
+    app.decide(
+        candidate["candidate_id"],
+        IdentityAction(expected_revision=3, decision="pending", profile_revision=1),
+        actor="operator",
+    )
+    with pytest.raises(OperationBlocked):
+        require_current_account(app.state, binding, account)
+    app.decide(
+        candidate["candidate_id"],
+        IdentityAction(expected_revision=4, decision="approved", profile_revision=1),
+        actor="operator",
+    )
+    require_current_account(app.state, binding, account)

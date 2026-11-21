@@ -128,6 +128,7 @@ class IdentityDecisionService:
                 "ou_path": row["target_ou_path"],
                 "native_id": row["target_native_id"],
             },
+            "account_evidence": json.loads(row["target_account_evidence"]),
             "authority_digest": row["authority_digest"],
             "profile_revision": row["profile_revision"],
             "prerequisites": json.loads(row["prerequisites_json"]),
@@ -147,7 +148,11 @@ class IdentityDecisionService:
         profile_revision: int,
         email: str | None = None,
         candidate_id: str | None = None,
+        account_evidence: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        account_evidence = dict(account_evidence or {})
+        if set(account_evidence) - {"source_id", "login_name"}:
+            raise ValueError("unsupported account evidence")
         selector = self._validate_selector(selector)
         target = self._validate_target(target)
         prerequisites = self._validate_prerequisites(prerequisites)
@@ -164,6 +169,7 @@ class IdentityDecisionService:
             "target": target,
             "prerequisites": prerequisites,
             "email": email,
+            "account_evidence": account_evidence,
         }
         if find_secret_field(payload):
             raise ValueError("identity candidate contains a secret-like field")
@@ -177,7 +183,8 @@ class IdentityDecisionService:
                 existing = self._record(row)
                 normalized_target = {**target, "account_id": str(target["account_id"])}
                 if (
-                    existing["selector"] != selector
+                    existing["account_evidence"] != account_evidence
+                    or existing["selector"] != selector
                     or existing["target"] != normalized_target
                     or existing["email"] != email
                     or existing["prerequisites"] != prerequisites
@@ -188,7 +195,7 @@ class IdentityDecisionService:
                 return existing
             timestamp = now()
             connection.execute(
-                "INSERT INTO identity_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO identity_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     candidate_id,
                     selector["realm_key"],
@@ -209,6 +216,7 @@ class IdentityDecisionService:
                     1,
                     timestamp,
                     timestamp,
+                    canonical_json(account_evidence),
                 ),
             )
             connection.execute(
