@@ -45,7 +45,12 @@ OCI_RUNTIME_ASSERTION_NAMES = frozenset(
         "corrupt_database_failed_closed",
         "read_only_directory_failed_closed",
         "symlink_path_failed_closed",
+        "documented_compose_installation",
     }
+)
+
+REFERENCE_COMPOSE_ASSERTION_NAMES = frozenset(
+    {"exact_image", "healthy", "non_root", "aliases_readable", "installed_admin_security"}
 )
 
 
@@ -441,9 +446,22 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         ),
         (
             "persistent_non_root_oci_runtime",
-            _all_required_true(report, "oci_runtime.assertions", OCI_RUNTIME_ASSERTION_NAMES),
+            _all_required_true(report, "oci_runtime.assertions", OCI_RUNTIME_ASSERTION_NAMES)
+            and _all_required_true(
+                report, "oci_runtime.reference_compose", REFERENCE_COMPOSE_ASSERTION_NAMES
+            )
+            and isinstance(_value(report, "oci_runtime.reference_compose.image_id"), str)
+            and (
+                re.fullmatch(
+                    r"sha256:[0-9a-f]{64}",
+                    _value(report, "oci_runtime.reference_compose.image_id"),
+                )
+                is not None
+                and _value(report, "oci_runtime.reference_compose.image_id")
+                == _value(report, "oci_runtime.image_id")
+            ),
             "tests/integration/oci_runtime_probe.py",
-            "oci_runtime.assertions",
+            "oci_runtime.assertions and oci_runtime.reference_compose",
         ),
         (
             "provisioning_crash_and_lost_response_halt_replay",

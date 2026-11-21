@@ -176,6 +176,15 @@ def complete_probe_report() -> dict[str, object]:
                 "corrupt_database_failed_closed": True,
                 "read_only_directory_failed_closed": True,
                 "symlink_path_failed_closed": True,
+                "documented_compose_installation": True,
+            },
+            "reference_compose": {
+                "image_id": "sha256:" + "a" * 64,
+                "exact_image": True,
+                "healthy": True,
+                "non_root": True,
+                "aliases_readable": True,
+                "installed_admin_security": True,
             },
         },
     }
@@ -574,4 +583,24 @@ def test_installed_application_security_is_required(tmp_path: Path, assertion: s
     module = report_contract()
     report = complete_probe_report()
     del report["oci_runtime"]["assertions"][assertion]
+    assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize(
+    "key", ["exact_image", "healthy", "non_root", "aliases_readable", "installed_admin_security"]
+)
+def test_documented_compose_installation_requires_each_fact(tmp_path: Path, key: str) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    del report["oci_runtime"]["reference_compose"][key]
+    assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))
+
+
+@pytest.mark.parametrize("image_id", [None, "sha256:" + "b" * 64])
+def test_documented_compose_installation_must_use_runtime_image(
+    tmp_path: Path, image_id: str | None
+) -> None:
+    module = report_contract()
+    report = complete_probe_report()
+    report["oci_runtime"]["reference_compose"]["image_id"] = image_id
     assert not module.probe_contract_is_complete(prepare_results(tmp_path, report))

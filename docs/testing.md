@@ -23,10 +23,12 @@ Mocks do not replace Gitea integration evidence.
 ## First-import delivery checks
 
 The common `make test-integration` entry runs the packaged source and target applications in
-their isolated Gitea networks. `frontend/integration/first-import.spec.ts` selects the source
-repository, creates a durable export, downloads its archive, uploads those exact bytes to the
+their isolated Gitea networks. `frontend/integration/first-import.spec.ts` selects two source
+repositories while excluding a control, creates a durable export, downloads its archive, uploads those exact bytes to the
 target, makes explicit local identity decisions and requests a prerequisite preview before
-execution. The target is then inspected for Git refs, native authors and the comment parent.
+execution. The core controls use bounded Tab navigation and visible-focus checks; file inputs
+receive synthetic files through the browser test driver. The narrow viewport also checks the
+actual plan storage estimate, overflow and accessibility. The target is then inspected for Git refs, native authors and the comment parent.
 The browser and application process are restarted before observing the same confirmed plan and
 checking replay for additional writes or objects. Source/target state remains separate.
 

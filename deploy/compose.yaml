@@ -49,6 +49,6 @@ volumes:
 
 secrets:
   source_api_token:
-    file: ${GITFERRY_SOURCE_TOKEN_FILE:-./secrets/source-api-token}
+    file: ${GITFERRY_SOURCE_TOKEN_FILE:-./secrets/source_api_token}
   target_api_token:
-    file: ${GITFERRY_TARGET_TOKEN_FILE:-./secrets/target-api-token}
+    file: ${GITFERRY_TARGET_TOKEN_FILE:-./secrets/target_api_token}

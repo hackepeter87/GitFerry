@@ -61,8 +61,7 @@ Use the source selection, export, package intake and transfer-plan sections in o
    or permissions.
 5. Review the included metadata and choose whether to apply team/member changes. Review the
    generated selection and digest, then prepare a draft in Transfer plans. Review operations,
-   actors, limitations, and target
-   prerequisites. Request the read-only prerequisite preview before starting.
+   actors, limitations, the saved local free-space estimate, and target prerequisites. Request the read-only prerequisite preview before starting.
 6. A passed preview is tied to the exact plan digest and generation. Start only after that gate.
    The worker rechecks prerequisites while holding the executor lock, then records durable
    operation states. Closing or refreshing the browser does not cancel queued work.
@@ -74,7 +73,7 @@ Changing or refreshing the source clears the preliminary selection. Loading or f
 imply complete inventory or authorization to execute. A preview is evidence for review, not a
 guarantee: execution performs its own checks before any write.
 
-## Portable package file boundary (in progress)
+## Portable package file boundary
 
 An application package combines a versioned `package.json` selection descriptor with Git bundles
 and an optional unchanged v1/v2 metadata manifest. Issue-author relationships are explicit in
@@ -98,6 +97,6 @@ compression, links, special files, undeclared files, duplicate names and path tr
 rejected. Existing destinations are preserved. Reports say `validated-files-only` and
 `execution_authorized: false`. No database, credential or network access is used by these commands.
 
-These are application-core building blocks for the wizard. Administrators are not expected to
-assemble descriptors manually in the final workflow. See
+The guided workflow uses these application-core services. Administrators do not assemble
+descriptors manually. See
 [ADR 0013](decisions/0013-application-package-and-file-receipt.md) for the trust boundary.

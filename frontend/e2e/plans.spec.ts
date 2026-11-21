@@ -18,7 +18,7 @@ const plan = {
   profile_revision: 2, evidence_digest: "c".repeat(64), round_key: "review-round", status: "draft",
   cancel_requested: false, reason: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
   preview: { generation: 1, plan_digest: "b".repeat(64), status: "passed", reason: null, scope: "synthetic-org/synthetic-repo", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
-  document: { inventory: { request: { repositories: [{ organization: "synthetic-org", repository: "synthetic-org/synthetic-repo" }] }, inventory_complete: false, limitations: ["Selected explicit inputs only; not a complete remote inventory"] } },
+  document: { required_bytes: 67121152, inventory: { request: { repositories: [{ organization: "synthetic-org", repository: "synthetic-org/synthetic-repo" }] }, inventory_complete: false, limitations: ["Selected explicit inputs only; not a complete remote inventory"] } },
   operations: [{ operation_id: "op.synthetic", operation_type: "create_repository", target_repository_scope: "synthetic-org/synthetic-repo", status: "prepared", target_global_id: null, error_reason: null }],
 };
 
@@ -39,6 +39,7 @@ test.describe("transfer plan review (mocked API)", () => {
     await expect(page.getByRole("heading", { name: "Transfer plans" })).toBeVisible();
     await expect(page.getByRole("region", { name: "Selected repository scope" }).getByText("synthetic-org/synthetic-repo", { exact: true })).toBeVisible();
     await expect(page.getByText("This is an explicit selection, not a complete source inventory.")).toBeVisible();
+    await expect(page.locator(".storage-estimate")).toHaveText("67,121,152 bytes");
     await page.getByText("Connection and plan verification details", { exact: true }).click();
     await expect(page.getByText("Approved identity evidence")).toBeVisible();
     const start = page.getByRole("button", { name: "Start reviewed plan" });
@@ -105,6 +106,7 @@ test("mocked unresolved parent and child stay distinct and cannot be requeued", 
   await signIn(page);
   await expect(page.getByText("Reconciliation required — may already be written", { exact: true })).toBeVisible();
   await expect(page.getByText("Waiting for parent — not sent", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open the operator recovery guide" })).toHaveAttribute("href", /docs\/transfer-plans\.md#recovery$/);
   await expect(page.getByRole("button", { name: "Start reviewed plan" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Cancel plan" })).toHaveCount(0);
 });

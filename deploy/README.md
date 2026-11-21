@@ -9,10 +9,15 @@ migration, a stable release and qualification of later data classes are not clai
 1. Build the current checkout with `make container-build`, or set `GITFERRY_IMAGE` to an image
    reference that includes an immutable digest.
 2. Copy `.env.example` to an operator-owned `.env` outside version control.
-3. Create the credential directory and the two token files named by the environment file. Give
+3. Create the credential directory and its `source_api_token` and `target_api_token` files.
+   The default environment references these same filenames. Give
    credential files mode `0600` and make them readable by the container UID `10001` (on Linux,
    assign ownership to `10001:10001`; the directory needs traversal permission for that UID).
    The original `source_api_token` and `target_api_token` aliases remain Compose secrets.
+   The two alias files must exist in that directory before startup because its bind mount is
+   read-only. If upgrading an earlier example or setting the two token-file references to other
+   paths, create empty `source_api_token` and `target_api_token` mountpoint files in the credential
+   directory; Compose overlays them with the explicitly configured secret files.
    Additional files in `GITFERRY_CREDENTIAL_DIR` are read-only local aliases: for example, a file
    named `comment-author` supplies that explicitly bound author's token. Never put token values
    in `.env`, configuration exports or SQLite. Adding another author file does not require editing

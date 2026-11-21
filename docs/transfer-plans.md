@@ -79,6 +79,25 @@ reference directories. Execution requires these directories to exist.
 
 ## Recovery
 
+The plan screen keeps the selected scope, operation state and closed diagnostic reason visible.
+Its recovery link opens this guide; observation and reload never repeat a write.
+
+| Visible condition | Operator action |
+| --- | --- |
+| Connection, CA or administrator prerequisite | Restore the local token/CA file, check the selected profile and explicitly approve changed identity evidence. Retry the preview after correcting the prerequisite. |
+| Missing author credential or identity | Supply the token of the explicitly bound non-admin account and check its native identity. Never substitute the technical administrator. |
+| Insufficient storage | Compare the displayed saved-plan estimate with free space on both package and work filesystems. Free capacity, then request a new preview. |
+| Structure collision, metadata drift or changed Git refs | Inspect the existing target and durable binding/baseline. Do not overwrite it, rename an origin, or repackage to bypass the conflict. |
+| Reconciliation required (`outcome_unknown`) | Stop retries. Use the local operator reconciliation command with independently verified target evidence; a new package or plan does not clear the halt. |
+| Waiting for parent (`blocked_parent`) | The child was not sent. Resolve the parent first; do not treat the child as an uncertain completed write. |
+| Invalid offline package | Correct the transport files at their source or select the intended package. Never edit recorded digests or admitted facts to force acceptance. |
+| Connection loss or stale review | Refresh the saved plan first. Recheck its digest and preview generation; do not infer that a lost response means the operation failed. |
+
+Explicit unknown-outcome reconciliation remains a local operator CLI procedure in this bounded
+release; a complete UI reconciliation workflow belongs to the return-transfer milestone. See
+[the durable-state commands](verification-durable-state-restart.md) for the required evidence and command forms.
+
+
 A confirmed plan is a no-op on replay. A new plan ID cannot bypass unknown or conflicting
 journal work for the same origin and target. If Gitea may have accepted a write before local
 confirmation, recovery leaves it `outcome_unknown`; it does not repeat the POST. A dependent

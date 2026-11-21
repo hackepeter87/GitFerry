@@ -253,7 +253,7 @@ def run_source_export_probe() -> dict[str, Any]:
         with browser_tunnel(COMPOSE) as base_url:
             uploaded = _run_browser(archive_host, "phase1", base_url)
             _target_worker("browser-upload")
-            _run_browser(archive_host, "phase2", base_url)
+            review_browser = _run_browser(archive_host, "phase2", base_url)
             preview = _target_worker("browser-preview")
             browser = _run_browser(archive_host, "phase5", base_url)
         docker_copy(
@@ -444,7 +444,12 @@ def run_source_export_probe() -> dict[str, Any]:
         ),
     }
     assertions["guided_browser_first_import"] = (
-        browser["status"] == "passed" and browser["confirmed"]
+        browser["status"] == "passed"
+        and browser["confirmed"]
+        and browser["keyboard_interactions"] > 0
+        and source_browser["keyboard_interactions"] > 0
+        and review_browser["keyboard_interactions"] > 0
+        and review_browser["storage_estimate_reviewed"]
     )
     assertions["guided_browser_source_export"] = (
         source_browser["status"] == "passed"
