@@ -31,6 +31,15 @@ const form = ref({
   userSearchBase: "",
   groupSearchBase: "",
   bindSecretRef: "",
+  claimLookupEnabled: false,
+  claimSearchBase: "",
+  claimLoginAttribute: "uid",
+  claimExternalIdAttribute: "employeeNumber",
+  claimEmailAttribute: "",
+  claimBindDn: "",
+  claimBindCredentialRef: "",
+  claimGroupSearchBase: "",
+  claimGroupMemberAttribute: "member",
 });
 const securityProtocol = computed(() => form.value.type === "ldap" ? "starttls" : "ldaps");
 let mounted = true;
@@ -60,13 +69,14 @@ function resetMessages(): void { error.value = ""; notice.value = ""; }
 
 function resetForm(): void {
   editing.value = undefined;
-  form.value = { instance_key: profiles.value[0]?.instance_key ?? "", source_name: "", directoryRealm: realms.value[0]?.realm_key ?? "", type: "ldaps", mode: "simple", host: "", port: 636, userDn: "", userFilter: "", emailAttribute: "mail", usernameAttribute: "uid", caSecretRef: "", userSearchBase: "", groupSearchBase: "", bindSecretRef: "" };
+  form.value = { instance_key: profiles.value[0]?.instance_key ?? "", source_name: "", directoryRealm: realms.value[0]?.realm_key ?? "", type: "ldaps", mode: "simple", host: "", port: 636, userDn: "", userFilter: "", emailAttribute: "mail", usernameAttribute: "uid", caSecretRef: "", userSearchBase: "", groupSearchBase: "", bindSecretRef: "", claimLookupEnabled: false, claimSearchBase: "", claimLoginAttribute: "uid", claimExternalIdAttribute: "employeeNumber", claimEmailAttribute: "", claimBindDn: "", claimBindCredentialRef: "", claimGroupSearchBase: "", claimGroupMemberAttribute: "member" };
 }
 
 function edit(record: DirectoryRecord): void {
   editing.value = record;
   const source = record.source;
-  form.value = { instance_key: record.instance_key, source_name: source.name, directoryRealm: source.directoryRealm, type: source.type, mode: source.bindSecretRef && !source.mode ? "bindDN" : "simple", host: source.host, port: source.port, userDn: source.userDn ?? "", userFilter: source.userFilter ?? "", emailAttribute: source.emailAttribute ?? "mail", usernameAttribute: source.usernameAttribute ?? "", caSecretRef: source.caSecretRef ?? "", userSearchBase: source.userSearchBase ?? "", groupSearchBase: source.groupSearchBase ?? "", bindSecretRef: source.bindSecretRef ?? "" };
+  const claim = source.claimLookup;
+  form.value = { instance_key: record.instance_key, source_name: source.name, directoryRealm: source.directoryRealm, type: source.type, mode: source.bindSecretRef && !source.mode ? "bindDN" : "simple", host: source.host, port: source.port, userDn: source.userDn ?? "", userFilter: source.userFilter ?? "", emailAttribute: source.emailAttribute ?? "mail", usernameAttribute: source.usernameAttribute ?? "", caSecretRef: source.caSecretRef ?? "", userSearchBase: source.userSearchBase ?? "", groupSearchBase: source.groupSearchBase ?? "", bindSecretRef: source.bindSecretRef ?? "", claimLookupEnabled: Boolean(claim), claimSearchBase: claim?.searchBase ?? "", claimLoginAttribute: claim?.loginAttribute ?? "uid", claimExternalIdAttribute: claim?.externalIdAttribute ?? "employeeNumber", claimEmailAttribute: claim?.emailAttribute ?? "", claimBindDn: claim?.bindDn ?? "", claimBindCredentialRef: claim?.bindCredentialRef ?? "", claimGroupSearchBase: claim?.groupSearchBase ?? "", claimGroupMemberAttribute: claim?.groupMemberAttribute ?? "member" };
 }
 
 function sourceValue(): DirectorySource {
@@ -76,11 +86,23 @@ function sourceValue(): DirectorySource {
   } else {
     Object.assign(value, { userSearchBase: form.value.userSearchBase.trim() || undefined, groupSearchBase: form.value.groupSearchBase.trim() || undefined, bindSecretRef: form.value.bindSecretRef.trim() });
   }
+  if (form.value.claimLookupEnabled) {
+    Object.assign(value, { claimLookup: { searchBase: form.value.claimSearchBase.trim(), loginAttribute: form.value.claimLoginAttribute.trim(), externalIdAttribute: form.value.claimExternalIdAttribute.trim(), emailAttribute: form.value.claimEmailAttribute.trim() || undefined, bindDn: form.value.claimBindDn.trim() || undefined, bindCredentialRef: form.value.claimBindCredentialRef.trim() || undefined, groupSearchBase: form.value.claimGroupSearchBase.trim() || undefined, groupMemberAttribute: form.value.claimGroupMemberAttribute.trim() || undefined } });
+  }
   return value;
 }
 
 async function save(): Promise<void> {
-  resetMessages(); saving.value = true;
+  resetMessages();
+  if (form.value.claimLookupEnabled && Boolean(form.value.claimBindDn.trim()) !== Boolean(form.value.claimBindCredentialRef.trim())) {
+    error.value = "Claim lookup bind DN and bind credential reference must be provided together, or both left blank for explicit anonymous lookup.";
+    return;
+  }
+  if (form.value.claimLookupEnabled && !form.value.caSecretRef.trim()) {
+    error.value = "A CA secret reference is required for directory claim lookup.";
+    return;
+  }
+  saving.value = true;
   try {
     const saved = await saveDirectory({ instance_key: form.value.instance_key, source: sourceValue(), expected_revision: editing.value?.revision ?? null });
     records.value = [...records.value.filter((item) => !(item.instance_key === saved.instance_key && item.source_name === saved.source_name)), saved];
@@ -141,6 +163,8 @@ function statusDetail(record: DirectoryRecord): string {
       <form class="directory-form" aria-labelledby="directory-form-title" @submit.prevent="save"><h3 id="directory-form-title">{{ editing ? "Edit directory settings" : "Review directory settings" }}</h3><p class="supporting">Only secret references are accepted. Never enter a password value.</p><div class="form-grid"><label for="directory-instance">Approved target connection</label><select id="directory-instance" v-model="form.instance_key" :disabled="saving || Boolean(editing)" required><option value="" disabled>Select a connection</option><option v-for="profile in profiles" :key="profile.instance_key" :value="profile.instance_key">{{ profile.display_name }} ({{ profile.instance_key }})</option></select><label for="directory-source-name">Source name</label><input id="directory-source-name" v-model="form.source_name" :disabled="saving || Boolean(editing)" required maxlength="128" autocomplete="off"><label for="directory-realm">Registered realm</label><select id="directory-realm" v-model="form.directoryRealm" :disabled="saving || Boolean(editing)" required><option value="" disabled>Select a realm</option><option v-for="realm in realms" :key="realm.realm_key" :value="realm.realm_key">{{ realm.display_name }} ({{ realm.realm_key }})</option></select><label for="directory-type">Directory transport</label><select id="directory-type" v-model="form.type" :disabled="saving"><option value="ldaps">LDAPS</option><option value="ldap">LDAP with StartTLS</option></select><label for="directory-security">Security protocol</label><select id="directory-security" :value="securityProtocol" disabled><option value="ldaps">LDAPS</option><option value="starttls">StartTLS</option></select><label for="directory-mode">Authentication mode</label><select id="directory-mode" v-model="form.mode" :disabled="saving"><option value="simple">Simple</option><option value="bindDN">BindDN (manual Gitea UI)</option></select><label for="directory-host">Directory host</label><input id="directory-host" v-model="form.host" :disabled="saving" required autocomplete="off"><label for="directory-port">Directory port</label><input id="directory-port" v-model.number="form.port" :disabled="saving" type="number" min="1" max="65535" required>
       <template v-if="form.mode === 'simple'"><label for="directory-user-dn">User DN template</label><input id="directory-user-dn" v-model="form.userDn" :disabled="saving" required autocomplete="off"><label for="directory-user-filter">User filter</label><input id="directory-user-filter" v-model="form.userFilter" :disabled="saving" required autocomplete="off"><label for="directory-email">Email attribute</label><input id="directory-email" v-model="form.emailAttribute" :disabled="saving" required autocomplete="off"><label for="directory-username">Username attribute <span>(optional mapping)</span></label><input id="directory-username" v-model="form.usernameAttribute" :disabled="saving" autocomplete="off"><label for="directory-ca">CA secret reference</label><input id="directory-ca" v-model="form.caSecretRef" :disabled="saving" required maxlength="128" autocomplete="off"></template>
       <template v-else><label for="directory-user-search-base">User search base</label><input id="directory-user-search-base" v-model="form.userSearchBase" :disabled="saving" autocomplete="off"><label for="directory-group-search-base">Group search base</label><input id="directory-group-search-base" v-model="form.groupSearchBase" :disabled="saving" autocomplete="off"><label for="directory-bind-secret">Bind secret reference</label><input id="directory-bind-secret" v-model="form.bindSecretRef" :disabled="saving" required maxlength="128" autocomplete="off"></template></div><p v-if="form.mode === 'bindDN'" class="alert">BindDN automation is unsupported. Add this source manually in Gitea’s authenticated admin UI over HTTPS; the bind secret is never entered here.</p><p v-else class="supporting">Simple LDAP is ready after the operator performs the reviewed bootstrap on the target host using its local Gitea server account access. GitFerry does not use an API token here.</p><div class="actions"><button class="primary" type="submit" :disabled="saving || !profiles.length">{{ saving ? "Saving…" : editing ? "Save revision" : "Save reviewed settings" }}</button><button v-if="editing" type="button" :disabled="saving" @click="resetForm">New settings</button></div></form>
+      <fieldset class="directory-form claim-lookup-form"><legend>Read-only directory claim lookup</legend><label class="check-label"><input v-model="form.claimLookupEnabled" type="checkbox" :disabled="saving"> Enable claim lookup</label><p class="supporting">Claim lookup is read-only and explicit. Anonymous lookup is used only when both bind fields are blank; no password value is accepted.</p><template v-if="form.claimLookupEnabled"><label for="directory-claim-search-base">Claim search base</label><input id="directory-claim-search-base" v-model="form.claimSearchBase" :disabled="saving" required autocomplete="off"><label for="directory-claim-login-attribute">Claim login attribute</label><input id="directory-claim-login-attribute" v-model="form.claimLoginAttribute" :disabled="saving" required autocomplete="off"><label for="directory-claim-external-id">Claim external ID attribute</label><input id="directory-claim-external-id" v-model="form.claimExternalIdAttribute" :disabled="saving" required autocomplete="off"><label for="directory-claim-email">Claim email attribute <span>(optional)</span></label><input id="directory-claim-email" v-model="form.claimEmailAttribute" :disabled="saving" autocomplete="off"><label for="directory-claim-bind-dn">Claim bind DN <span>(optional; pair with credential reference)</span></label><input id="directory-claim-bind-dn" v-model="form.claimBindDn" :disabled="saving" autocomplete="off"><label for="directory-claim-bind-credential">Claim bind credential reference <span>(optional; pair with bind DN)</span></label><input id="directory-claim-bind-credential" v-model="form.claimBindCredentialRef" :disabled="saving" autocomplete="off"><label for="directory-claim-group-base">Claim group search base <span>(optional)</span></label><input id="directory-claim-group-base" v-model="form.claimGroupSearchBase" :disabled="saving" autocomplete="off"><label for="directory-claim-group-member">Claim group member attribute <span>(optional)</span></label><input id="directory-claim-group-member" v-model="form.claimGroupMemberAttribute" :disabled="saving" autocomplete="off"></template></fieldset>
+      <fieldset v-if="form.claimLookupEnabled && form.mode === 'bindDN'" class="directory-form"><legend>Claim lookup transport trust</legend><label for="directory-claim-ca">CA secret reference</label><input id="directory-claim-ca" v-model="form.caSecretRef" :disabled="saving" required maxlength="128" autocomplete="off"></fieldset>
     </template>
   </section>
 </template>

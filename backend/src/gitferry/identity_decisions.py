@@ -152,7 +152,7 @@ class IdentityDecisionService:
         credential_checked: bool = False,
     ) -> dict[str, Any]:
         account_evidence = dict(account_evidence or {})
-        if set(account_evidence) - {"source_id", "login_name"}:
+        if set(account_evidence) - {"source_id", "login_name", "directory"}:
             raise ValueError("unsupported account evidence")
         selector = self._validate_selector(selector)
         target = self._validate_target(target)

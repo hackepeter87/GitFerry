@@ -6,6 +6,13 @@ Choose a locally approved target connection and check an existing, non-administr
 Review the source realm, login, external identifier/SID and OU alongside the native target ID.
 Email is optional and informational. Equal names or email addresses never select an account.
 
+For a directory account, select a locally configured claim source and enter its directory login
+and the functional account's credential reference. GitFerry reads the native authentication-source
+ID; an optional expected ID can constrain it. Review the target realm, external ID, DN/OU and
+direct groups separately from the source selector. Different source and target IDs are expected.
+The selection is an explicit local association; it does not prove every Gitea source setting.
+No target fact is copied into a source selector or approved merely because names match.
+
 Submit the proposal, then explicitly approve or reject it. Candidate history survives restart
 and records the local actor and revision. A conflict does not grant a binding. Reopen a rejected
 or conflicted proposal only after reviewing the cause; GitFerry checks the target account again.
@@ -34,6 +41,11 @@ Request fields match `/api/v1/identities` in the generated API schema. Decision 
 `profile_revision`, and an optional `credential_ref`. Secret values must never be placed in
 request documents. CLI authority is local host access; browser authority is an authenticated
 administrator session with CSRF protection.
+
+Configured directory facts are refreshed before approval and affected writes. A changed external
+ID, DN/OU or observed group set blocks the operation and records a conflict. A directory outage
+blocks the read/write prerequisite; it does not replace the binding with an administrator account.
+Email changes do not change identity. Restoring old facts does not automatically clear a conflict.
 
 Native account verification does not establish LDAP or Active Directory behavior. Directory
 bootstrap, directory claim refresh and real login/access qualification are tracked separately

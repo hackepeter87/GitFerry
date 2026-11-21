@@ -157,7 +157,7 @@ class GiteaPlanAdapter:
                 binding.target_login,
                 binding.target_account_id,
             )
-            require_current_account(self.state, binding, account)
+            require_current_account(self.state, binding, account, self.references)
             self.issues[binding_id] = issue_client
             self.comments[binding_id] = self.resources.enter_context(
                 GiteaCommentClient(
