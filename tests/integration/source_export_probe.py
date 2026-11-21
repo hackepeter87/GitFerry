@@ -43,6 +43,8 @@ ASSERTIONS = frozenset(
         "package_replay_process_restart_no_extra_posts_or_objects",
         "api_queue_background_download",
         "api_restart_replay_no_source_access",
+        "target_upload_files_only_before_local_setup",
+        "target_upload_replay_persistent_identity",
     }
 )
 
@@ -262,6 +264,19 @@ def run_source_export_probe() -> dict[str, Any]:
             and target_replay["same_remote_objects"]
             and target_replay["no_extra_posts"]
             and target_replay["no_extra_objects"]
+        ),
+        "target_upload_files_only_before_local_setup": (
+            target_package["upload"]["status"] == "ready"
+            and target_package["upload"]["package_ref"] == "source-export-real"
+            and target_package["upload"]["resumed_status"] == "ready"
+            and target_package["upload"]["counts_unchanged"]
+        ),
+        "target_upload_replay_persistent_identity": (
+            target_replay["upload_package_ref"] == target_package["upload"]["package_ref"]
+            and target_replay["upload_digest"] == target_package["upload"]["digest"]
+            and target_replay["upload_archive_sha256"] == captured["archive_sha256"]
+            and target_replay["upload_resumed_status"] == "ready"
+            and target_replay["upload_counts_unchanged"]
         ),
     }
     if set(assertions) != ASSERTIONS or not all(assertions.values()):

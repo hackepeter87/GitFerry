@@ -1,6 +1,6 @@
 # ADR 0016: Durable source commands and verified archive downloads
 
-Status: proposed under [Issue #10](https://github.com/hackepeter87/GitFerry/issues/10).
+Status: accepted through PR #55, integrated as `de6fcf4`; exact-main CI run `44870014502` passed.
 
 ## Decision
 
