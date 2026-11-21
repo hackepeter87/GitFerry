@@ -688,3 +688,12 @@ or atomic comment precheck/PATCH claim follows from this run.
 The sequential failure contract `failure-20261121063107-99769` passed: the injected failure kept exit
 code 86, captured diagnostics and completed scoped cleanup with exit code 0.
 `make test-clean` then completed successfully. Hosted verification of this slice remains pending.
+
+Hosted PR run `44876141315` subsequently passed both jobs for source `785f6d3`, using clean
+merge checkout `7117cf5`. Its success report has all 23 hosted mandatory checks; the deliberate
+failure report retains exit 86 and diagnostics. Both cleanup results are 0. Independent review
+then required stronger browser-upload identity linkage and stale target/package UI corrections.
+Those corrections add exact observed upload-ID equality, clear checked account/credential/message
+state on target changes, and preserve connection-profile refresh on package changes. The expanded
+eight-case intake suite and frontend build passed locally after these changes; the earlier hosted
+result must not be reused as approval for the corrected commit.

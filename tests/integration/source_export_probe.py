@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -59,6 +60,7 @@ TARGET_REPLAY_PROGRAM = """from pathlib import Path
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import urllib.error
@@ -210,7 +212,7 @@ def run_source_export_probe() -> dict[str, Any]:
     _target_worker("start-browser")
     try:
         with browser_tunnel(COMPOSE) as base_url:
-            _run_browser(archive_host, "phase1", base_url)
+            uploaded = _run_browser(archive_host, "phase1", base_url)
             _target_worker("browser-upload")
             browser = _run_browser(archive_host, "phase2", base_url)
         docker_copy(
@@ -349,7 +351,13 @@ def run_source_export_probe() -> dict[str, Any]:
         ),
         "target_upload_files_only_before_local_setup": (
             target_package["upload"]["status"] == "ready"
-            and bool(target_package["upload"]["package_ref"])
+            and bool(
+                re.fullmatch(
+                    r"upload-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+                    target_package["upload"]["package_ref"],
+                )
+            )
+            and target_package["upload"]["package_ref"] == uploaded["upload_id"]
             and target_package["upload"]["resumed_status"] == "ready"
             and target_package["upload"]["counts_unchanged"]
         ),

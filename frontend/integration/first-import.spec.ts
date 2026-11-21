@@ -46,7 +46,9 @@ test("phase1 receives the actual source archive without admitting identities", a
   await page.getByRole("button", { name: "Send package" }).click();
   await expect(page.locator(".package-row .package-status")).toHaveText("Ready for review", { timeout: 30_000 });
   await expect(page.locator(".package-row")).toHaveCount(1);
-  record({ uploaded: true });
+  const uploadId = (await page.locator(".package-row strong").innerText()).trim();
+  expect(uploadId).toMatch(/^upload-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  record({ uploaded: true, upload_id: uploadId });
 });
 
 test("phase2 confirms local decisions and executes the real first import", async ({ page }) => {

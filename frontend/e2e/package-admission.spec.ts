@@ -129,6 +129,7 @@ test("does not let stale prerequisites keep a changed package busy", async ({ pa
   await page.route("**/api/v1/packages/pkg.second/prerequisites", (route) => route.fulfill({ json: { ...prerequisites, package_id: "pkg.second", digest_sha256: second.package_digest } }));
   await open(page, { uploads: [ready, second] }); await page.getByLabel("Locally approved target").selectOption("target.synthetic"); await page.getByRole("button", { name: "Load prerequisites" }).click();
   await requested;
+  await page.route("**/api/v1/connections", (route) => route.fulfill({ json: [{ ...target, revision: 4, display_name: "Updated target" }] }));
   await page.getByRole("button", { name: /upload-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/ }).click();
   await expect(page.getByRole("heading", { name: /Approve package pkg.second/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Load prerequisites" })).toBeEnabled();
@@ -136,7 +137,33 @@ test("does not let stale prerequisites keep a changed package busy", async ({ pa
   release();
   await staleResponse;
   await expect(page.locator(".package-admission-panel .admission-content")).toHaveCount(0);
+  await expect(page.getByRole("option", { name: "Updated target (target.synthetic)" })).toHaveCount(1);
   await page.getByLabel("Locally approved target").selectOption("target.synthetic");
+  const nextRequest = page.waitForRequest("**/api/v1/packages/pkg.second/prerequisites");
   await page.getByRole("button", { name: "Load prerequisites" }).click();
+  expect((await nextRequest).postDataJSON().profile_revision).toBe(4);
   await expect(page.locator(".package-admission-panel")).toContainText(second.package_digest);
+});
+
+test("target changes discard checked account evidence and local credential choices", async ({ page }) => {
+  const other = { ...target, instance_key: "target.other", display_name: "Other target" };
+  const missing = { ...prerequisites, identities: [{ ...prerequisites.identities[0], binding: null }] };
+  await page.route("**/api/v1/packages/pkg.synthetic/prerequisites", (route) => route.fulfill({ json: missing }));
+  await page.route("**/api/v1/packages/pkg.synthetic/check-account", (route) => route.fulfill({ json: {
+    target_login: "chosen-author", target_account_id: "9010", credential_checked: true,
+  } }));
+  await open(page, { connections: [target, other] });
+  await page.getByLabel("Locally approved target").selectOption(target.instance_key);
+  await page.getByRole("button", { name: "Load prerequisites" }).click();
+  await page.getByLabel("Target login", { exact: true }).fill("chosen-author");
+  await page.getByLabel(/Author credential reference/).fill("local-author-ref");
+  await page.getByRole("button", { name: "Check target account" }).click();
+  await expect(page.getByRole("button", { name: "Confirm binding", exact: true })).toBeEnabled();
+  await page.getByLabel("Locally approved target").selectOption(other.instance_key);
+  await page.getByRole("button", { name: "Load prerequisites" }).click();
+  await expect(page.getByLabel("Target login", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel(/Author credential reference/)).toHaveValue("");
+  await expect(page.getByRole("button", { name: "Confirm binding", exact: true })).toBeDisabled();
+  await expect(page.getByText(/Account 9010 checked/)).toHaveCount(0);
+  await expect(page.getByText(/Account checked:/)).toHaveCount(0);
 });

@@ -23,8 +23,9 @@ const includeMetadata = ref(true);
 const applyMembers = ref(false);
 const admitted = ref(false);
 let requestGeneration = 0;
+let connectionsGeneration = 0;
 let disposed = false;
-onBeforeUnmount(() => { disposed = true; ++requestGeneration; });
+onBeforeUnmount(() => { disposed = true; ++requestGeneration; ++connectionsGeneration; });
 
 const target = computed(() => connections.value.find((item) => item.instance_key === targetKey.value));
 const packageRef = computed(() => props.upload?.package_ref ?? "");
@@ -41,12 +42,13 @@ const selectionLimitations = computed(() => Array.isArray(selectionRequest.value
 const canPrepare = computed(() => Boolean(review.value && !missingBindingCount.value && !selectionUnsupported.value.length && !(review.value.selection.missing_credentials?.length) && !(review.value.selection.waiting_parents?.length) && !(review.value.selection.blocked_operations?.length)));
 
 watch(() => props.upload?.package_ref, async (value) => {
-  const generation = ++requestGeneration;
+  const generation = ++connectionsGeneration;
+  ++requestGeneration;
   busy.value = false; prerequisites.value = undefined; review.value = undefined; admitted.value = false; error.value = ""; notice.value = ""; targetKey.value = ""; realmForms.value = {}; identityForms.value = {};
   if (!value) return;
-  try { const value = await listConnections(); if (!disposed && generation === requestGeneration) connections.value = value; } catch (cause) { if (!disposed && generation === requestGeneration) handleError(cause, "Target connections could not be loaded."); }
+  try { const value = await listConnections(); if (!disposed && generation === connectionsGeneration) connections.value = value; } catch (cause) { if (!disposed && generation === connectionsGeneration) handleError(cause, "Target connections could not be loaded."); }
 }, { immediate: true });
-watch(targetKey, () => { ++requestGeneration; busy.value = false; prerequisites.value = undefined; review.value = undefined; admitted.value = false; });
+watch(targetKey, () => { ++requestGeneration; identityForms.value = {}; notice.value = ""; error.value = ""; busy.value = false; prerequisites.value = undefined; review.value = undefined; admitted.value = false; });
 watch([includeMetadata, applyMembers], () => { if (review.value) { review.value = undefined; notice.value = "Plan options changed. Review the selection again before preparing a draft."; } });
 
 function base() { return { target_instance_key: targetKey.value, profile_revision: target.value?.revision ?? -1 }; }
