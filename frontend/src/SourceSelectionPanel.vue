@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { ApiError, browseConnection, listConnections, type BrowseEntry, type ConnectionProfile } from "./api";
+import SourceExportsPanel from "./SourceExportsPanel.vue";
 
 const emit = defineEmits<{ (event: "session-expired"): void }>();
 const profiles = ref<ConnectionProfile[]>([]);
@@ -136,8 +137,8 @@ function handleError(cause: unknown, fallback: string): void {
           <button type="button" :aria-label="`Remove ${entry.repository} from selection`" @click="toggleRepository(entry)">Remove</button>
         </li>
       </ul>
-      <p class="notice">Export/import execution is not available yet. This selection stays in this browser view; reloading the page clears it. Content and identity prerequisites have not yet been inventoried.</p>
     </template>
+    <SourceExportsPanel :source-profile="canBrowse ? selectedProfile : undefined" :selected-repositories="selectedRepositories" @session-expired="emit('session-expired')" />
   </section>
 </template>
 

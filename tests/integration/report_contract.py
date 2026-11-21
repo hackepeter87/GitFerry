@@ -342,6 +342,8 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                         "package_admission_database_independent",
                         "no_user_preparation_blocks_metadata",
                         "package_replay_process_restart_no_extra_posts_or_objects",
+                        "api_queue_background_download",
+                        "api_restart_replay_no_source_access",
                     }
                 ),
             ),

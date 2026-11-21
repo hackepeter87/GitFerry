@@ -1,6 +1,7 @@
 # ADR 0015: Portable package facts and locally authorized plans
 
-Status: proposed under [Issue #10](https://github.com/hackepeter87/GitFerry/issues/10).
+Status: accepted through [PR #54](https://github.com/hackepeter87/GitFerry/pull/54),
+within [Issue #10](https://github.com/hackepeter87/GitFerry/issues/10).
 
 ## Context
 

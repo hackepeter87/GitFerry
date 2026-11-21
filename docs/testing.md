@@ -540,4 +540,52 @@ the returned commit with the bundle. The wait has a 20-second polling deadline a
 request timeouts; only reads are retried. A persistent error or missing branch still fails.
 Observations are retained in the comparison artifact. Focused tests prove delayed visibility and
 timeout rejection. This addresses a suspected post-receive timing boundary without changing the
-image pin, accepting a missing branch or retrying a remote write; hosted re-verification is required.
+image pin, accepting a missing branch or retrying a remote write. PR run `44866454249` and
+integrated-main run `44866950765` subsequently passed. Downloaded main evidence binds the clean
+source and checkout to `9e6b2f4bb40329b2288d50be379607173ab55759`, with all 23 required checks,
+17 source/package assertions, Linux/x86_64, Gitea 1.27.2 and cleanup exit 0.
+
+## Issue #10 guided source commands and downloads
+
+The source screen queues an immutable command through the protected HTTP API. The existing
+background worker captures and packages it without an open browser. SQLite migration 10 stores
+delivery state separately from the source capture and target operation journal. Module tests in
+`test_source_export_jobs.py` exercise explicit queueing, shared executor exclusion, immutable
+requests, schema-9 upgrade, file integrity, explicit retry and actual child-process recovery after
+archive publication. `test_source_export_api.py` covers authentication, CSRF, worker availability
+before persistence, wake-up and closing the verified download descriptor, including early exit.
+
+`frontend/e2e/source-export.spec.ts` uses mocked API responses to verify exact selected IDs and
+profile revision, keyboard activation, saved status/polling/download links, auth expiry, explicit
+retry, and lost-response retry after reload using the same ID and request. It does not claim
+browser-to-Gitea acceptance. Saved downloads remain accessible without reselecting or contacting
+a source. The connection-export browser assertion now selects the exact configuration Export
+button, because the page also offers source-export actions; its download and keyboard checks
+remain intact.
+
+The existing real source-export probe now runs the actual managed application lifespan, admin
+API and background worker against the isolated Gitea source. It downloads the resulting archive
+through the authenticated streaming endpoint; the independent target imports those files using
+the existing probe. A new process repeats the command and downloads identical bytes while the
+source TLS proxy is stopped. Two additional source assertions are mandatory:
+`api_queue_background_download` and `api_restart_replay_no_source_access`. Each has a
+missing-evidence negative report test. Existing capture/core replay, target-author/parent/Git,
+network-isolation and unknown-write assertions remain required.
+
+During development, run `8edff61f8f3c4137` failed before source capture confirmation. The probe
+mixed a manually injected worker with the OCI image's enabled managed lifespan, which replaces
+that worker. The corrected probe supplies disjoint persistent paths and local references to the
+normal managed startup instead. The failed run retained diagnostics and completed cleanup (exit
+0); it is not passing capability evidence. Source-worker failures now retain exception types and
+code locations without exception messages or credentials.
+
+The corrected local run `de63a7d49b504cb3` passed all 22 mandatory checks and all 19 source/package
+assertions against the unchanged Gitea 1.27.2 pin. The host was Darwin/arm64; the Docker server and
+test containers were Linux/arm64 with no observed emulation. Cleanup exited 0 and no mandatory
+check failed or remained unexecuted. `make doctor`, `make test` (442 backend tests, Ruff/format,
+MyPy over 53 source files, frontend build) and all 23 Chromium browser checks passed. A later
+focused API check additionally covers stale-profile conflict classification. The controlled
+failure contract retained diagnostics and cleaned successfully; `make test-clean` left no
+GitFerry test containers or volumes. These are local working-tree results; exact-commit review,
+hosted checks and integrated-main verification are required separately. The complete target
+intake/identity-prerequisite browser flow and milestone 0.2 acceptance remain open.

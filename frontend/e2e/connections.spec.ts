@@ -23,10 +23,10 @@ test.describe("connection management", () => {
     await page.getByLabel("Installation marker").fill(`install-${Date.now()}`);
     await page.getByLabel("Credential reference").fill("cred.synthetic");
     await page.getByRole("button", { name: "Add connection" }).click();
-    await expect(page.getByText(name)).toBeVisible();
+    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
 
     await page.reload();
-    await expect(page.getByText(name)).toBeVisible();
+    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
     await page.getByRole("listitem").filter({ hasText: name }).getByRole("button", { name: "Edit" }).click();
     await page.getByLabel("Display name").fill(`${name} edited`);
 
@@ -62,7 +62,7 @@ test.describe("connection management", () => {
   test("exports, rejects malformed imports, and supports keyboard controls", async ({ page }) => {
     await signIn(page);
     const download = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export" }).click();
+    await page.getByRole("button", { name: "Export", exact: true }).click();
     expect((await download).suggestedFilename()).toBe("gitferry-connections.json");
 
     const chooser = page.waitForEvent("filechooser");

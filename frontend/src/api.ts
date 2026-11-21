@@ -108,6 +108,42 @@ export interface TransferPlan {
   events?: Array<Record<string, unknown>>;
 }
 
+export type SourceExportCaptureStatus = "prepared" | "capturing" | "captured" | "failed";
+export type SourceExportStatus = "prepared" | "queued" | "running" | "ready" | "failed";
+
+export interface SourceExportRepository {
+  repository: string;
+  global_id: string;
+}
+
+export interface SourceExportRequest {
+  version: 1;
+  source_instance_key: string;
+  source_profile_revision: number;
+  recipient_instance_key: string;
+  repositories: SourceExportRepository[];
+  include_metadata: boolean;
+  include_members: boolean;
+}
+
+export interface SourceExportJob {
+  export_id: string;
+  request: SourceExportRequest;
+  capture_status: SourceExportCaptureStatus;
+  status: SourceExportStatus;
+  archive_sha256: string | null;
+  archive_size: number | null;
+  error_code: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SourceExportRecipient {
+  instance_key: string;
+  display_name: string;
+  installation_marker: string;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -238,6 +274,38 @@ export function cancelPlan(planId: string): Promise<TransferPlan> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
+}
+
+export function listSourceExports(): Promise<SourceExportJob[]> {
+  return request("/api/v1/exports");
+}
+
+export function listSourceExportRecipients(): Promise<SourceExportRecipient[]> {
+  return request("/api/v1/exports/recipients");
+}
+
+export function createSourceExport(exportId: string, value: SourceExportRequest): Promise<SourceExportJob> {
+  return request("/api/v1/exports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ export_id: exportId, request: value }),
+  });
+}
+
+export function queueSourceExport(exportId: string): Promise<SourceExportJob> {
+  return request(`/api/v1/exports/${encodeURIComponent(exportId)}/queue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+}
+
+export function getSourceExport(exportId: string): Promise<SourceExportJob> {
+  return request(`/api/v1/exports/${encodeURIComponent(exportId)}`);
+}
+
+export function sourceExportDownloadUrl(exportId: string): string {
+  return `/api/v1/exports/${encodeURIComponent(exportId)}/download`;
 }
 
 function readCookie(name: string): string | undefined {
