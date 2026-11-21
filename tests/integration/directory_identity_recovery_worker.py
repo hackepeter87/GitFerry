@@ -27,7 +27,7 @@ URL = os.environ.get("GITFERRY_RECOVERY_TARGET_URL", "http://target:3000")
 TARGET = os.environ.get("GITFERRY_RECOVERY_TARGET", "target")
 
 
-def _candidate(state: StateStore) -> tuple[Any, dict[str, Any], dict[str, Any]]:
+def _candidate(state: StateStore, login: str) -> tuple[Any, dict[str, Any], dict[str, Any]]:
     with state.read_connection() as connection:
         rows = connection.execute(
             "SELECT b.binding_id, c.* FROM identity_bindings b "
@@ -41,7 +41,7 @@ def _candidate(state: StateStore) -> tuple[Any, dict[str, Any], dict[str, Any]]:
     ordered = sorted(
         rows,
         key=lambda row: (
-            row["target_login"] != "ldap-reader",
+            row["target_login"] != login,
             row["updated_at"],
             row["candidate_id"],
         ),
@@ -49,7 +49,7 @@ def _candidate(state: StateStore) -> tuple[Any, dict[str, Any], dict[str, Any]]:
     for row in ordered:
         candidate = dict(row)
         evidence = json.loads(candidate["target_account_evidence"])
-        if evidence.get("directory") is not None:
+        if candidate["target_login"] == login and evidence.get("directory") is not None:
             return state.get_identity_binding(row["binding_id"]), candidate, evidence
     raise RuntimeError("no approved directory-backed identity binding in package-admission state")
 
@@ -118,9 +118,9 @@ def _directory_observation(
         return None
 
 
-def run(mode: str) -> dict[str, Any]:
+def run(mode: str, login: str = "ldap-reader") -> dict[str, Any]:
     state = StateStore(DATABASE)
-    binding, candidate, evidence = _candidate(state)
+    binding, candidate, evidence = _candidate(state, login)
     before_binding = _binding_dict(binding)
     references = LocalReferences(ROOT / "secrets", ROOT)
     if mode == "unavailable-ca":
@@ -133,6 +133,8 @@ def run(mode: str) -> dict[str, Any]:
         "candidate_id": candidate["candidate_id"],
         "before_status": candidate["status"],
         "expected_external_id": expected_claim.get("external_id"),
+        "expected_groups": expected_claim.get("groups", []),
+        "directory": evidence["directory"],
         "binding_before": before_binding,
     }
     if mode == "unavailable-ca":
@@ -186,14 +188,18 @@ def run(mode: str) -> dict[str, Any]:
         None,
         result["expected_external_id"],
     )
+    result["changed_groups"] = (
+        "observed_groups" in result and result["observed_groups"] != result["expected_groups"]
+    )
     return result
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=("verify", "unavailable-ca"))
+    parser.add_argument("--login", default="ldap-reader")
     args = parser.parse_args()
-    print(json.dumps(run(args.mode), sort_keys=True))
+    print(json.dumps(run(args.mode, args.login), sort_keys=True))
 
 
 if __name__ == "__main__":

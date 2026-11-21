@@ -61,5 +61,38 @@ not an inference that the full directory requirement has been completed.
 The isolated OpenLDAP evidence covers synthetic directory authentication and selected attributes.
 It does not qualify Microsoft AD SIDs, nested groups, domain login forms, or every account-disable
 policy. A filter-excluded synthetic account is a different claim from native AD account control.
-Native Gitea authentication-source changes invalidate approved GitFerry account evidence; live
-directory SID/OU refresh and its mapping conflict workflow require their own qualification.
+Native Gitea authentication-source and observed directory subject changes invalidate approved
+GitFerry account evidence. Each environment and recovery path is qualified separately below.
+
+## Equal directory logins and native Gitea usernames
+
+A Gitea username belongs to one instance-wide namespace. Two authentication sources can contain
+an identical directory login, but this does not create two native accounts with the same Gitea
+username. The target administrator must explicitly choose distinct native usernames and associate
+each with its authentication source and external `login_name`, using supported Gitea administration.
+GitFerry does not create those functional accounts or choose an alias automatically.
+
+In Identity administration, select the native **Target login** and its own credential reference.
+Then select the reviewed **Configured directory claim source** and **Directory login** separately.
+The native `source_id` and `login_name` must match that selection. Review realm, external ID,
+DN/OU, groups and native account before approval. Equal login or email text grants no rights.
+
+Gitea's regular account-create API requires a native email field even when the directory record
+has no email. Authentication-created accounts can receive Gitea-generated email values. These are
+Gitea account prerequisites, not GitFerry identity keys or requirements on directory mail attributes.
+
+## Availability, drift and explicit recovery
+
+An unavailable directory blocks mapped writes while retaining the existing binding and approval.
+Restored availability can make the unchanged binding usable again. A changed external identity or
+reviewed group set instead creates a durable conflict. Restoring the earlier directory facts does
+not erase that conflict. Inspect the retained evidence and events, enter the account's local
+credential reference, select **Reopen**, review the pending candidate and explicitly **Approve**.
+These steps do not recreate accounts, repeat a confirmed import or redirect an immutable binding.
+An actually changed identity cannot be accepted by using Reopen as a replacement operation.
+
+The separate Samba 4.22.11 qualification covers LDAPS with verified CA, real Gitea 1.27.2 login,
+missing directory mail, rejected disabled accounts and wrong passwords, plus explicit native aliases.
+This is AD-compatible server evidence, not Microsoft Windows AD qualification. Product directory
+claims contain direct groups; a successful server-side nested-group query is not transitive product
+permission support. The common report records these separately from the OpenLDAP desktop rights flow.

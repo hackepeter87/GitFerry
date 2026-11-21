@@ -807,3 +807,20 @@ use an explicit OU base because referrals are intentionally rejected.
 This is Samba AD-compatible evidence, not Windows Server AD, trust/replication, Kerberos client
 or Gitea AD-authentication qualification. `tests/integration/ad/run.sh` is the focused diagnostic
 entry; common report assertions and scoped cleanup remain mandatory for delivery.
+
+
+### Directory realm and recovery qualification
+
+The existing common integration entry also exercises two OpenLDAP bases with equal `uid` values,
+different external IDs and DNs, explicitly selected native Gitea aliases and separate local realms.
+The desktop configures and approves both sources; the existing late-mapping import then checks real
+clone/push/deny and native author results. No new transport format or shared importer state is used.
+The recovery worker stops the directory, checks fail-closed behavior, restores availability using a
+bounded readiness check, mutates group and external-ID facts, and checks durable conflicts in fresh
+processes. Desktop phase 6 explicitly reopens and approves only after original facts are restored.
+The common report requires these assertions; absent evidence cannot pass.
+
+Samba qualification independently checks actual Gitea login and source-linked alias identity,
+including a directory account without mail and denied disabled/wrong-password attempts. Its public
+CA is appended to the isolated target trust volume without replacing the OpenLDAP CA. Technical
+administration remains separate; no database is edited. Field-level limits are in `directories.md`.

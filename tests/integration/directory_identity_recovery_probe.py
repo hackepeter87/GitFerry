@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -23,10 +24,10 @@ LDAP_SERVICE = os.environ.get("GITFERRY_RECOVERY_LDAP_SERVICE", "openldap")
 READER_DN = "uid=ldap-reader,ou=People,dc=example,dc=invalid"
 
 
-def _worker(mode: str) -> dict[str, Any]:
+def _worker(mode: str, login: str = "ldap-reader") -> dict[str, Any]:
     result = support.docker_service_exec(
         SERVICE,
-        ["python", "/probe/directory_identity_recovery_worker.py", mode],
+        ["python", "/probe/directory_identity_recovery_worker.py", mode, "--login", login],
         check=False,
         timeout=180,
     )
@@ -111,6 +112,30 @@ def _replace_external(value: str) -> None:
     )
 
 
+def _wait_directory() -> None:
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        result = support.docker_service_exec(
+            LDAP_SERVICE,
+            ["ldapwhoami", "-x", "-H", "ldap://127.0.0.1:389"],
+            check=False,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return
+        time.sleep(0.5)
+    raise ProbeFailure("directory did not become ready after outage")
+
+
+def _group_change(add: bool) -> None:
+    action = "add" if add else "delete"
+    _ldap_modify(
+        "dn: cn=gitea-users,ou=Groups,dc=example,dc=invalid\n"
+        f"changetype: modify\n{action}: member\n"
+        "member: uid=ldap-reader,ou=People-B,dc=example,dc=invalid\n\n"
+    )
+
+
 def run() -> dict[str, Any]:
     support.docker_copy(WORKER, f"{SERVICE}:/probe/directory_identity_recovery_worker.py")
     initial = _worker("verify")
@@ -119,6 +144,42 @@ def run() -> dict[str, Any]:
     unavailable = _worker("unavailable-ca")
     if unavailable.get("status") != "blocked" or unavailable.get("after_status") != "approved":
         raise ProbeFailure("missing directory CA did not fail closed without changing approval")
+    support.run([*support.COMPOSE, "stop", LDAP_SERVICE])
+    try:
+        outage = _worker("verify")
+        if (
+            outage.get("status") != "blocked"
+            or outage.get("after_status") != "approved"
+            or not outage.get("binding_unchanged")
+        ):
+            raise ProbeFailure("directory outage did not block without changing binding")
+    finally:
+        support.run([*support.COMPOSE, "start", LDAP_SERVICE])
+        _wait_directory()
+    recovered = _worker("verify")
+    if recovered.get("status") != "passed":
+        raise ProbeFailure("directory did not recover after availability returned")
+    writer_initial = _worker("verify", "ldap-writer")
+    if writer_initial.get("status") != "passed":
+        raise ProbeFailure("writer binding was not healthy before group change")
+    _group_change(True)
+    try:
+        group_drift = _worker("verify", "ldap-writer")
+        if (
+            group_drift.get("status") != "blocked"
+            or group_drift.get("after_status") != "conflict"
+            or not group_drift.get("changed_groups")
+        ):
+            raise ProbeFailure("group change did not block the mapped writer")
+    finally:
+        _group_change(False)
+    group_restored = _worker("verify", "ldap-writer")
+    if (
+        group_restored.get("status") != "blocked"
+        or group_restored.get("after_status") != "conflict"
+        or not group_restored.get("binding_unchanged")
+    ):
+        raise ProbeFailure("restoring group membership silently reopened binding")
     facts = _ldap_values()
     drift_value = facts["external_id"] + "-drift"
     try:
@@ -149,7 +210,12 @@ def run() -> dict[str, Any]:
         "restored": restored,
         "original_external_id": facts["external_id"],
         "mutated_external_id": drift_value,
-        "group_mutated": False,
+        "outage": outage,
+        "outage_recovered": recovered,
+        "writer_initial": writer_initial,
+        "group_drift": group_drift,
+        "group_restored": group_restored,
+        "group_mutated": True,
         "binding_unchanged": True,
         "restored_facts_do_not_reopen": True,
     }
