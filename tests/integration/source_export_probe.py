@@ -61,7 +61,11 @@ ASSERTIONS = frozenset(
         "guided_browser_production_runtime",
         "guided_selected_set_and_control",
         "guided_browser_restart_read_only",
+        "directory_equal_login_realms_explicit_bindings",
         "directory_claim_drift_restart_blocked",
+        "directory_outage_blocks_without_rebinding",
+        "directory_group_drift_requires_review",
+        "directory_conflict_desktop_recovery",
         "directory_ldap_reader_clone_allowed",
         "directory_ldap_reader_push_denied",
         "directory_ldap_writer_clone_allowed",
@@ -548,6 +552,57 @@ def run_source_export_probe() -> dict[str, Any]:
         identity_recovery["status"] == "passed"
         and identity_recovery["binding_unchanged"]
         and identity_recovery["restored_facts_do_not_reopen"]
+    )
+    first_identity = identity_recovery["initial"]["directory"]
+    second_identity = identity_recovery["writer_initial"]["directory"]
+    assertions["directory_equal_login_realms_explicit_bindings"] = (
+        first_identity["claim"]["login"] == second_identity["claim"]["login"] == "ldap-reader"
+        and all(
+            first_identity["claim"][key] != second_identity["claim"][key]
+            for key in ("realm_key", "external_id", "dn", "ou_path")
+        )
+        and first_identity["selection"]["native_source_id"]
+        != second_identity["selection"]["native_source_id"]
+        and identity_recovery["initial"]["binding_before"]["target_account_id"]
+        != identity_recovery["writer_initial"]["binding_before"]["target_account_id"]
+    )
+    assertions["directory_outage_blocks_without_rebinding"] = (
+        identity_recovery["outage"]["status"] == "blocked"
+        and identity_recovery["outage"]["after_status"] == "approved"
+        and identity_recovery["outage"]["binding_unchanged"]
+        and identity_recovery["outage_recovered"]["status"] == "passed"
+    )
+    assertions["directory_group_drift_requires_review"] = (
+        identity_recovery["group_drift"]["changed_groups"]
+        and identity_recovery["group_restored"]["after_status"] == "conflict"
+        and identity_recovery["group_restored"]["binding_unchanged"]
+    )
+    _target_worker("start-browser")
+    try:
+        with browser_tunnel(COMPOSE) as base_url:
+            reviewed = _run_browser(archive_host, "phase6", base_url)
+    finally:
+        try:
+            docker_copy(
+                "gitferry-b:/state/package-admission/browser-server.log",
+                WORK / "browser-recovery-server.log",
+            )
+        finally:
+            _target_worker("stop-browser")
+    from directory_identity_recovery_probe import _worker as identity_worker
+
+    reviewed_bindings = [
+        identity_worker("verify", login) for login in ("ldap-reader", "ldap-writer")
+    ]
+    identity_recovery["desktop_review"] = reviewed
+    identity_recovery["reviewed_bindings"] = reviewed_bindings
+    assertions["directory_conflict_desktop_recovery"] = (
+        reviewed["explicit_review"] == 2
+        and reviewed["persisted_approved"] == 2
+        and all(
+            value["status"] == "passed" and value["binding_unchanged"]
+            for value in reviewed_bindings
+        )
     )
     if set(assertions) != ASSERTIONS or not all(assertions.values()):
         raise ProbeFailure(f"Source export assertions failed: {assertions}")
