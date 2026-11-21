@@ -64,3 +64,29 @@ def test_inventory_counts_require_both_independent_snapshots(
     assert evidence["expected"] == values[0]
     assert evidence["observed"] == values[1]
     assert evidence["independent_after"] == values[2]
+
+
+@pytest.mark.parametrize("state", ["running", "zombie", "disappeared", "unreadable"])
+def test_browser_termination_observes_single_proc_read(monkeypatch, state):
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[2] / "tests/integration"))
+    probe = importlib.import_module("browser_runtime")
+    calls = []
+
+    class ProcStatus:
+        def read_text(self):
+            calls.append("read")
+            if state == "disappeared":
+                raise FileNotFoundError("process exited during read")
+            if state == "unreadable":
+                raise PermissionError("cannot prove exit")
+            return "123 (python) " + ("Z" if state == "zombie" else "S") + " 0 0"
+
+        def exists(self):
+            raise AssertionError("existence precheck reintroduces the race")
+
+    if state == "unreadable":
+        with pytest.raises(PermissionError):
+            probe.process_exited(ProcStatus())
+    else:
+        assert probe.process_exited(ProcStatus()) is (state != "running")
+    assert calls == ["read"]

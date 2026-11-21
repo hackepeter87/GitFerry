@@ -42,3 +42,12 @@ def serve(root: Path) -> None:
     )
     os.environ["GITFERRY_HOST"] = "127.0.0.1"
     main()
+
+
+def process_exited(status_path: Path) -> bool:
+    """Read proc state once; termination may remove it between any two syscalls."""
+    try:
+        status = status_path.read_text()
+    except FileNotFoundError:
+        return True
+    return status.split(") ", 1)[1].startswith("Z")
