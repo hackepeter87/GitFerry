@@ -476,8 +476,9 @@ was Darwin/arm64 and the Docker runtime Linux/arm64; this is a local Linux-conta
 not a hosted GitHub Actions run. Scoped cleanup exited 0. The package was 7,077 bytes and had
 SHA-256 `766d8622f179d060c799b9ec3e16a6c5ddd629edc3cc29662c852f76b2bf7ac4`.
 This working-tree run proves the stated selected capture/file receipt, not complete target
-application, the UI wizard, or the later immutable PR/main commits. Exact-commit hosted CI and
-independent review remain required before integration.
+application, the UI wizard, or the later immutable PR/main commits. This slice subsequently passed independent review and hosted-main run `44862775964` on
+`5c7d303425bd593dc89937bb3bc978a4a94c0199`, including all 23 hosted mandatory checks. The
+source-capture evidence does not itself claim the later target-application extension.
 
 The first two development integration attempts rejected source capture because the mapper required
 the aggregate team `permission` to equal the unit permissions. A separate synthetic Gitea 1.27.2
@@ -486,3 +487,47 @@ API contract probe established the actual response: `permission: none` alongside
 now uses equal supported code/issue units and excludes ownership. The failed runs retained
 diagnostics and completed scoped cleanup. This correction preserves the existing effective-right
 requirements; it does not weaken the assertion that teams must actually be captured.
+
+## Issue #10 local package admission and plan preparation
+
+`test_package_admission.py` exercises generated source packages received through an archive into
+an independent database. It checks rolled-back review, atomic fact/receipt admission, schema-8
+upgrade, exact-byte aliases, permanent origins/parents, explicit author prerequisites, structure
+without business users, changed profile/selection conflicts, receipt replay in a new Python
+process and preservation of an unknown operation under repackaging. It also replaces an embedded
+manifest after initial inspection: both admission and selection must reject the newly read bytes
+unless they match the descriptor digest. `test_package_api.py` covers the authenticated real
+service path and sanitized conflicts; selection and CLI tests cover the thin application boundaries.
+
+The existing source-export integration probe adds six mandatory assertions. The target imports
+only the source-produced archive into its own state, applies the existing plan runner, checks
+native issue/comment authors and their parent, compares transferred Git refs, then repeats receipt,
+planning and execution in another process. The same durable plan must be recovered without extra
+remote objects or mutation events. Missing bindings block metadata planning before any operation
+is prepared. Target access to the source and external network is checked from the actual importer.
+Each added assertion has a deletion-negative report-contract test; omission is not success.
+
+During development, an attempted copy onto an already read-only mounted helper stopped the first
+integration run. Removing that redundant copy preserved the mount. The subsequent actual import
+and replay succeeded, but the relationship assertion compared different Gitea fields: the
+comment's `issue_url` is the parent's web URL, whereas the issue's `url` is its API URL. Captured
+native responses established this distinction; the assertion now compares `comment.issue_url`
+with `issue.html_url`, in addition to reading the expected issue's comment list and checking native
+author IDs. Failed runs retained diagnostics and completed scoped cleanup; they are not passing
+integration evidence. Bounded comparison facts are retained in
+`integration-results/work/package-admission-evidence.json` before cleanup.
+
+The complete guided browser flow remains unaccepted. These tests do not establish LDAP/AD,
+additional permission units, native historical timestamp restoration, atomic comment PATCH
+preconditions, signed sender provenance, general exactly-once behavior or 30 GB operation.
+
+Local integration run `0135345abcb141ce` passed all 22 required checks and all 17 source/package
+assertions, including the actual target import and same-plan process restart. It used the unchanged
+Gitea 1.27.2 image pin on a Darwin/arm64 host with Linux/arm64 Docker containers and no observed
+emulation. Scoped cleanup exited 0; no required check failed or remained unexecuted. This is a
+working-tree local Linux-container result, not an exact-commit hosted result. `make doctor` and
+`make test` also passed (419 backend tests, Ruff/format, MyPy over 51 source files, frontend build).
+Exact-head review, hosted CI and integrated-main verification remain required before integration.
+
+The controlled failure contract also passed: its deliberately failed run retained diagnostics and
+completed scoped cleanup. It is not counted as a successful migration.

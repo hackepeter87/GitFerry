@@ -24,7 +24,7 @@ ROOT = Path("/state/source-export")
 DATABASE = ROOT / "state.sqlite3"
 PACKAGE_DIR = ROOT / "packages"
 WORK_DIR = ROOT / "work"
-REPOSITORY = "access-lab/selected-private"
+REPOSITORY = "source-export-lab/selected"
 SOURCE = "source"
 RECIPIENT = "target"
 
@@ -56,6 +56,50 @@ def _token() -> str:
     return str(value["sha1"])
 
 
+def _admin_request(token: str, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    headers = dict(kwargs.pop("headers", {}))
+    headers["Authorization"] = "token " + token
+    response = httpx.request(
+        method,
+        "http://source:3000/api/v1" + path,
+        headers=headers,
+        timeout=20,
+        trust_env=False,
+        **kwargs,
+    )
+    response.raise_for_status()
+    return response
+
+
+def _setup_source_repository(token: str) -> None:
+    """Create the bounded source fixture before capture begins."""
+    _admin_request(
+        token,
+        "POST",
+        "/orgs",
+        json={"username": "source-export-lab", "visibility": "private"},
+    )
+    team = _admin_request(
+        token,
+        "POST",
+        "/orgs/source-export-lab/teams",
+        json={
+            "name": "read-write",
+            "permission": "write",
+            "units_map": {"repo.code": "write", "repo.issues": "write"},
+        },
+    ).json()
+    for username in ("issue-author", "comment-author"):
+        _admin_request(token, "PUT", f"/teams/{team['id']}/members/{username}")
+    _admin_request(
+        token,
+        "POST",
+        "/orgs/source-export-lab/repos",
+        json={"name": "selected", "private": True, "auto_init": True},
+    )
+    _admin_request(token, "PUT", f"/teams/{team['id']}/repos/source-export-lab/selected")
+
+
 def _service() -> SourceExports:
     state = StateStore(DATABASE)
     return SourceExports(
@@ -79,6 +123,8 @@ def capture() -> dict[str, Any]:
     shutil.rmtree(ROOT, ignore_errors=True)
     for directory in (PACKAGE_DIR, WORK_DIR, ROOT / "secrets", ROOT / "ca"):
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    token = _token()
+    _setup_source_repository(token)
     # Seed the selected source object before the read-only capture starts.  The
     # capture itself is then limited to GETs plus Git upload-pack POSTs.
     issue = _source_request(
@@ -95,7 +141,6 @@ def capture() -> dict[str, Any]:
     shutil.copyfile("/tmp/source-export-trusted.pem", ROOT / "trusted.pem")
     shutil.copyfile("/tmp/source-export-trusted.key", ROOT / "trusted.key")
     shutil.copyfile(ROOT / "trusted.pem", ROOT / "ca" / "source-ca.pem")
-    token = _token()
     (ROOT / "secrets" / "source-token").write_text(token, encoding="ascii")
     (ROOT / "secrets" / "source-token").chmod(0o600)
     state = StateStore(DATABASE)

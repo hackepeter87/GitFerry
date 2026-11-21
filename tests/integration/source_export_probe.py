@@ -21,7 +21,7 @@ from support import (
     docker_service_exec,
 )
 
-REPOSITORY = "access-lab/selected-private"
+REPOSITORY = "source-export-lab/selected"
 ASSERTIONS = frozenset(
     {
         "source_capture_confirmed",
@@ -35,6 +35,12 @@ ASSERTIONS = frozenset(
         "offline_replay_exact",
         "target_only_archive_verified",
         "source_and_target_databases_independent",
+        "package_admission_apply_confirmed",
+        "native_authors_parent_and_git_refs",
+        "target_only_archive_and_external_unreachable",
+        "package_admission_database_independent",
+        "no_user_preparation_blocks_metadata",
+        "package_replay_process_restart_no_extra_posts_or_objects",
     }
 )
 
@@ -76,15 +82,30 @@ def _worker(mode: str) -> dict[str, Any]:
     return json.loads(result.stdout)
 
 
+def _target_worker(mode: str) -> dict[str, Any]:
+    result = docker_service_exec(
+        "gitferry-b", ["python", "/probe/package_admission_worker.py", mode], timeout=240
+    )
+    if result.returncode:
+        raise ProbeFailure(f"package admission worker {mode} failed with exit {result.returncode}")
+    return json.loads(result.stdout)
+
+
 def run_source_export_probe() -> dict[str, Any]:
     worker_path = Path(__file__).with_name("source_export_worker.py")
     docker_copy(worker_path, "gitferry-a:/probe/source_export_worker.py")
     docker_copy(worker_path.with_name("plan_worker.py"), "gitferry-a:/probe/plan_worker.py")
+    docker_copy(
+        worker_path.with_name("package_admission_worker.py"),
+        "gitferry-b:/probe/package_admission_worker.py",
+    )
     tls_directory = WORK / "source-export-tls"
     tls_directory.mkdir()
     cert, key = certificate(tls_directory, "trusted")
     docker_copy(cert, "gitferry-a:/tmp/source-export-trusted.pem")
     docker_copy(key, "gitferry-a:/tmp/source-export-trusted.key")
+    docker_copy(cert, "gitferry-b:/tmp/package-admission-trusted.pem")
+    docker_copy(key, "gitferry-b:/tmp/package-admission-trusted.key")
     token = api(
         SOURCE_URL,
         "POST",
@@ -123,6 +144,38 @@ def run_source_export_probe() -> dict[str, Any]:
     if target_probe.returncode:
         raise ProbeFailure("target-only archive verification failed")
     target_details = json.loads(target_probe.stdout)
+    target_package = _target_worker("initial")
+    target_replay = _target_worker("replay")
+    # Keep bounded, credential-free comparison facts before the runner cleans up
+    # the isolated instances, including when a later assertion fails.
+    evidence_keys = (
+        "status",
+        "plan_id",
+        "issue_author",
+        "issue_author_id",
+        "comment_author",
+        "comment_author_id",
+        "target_author_ids",
+        "comment_issue_url",
+        "issue_url",
+        "issue_html_url",
+        "bundle_refs",
+        "target_refs",
+        "objects",
+        "post_count",
+    )
+    (WORK / "package-admission-evidence.json").write_text(
+        json.dumps(
+            {
+                "initial": {key: target_package[key] for key in evidence_keys},
+                "replay": target_replay,
+            },
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     claims = package.document.get("metadata", {}).get("issue_authors", [])
     manifest_digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
     assertions = {
@@ -155,6 +208,35 @@ def run_source_export_probe() -> dict[str, Any]:
             and target_details["source_exports_rows"] == 0
             and target_details["source_state_absent"]
         ),
+        "package_admission_apply_confirmed": target_package["status"] == "confirmed",
+        "native_authors_parent_and_git_refs": (
+            target_package["issue_author"] == "issue-author"
+            and target_package["issue_author_id"]
+            == target_package["target_author_ids"]["issue-author"]
+            and target_package["comment_author"] == "comment-author"
+            and target_package["comment_author_id"]
+            == target_package["target_author_ids"]["comment-author"]
+            # Gitea's comment.issue_url is the parent's web URL; issue.url is
+            # its distinct API URL. Compare the returned web relationship.
+            and target_package["comment_issue_url"] == target_package["issue_html_url"]
+            and target_package["target_refs"] == target_package["bundle_refs"]
+        ),
+        "target_only_archive_and_external_unreachable": (
+            target_package["target_only"] and target_package["external_unreachable"]
+        ),
+        "package_admission_database_independent": target_package["source_exports_rows"] == 0,
+        "no_user_preparation_blocks_metadata": (
+            target_package["review_missing_bindings"] and target_package["blocked_without_bindings"]
+        ),
+        "package_replay_process_restart_no_extra_posts_or_objects": (
+            target_replay["replay"]
+            and target_replay["plan_id"] == target_package["plan_id"]
+            and target_replay["plan_reviewed"]
+            and target_replay["plan_prepared"]
+            and target_replay["same_remote_objects"]
+            and target_replay["no_extra_posts"]
+            and target_replay["no_extra_objects"]
+        ),
     }
     if set(assertions) != ASSERTIONS or not all(assertions.values()):
         raise ProbeFailure(f"Source export assertions failed: {assertions}")
@@ -166,6 +248,6 @@ def run_source_export_probe() -> dict[str, Any]:
         "limits": [
             "One real private repository on pinned Gitea 1.27.2",
             "Capture is read-only after setup; Git upload-pack POSTs are transport reads",
-            "Target verification stops at archive receipt and does not claim full apply",
+            "Target import uses one fresh package and synthetic local identity bindings",
         ],
     }

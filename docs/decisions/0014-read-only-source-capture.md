@@ -1,6 +1,6 @@
 # ADR 0014: Durable source capture before portable first-import planning
 
-Status: proposed under [Issue #10](https://github.com/hackepeter87/GitFerry/issues/10).
+Status: accepted in PR #53 under [Issue #10](https://github.com/hackepeter87/GitFerry/issues/10).
 
 ## Context
 
