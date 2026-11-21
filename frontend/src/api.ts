@@ -46,6 +46,27 @@ export interface ConnectionIdentity {
   certificate_sha256: string | null;
 }
 
+export type BrowseKind = "organizations" | "repositories";
+
+export interface BrowseEntry {
+  id: string;
+  name?: string;
+  repository?: string;
+  private?: boolean;
+}
+
+export interface BrowseResponse {
+  instance_key: string;
+  profile_revision: number;
+  evidence_digest: string;
+  kind: BrowseKind;
+  organization: string | null;
+  page: number;
+  entries: BrowseEntry[];
+  next_page: number | null;
+  inventory_complete: false;
+}
+
 export type PlanStatus = "draft" | "queued" | "preflighting" | "running" | "confirmed" | "blocked" | "failed" | "cancelled" | (string & {});
 
 export interface PlanOperation {
@@ -145,6 +166,17 @@ export function logout(): Promise<void> {
 
 export function listConnections(): Promise<ConnectionProfile[]> {
   return request("/api/v1/connections");
+}
+
+export function browseConnection(
+  key: string,
+  value: { expected_revision: number; kind: BrowseKind; organization: string | null; page: number },
+): Promise<BrowseResponse> {
+  return request(`/api/v1/connections/${encodeURIComponent(key)}/browse`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(value),
+  });
 }
 
 export function createConnection(value: Pick<ConnectionProfile, "display_name" | "base_url" | "installation_marker" | "credential_ref" | "ca_ref">): Promise<ConnectionProfile> {
