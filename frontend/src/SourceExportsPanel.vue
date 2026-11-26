@@ -30,6 +30,9 @@ const includeMetadata = ref(true);
 const includeMembers = ref(false);
 const includeLfs = ref(false);
 const includeWiki = ref(false);
+const includeLabels = ref(false);
+const includeAttachments = ref(false);
+const includeReleases = ref(false);
 const loading = ref(true);
 const saving = ref(false);
 const message = ref("");
@@ -48,6 +51,9 @@ onUnmounted(() => { disposed = true; });
 watch(() => props.sourceProfile?.instance_key, () => {
   reviewedInventory.value = null;
   if (!availableRecipients.value.some((item) => item.instance_key === recipientKey.value)) recipientKey.value = "";
+});
+watch(includeMetadata, (enabled) => {
+  if (!enabled) includeAttachments.value = false;
 });
 
 async function load(): Promise<void> {
@@ -71,8 +77,9 @@ function makeRequest(): SourceExportRequest | null {
   })).sort((a, b) => a.repository.localeCompare(b.repository));
   if (repositories.some((entry) => !entry.repository || !entry.global_id)) return null;
   const includeNative = includeLfs.value || includeWiki.value;
+  const includePortableMetadata = includeLabels.value || includeAttachments.value || includeReleases.value;
   return {
-    version: includeNative ? 3 : 2,
+    version: includePortableMetadata ? 4 : includeNative ? 3 : 2,
     inventory_id: reviewedInventory.value.inventory_id,
     inventory_digest: reviewedInventory.value.digest,
     source_instance_key: profile.instance_key,
@@ -81,8 +88,16 @@ function makeRequest(): SourceExportRequest | null {
     repositories,
     include_metadata: includeMetadata.value,
     include_members: includeMembers.value,
-    ...(includeNative
+    ...(includeNative || includePortableMetadata
       ? { include_lfs: includeLfs.value, include_wiki: includeWiki.value }
+      : {}),
+    ...(includePortableMetadata
+      ? {
+          include_labels: includeLabels.value,
+          include_attachments: includeAttachments.value,
+          include_releases: includeReleases.value,
+          include_release_assets: includeReleases.value,
+        }
       : {}),
   };
 }
@@ -187,9 +202,13 @@ function formatSize(size: number | null): string {
       <label><input v-model="includeMembers" type="checkbox" :disabled="saving"> Include membership records</label>
       <label><input v-model="includeLfs" type="checkbox" :disabled="saving"> Include Git LFS objects</label>
       <label><input v-model="includeWiki" type="checkbox" :disabled="saving"> Include native wiki history</label>
+      <label><input v-model="includeLabels" type="checkbox" :disabled="saving"> Include labels and issue label assignments</label>
+      <label><input v-model="includeAttachments" type="checkbox" :disabled="saving || !includeMetadata"> Include issue and comment attachments</label>
+      <label><input v-model="includeReleases" type="checkbox" :disabled="saving"> Include releases and release assets</label>
+      <p class="supporting">Assets are copied as verified package payloads. Existing same-name labels or assets require a compatible stable mapping; omission never deletes target content. Release authors require an explicit local identity binding. Historical native creation times are recorded but cannot be restored by the regular create APIs.</p>
       <p class="supporting">LFS includes standard pointers and same-origin objects only. Native wiki export requires a populated native wiki; empty, disabled, or uninitialized wikis block the request. There is no automatic return or merge. Membership records are proposals; target identities and permissions need local approval.</p>
     </fieldset>
-    <InventoryPanel v-if="sourceProfile" :source-profile="sourceProfile" :selected-repositories="selectedRepositories" :include-metadata="includeMetadata" :include-members="includeMembers" :include-lfs="includeLfs" :include-wiki="includeWiki" @reviewed="reviewedInventory = $event" @session-expired="emit('session-expired')" />
+    <InventoryPanel v-if="sourceProfile" :source-profile="sourceProfile" :selected-repositories="selectedRepositories" :include-metadata="includeMetadata" :include-members="includeMembers" :include-lfs="includeLfs" :include-wiki="includeWiki" :include-labels="includeLabels" :include-attachments="includeAttachments" :include-releases="includeReleases" @reviewed="reviewedInventory = $event" @session-expired="emit('session-expired')" />
     <p v-if="!reviewedInventory" class="supporting">Inspect and review the current inventory before queueing an export.</p>
     <button class="primary" type="button" :disabled="!canCreate" @click="createAndQueue">{{ saving ? "Queueing export…" : "Create and queue export" }}</button>
 
