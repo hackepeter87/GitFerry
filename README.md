@@ -11,7 +11,10 @@ a stable release or a complete implementation of later roadmap capabilities. The
 - FastAPI backend, CLI and authenticated Vue 3/TypeScript administration frontend
 - durable source export/download, package intake, explicit local identity decisions and first-import plans
 - versioned instance and transfer blueprint schemas with secret references
-- two-instance Gitea 1.27.2 integration environment
+- two-instance Gitea integration environment; the current reproducible primary baseline is Gitea
+  28.4.0 at OCI index digest `sha256:aa90e8f00b755b0d665214ab9c14447ea44d3190dbe6b6d0cb46cd9c4f55d309`.
+  GitFerry itself is not locked to that exact release: it validates stable observed Gitea versions
+  and records version-specific API evidence. Gitea 1.27.2 remains historical compatibility evidence.
 - Git bundle, explicit identity/team permission, metadata roundtrip, and Gitea import probes
 - versioned SQLite state for verified bindings, origins/mappings, selected baselines, bounded issue
   and normal-comment operations, conflicts, and controlled restart
@@ -84,7 +87,8 @@ gitferry transport admit --database state.sqlite3 --local-instance instance-b \
 - [Verified upstream references](docs/references.md)
 - [Architecture decisions](docs/decisions/)
 
-Gitea REST patterns are based on the official 1.27 API documentation. The integration suite also captures the tested instance OpenAPI document at runtime rather than assuming the API surface.
+Gitea REST patterns are based on the tested instance's official API contract. The integration suite
+captures the live OpenAPI document at runtime rather than assuming a single Gitea release.
 
 ## License
 

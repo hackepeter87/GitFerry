@@ -13,7 +13,9 @@ it is never a command argument or exported value. This read-only BindDN lookup i
 the unsupported secret-bearing Gitea bootstrap command. An explicit CA is required, referrals
 are not followed, and missing/ambiguous results block identity decisions.
 
-LDAP simple authentication is the bounded automated bootstrap path for Gitea **1.27.2**.
+LDAP simple authentication is the bounded automated bootstrap path for the tested Gitea API
+contract. The current primary qualification is Gitea **28.4.0**; GitFerry does not require an
+exact application-wide Gitea version and records the observed server version for each run.
 Gitea binds with the user's own password at login; no directory bind password is required by
 the bootstrap. LDAPS or StartTLS and an explicit trusted CA are required. Install that CA for
 the running Gitea service as well as the local bootstrap process. A same-name local Gitea account
@@ -91,7 +93,8 @@ credential reference, select **Reopen**, review the pending candidate and explic
 These steps do not recreate accounts, repeat a confirmed import or redirect an immutable binding.
 An actually changed identity cannot be accepted by using Reopen as a replacement operation.
 
-The separate Samba 4.22.11 qualification covers LDAPS with verified CA, real Gitea 1.27.2 login,
+The separate Samba 4.22.11 qualification covers LDAPS with verified CA and real Gitea login on the
+qualified test baseline (28.4.0; historical 1.27.2 evidence is retained),
 missing directory mail, rejected disabled accounts and wrong passwords, plus explicit native aliases.
 This is AD-compatible server evidence, not Microsoft Windows AD qualification. Product directory
 claims contain direct groups; a successful server-side nested-group query is not transitive product

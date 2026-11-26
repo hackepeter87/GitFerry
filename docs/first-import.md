@@ -37,7 +37,7 @@ in addition to the existing connection-check deadline. Failures return no partia
 profile revision/approval changes invalidate the read. The source API account needs access to
 Gitea's administrator organization listing and the selected organization repositories.
 
-The Gitea 1.27.2 [administrator organization endpoint](https://github.com/go-gitea/gitea/blob/v1.27.2/routers/api/v1/admin/org.go)
+The Gitea [administrator organization endpoint](https://docs.gitea.com/api/1.24/#tag/admin/operation/adminGetAllOrgs)
 provides paginated organization identities. Repository display names and IDs are selection data;
 source-provided clone URLs are not used as connection authority.
 
