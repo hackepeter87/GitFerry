@@ -10,6 +10,7 @@ from time import monotonic, sleep
 from typing import Any
 
 import httpx
+from gitea_compat import PRIMARY_GITEA_VERSION
 from permissions_probe import CONTROL_REPO, SELECTED_REPO
 from support import (
     RESULTS,
@@ -238,7 +239,7 @@ def run_comment_transport_roundtrip_probe() -> dict[str, Any]:
     contract = openapi_update_contract()
     return {
         "status": "passed",
-        "gitea_version": "1.27.2",
+        "gitea_version": PRIMARY_GITEA_VERSION,
         "manifests": {
             "forward": {"id": seed["manifest_id"], "digest": seed["digest_sha256"]},
             "return": {"id": returned["manifest_id"], "digest": returned["digest_sha256"]},

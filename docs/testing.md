@@ -4,7 +4,11 @@
 
 - Unit: blueprint/schema rules, realm/SID/OU identity ambiguity and collisions, SQLite migrations/constraints, operation transitions, selected issue baselines, manifest/path validation, and drift decisions.
 - API: FastAPI request/response behavior with no external service.
-- Integration: two real Gitea 1.27.2 containers, synthetic seed data, Git bundle and metadata probes, plus file-backed SQLite workers restarted or killed as separate operating-system processes.
+- Integration: two real Gitea containers, synthetic seed data, Git bundle and metadata probes, plus
+  file-backed SQLite workers restarted or killed as separate operating-system processes. The current
+  reproducible primary baseline is Gitea 28.4.0 at OCI index digest
+  `sha256:aa90e8f00b755b0d665214ab9c14447ea44d3190dbe6b6d0cb46cd9c4f55d309`; historical 1.27.2
+  runs remain dated evidence.
 - OCI lifecycle integration: inspect the built image, start it non-root on a fresh named volume,
   retain exact mappings/baselines/journal/conflicts across container replacement and SIGKILL,
   observe graceful SIGTERM shutdown, and require corrupt/newer-schema/read-only/symlink starts to
@@ -57,6 +61,24 @@ existing transport, interruption or cleanup evidence. Record the exact tested co
 review and acceptance outcome in the delivery issue/PR and Actions artifacts. The historical
 records below describe their original scopes; they do not approve later changed code or accept
 the complete 0.2 milestone.
+
+## Current primary qualification (Issue #68)
+
+Local run `d2c6c4314b7b46bb` passed the report-gated integration suite from fresh scoped volumes
+on 2026-11-26. Both real Gitea services reported 28.4.0 and resolved the configured OCI index pin
+`sha256:aa90e8f00b755b0d665214ab9c14447ea44d3190dbe6b6d0cb46cd9c4f55d309` to Linux/arm64 image
+manifest `sha256:93f860dce19a3bb924361c167c93c7a2a93d74a5600060772c643cbf65de01f1`;
+Docker Server was Linux/arm64 29.9.3 with no observed emulation. The run passed metadata, directory, permissions,
+inventory, package, manifest, issue/comment, restart/unknown-outcome, and cleanup assertions.
+This is local evidence, not a hosted GitHub Actions run and not a claim that GitFerry requires
+exactly 28.4.0 at runtime.
+
+The separate `run-gitea-upgrade-probe.sh` qualification then used the immutable historical
+1.27.2 source image and the primary 28.4.0 target image. Both live `/version` responses matched,
+the target accepted the documented repository migration request with HTTP 201, and the synthetic
+source issue was present in the imported target repository. This proves that bounded direction and
+operation only; it is not an in-place database upgrade, a downgrade claim, or support evidence for
+every intermediate Gitea release.
 
 ## Connection profile evidence (Issue #8)
 

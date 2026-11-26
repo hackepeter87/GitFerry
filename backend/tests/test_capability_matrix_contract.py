@@ -125,15 +125,18 @@ def test_matrix_does_not_overstate_label_return_and_names_foundational_gap_owner
         )
 
 
-def test_matrix_keeps_known_boundaries_and_exact_integration_pin_visible() -> None:
+def test_matrix_keeps_known_boundaries_and_integration_baselines_visible() -> None:
     text = MATRIX.read_text(encoding="utf-8")
     normalized = " ".join(text.split())
     compose = (ROOT / "tests" / "integration" / "compose.yaml").read_text(encoding="utf-8")
-    digest = "sha256:d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd"
+    historical_digest = "sha256:d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd"
+    primary_digest = "sha256:aa90e8f00b755b0d665214ab9c14447ea44d3190dbe6b6d0cb46cd9c4f55d309"
 
     assert "Gitea 1.27.2" in text
-    assert digest in text
-    assert digest in compose
+    assert historical_digest in text
+    assert "Gitea 28.4.0" in text
+    assert primary_digest in text
+    assert primary_digest in compose
     assert "no general exactly-once guarantee" in text
     assert "do not restore native `created_at`" in text
     assert "no atomic server-side version precondition" in text

@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 import support
+from gitea_compat import PRIMARY_GITEA_VERSION
 from gitferry.directory_bootstrap import prepare_ldap_simple_bootstrap
 from support import TARGET_URL, ProbeFailure, api
 
@@ -496,7 +497,7 @@ def run_directory_probe() -> dict[str, Any]:
         raise ProbeFailure("authenticated LDAP account was not readable by the administrator")
     wrong_ca_rejected = _wrong_ca_probe()
     version = _gitea_version()
-    if version != "1.27.2":
+    if version != PRIMARY_GITEA_VERSION:
         raise ProbeFailure("unexpected Gitea version in directory fixture")
     package_versions = support.run(
         [

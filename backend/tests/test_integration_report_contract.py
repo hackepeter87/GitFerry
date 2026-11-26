@@ -2,19 +2,22 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
+PRIMARY_GITEA_VERSION = "28.4.0"
 PINNED_GITEA_IMAGE = (
-    "docker.gitea.com/gitea:1.27.2@sha256:"
-    "d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd"
+    "docker.gitea.com/gitea:28.4.0@sha256:"
+    "aa90e8f00b755b0d665214ab9c14447ea44d3190dbe6b6d0cb46cd9c4f55d309"
 )
 
 
 def report_contract() -> ModuleType:
     path = Path(__file__).parents[2] / "tests" / "integration" / "report_contract.py"
+    sys.path.insert(0, str(path.parent))
     spec = importlib.util.spec_from_file_location("integration_report_contract", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -40,7 +43,7 @@ def complete_probe_report() -> dict[str, object]:
     report: dict[str, object] = {
         "content_inventory": {
             "status": "passed",
-            "gitea_version": "1.27.2",
+            "gitea_version": PRIMARY_GITEA_VERSION,
             "assertions": {key: True for key in report_contract().INVENTORY_ASSERTIONS},
             "counts": {
                 **{key: 1 for key in report_contract().INVENTORY_OBSERVED},
@@ -56,7 +59,7 @@ def complete_probe_report() -> dict[str, object]:
         },
         "native_payloads": {
             "status": "passed",
-            "gitea_version": "1.27.2",
+            "gitea_version": PRIMARY_GITEA_VERSION,
             "assertions": {key: True for key in report_contract().NATIVE_PAYLOAD_ASSERTIONS},
             "cases": {
                 "normal": {
@@ -187,7 +190,7 @@ def complete_probe_report() -> dict[str, object]:
                     "record": {"status": "outcome_unknown", "native_source_id": None},
                 },
             },
-            "gitea_version": "1.27.2",
+            "gitea_version": PRIMARY_GITEA_VERSION,
             "valid_password_login": True,
             "wrong_password_rejected": True,
             "wrong_ca_rejected_and_restored": True,
@@ -379,7 +382,7 @@ def complete_probe_report() -> dict[str, object]:
                 True,
             ),
         },
-        "gitea": {"source": "1.27.2", "target": "1.27.2"},
+        "gitea": {"source": PRIMARY_GITEA_VERSION, "target": PRIMARY_GITEA_VERSION},
         "comment_transport_roundtrip": {"assertions": comment_assertions},
         "portable_transport_roundtrip": {
             "assertions": {"separate_networks_block_cross_gitea": True}
@@ -499,6 +502,9 @@ def prepare_results(tmp_path: Path, report: dict[str, object] | None) -> Path:
                             "repo_digests": [
                                 "docker.gitea.com/gitea@" + PINNED_GITEA_IMAGE.split("@", 1)[1]
                             ],
+                            "resolved_platform_digest": (
+                                "sha256:1565a01ff935d56156285149acfce48ecc19c5d4e8ed278bebcf06f44e148295"
+                            ),
                         }
                         for name in ("source", "target")
                     },

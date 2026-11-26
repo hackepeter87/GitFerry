@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from gitea_compat import PRIMARY_GITEA_VERSION
 from gitferry.identity import (
     ExplicitIdentityMapping,
     ExternalIdentity,
@@ -376,7 +377,8 @@ def run_permissions_probe() -> tuple[dict[str, Any], AccessContext]:
         ],
         "identity_scope": "synthetic mapping only; no LDAP or AD connection was exercised",
         "gitea_account_creation_requirement": (
-            "Gitea 1.27.2 admin user creation requires an email; synthetic .invalid values were "
+            f"Gitea {PRIMARY_GITEA_VERSION} admin user creation requires an email; "
+            "synthetic .invalid values were "
             "used only for account provisioning and never as mapping keys"
         ),
         "source_target_id_differences": {

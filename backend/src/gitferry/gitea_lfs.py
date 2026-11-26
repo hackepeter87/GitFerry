@@ -1,4 +1,4 @@
-"""Bounded Gitea 1.27.2 LFS basic transfers on the approved origin only."""
+"""Bounded primary-Gitea LFS basic transfers on the approved origin only."""
 
 from __future__ import annotations
 

@@ -376,9 +376,9 @@ class SourceExports:
                         "sha256": bundle.sha256,
                     }
             if request["version"] == 3:
-                if inventory is None or inventory.schema_version != 2:
+                if inventory is None or inventory.schema_version < 2:
                     raise SourceExportConflict(
-                        "native payload capture requires inventory version two"
+                        "native payload capture requires a native-capable inventory version"
                     )
                 from gitferry.gitea_lfs import GiteaLFSClient
                 from gitferry.lfs_payloads import LFSPointer

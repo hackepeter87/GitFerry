@@ -263,7 +263,7 @@ def test_collect_inventory_exposes_unsupported_lfs_and_excluded_classes() -> Non
     def handle(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path.endswith("/version"):
-            return httpx.Response(200, json={"version": "1.27.2"})
+            return httpx.Response(200, json={"version": "29.1.0"})
         if path.endswith("/repos/acme/one"):
             return httpx.Response(
                 200,
@@ -320,6 +320,8 @@ def test_collect_inventory_exposes_unsupported_lfs_and_excluded_classes() -> Non
         transport=httpx.MockTransport(handle),
     )
     classes = {item.content_class: item for item in document.repositories[0].classes}
+    assert document.schema_version == document.comparison_version == 3
+    assert document.gitea_version == "29.1.0"
     assert classes["lfs"].status == "not-supported"
     assert classes["lfs"].count is None
     assert classes["labels"].status == "observed" and classes["labels"].count == 0
@@ -332,7 +334,7 @@ def test_collect_inventory_exposes_unsupported_lfs_and_excluded_classes() -> Non
 def test_collect_inventory_rejects_selected_repository_identity_mismatch() -> None:
     def handle(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/version"):
-            return httpx.Response(200, json={"version": "1.27.2"})
+            return httpx.Response(200, json={"version": "28.4.0"})
         return httpx.Response(
             200, json={"id": 8, "full_name": "acme/one", "owner": {"id": 3, "login": "acme"}}
         )
@@ -356,7 +358,7 @@ def test_collect_inventory_rejects_selected_repository_identity_mismatch() -> No
 def test_unavailable_selected_class_is_blocked_not_empty(status: int) -> None:
     def handle(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/version"):
-            return httpx.Response(200, json={"version": "1.27.2"})
+            return httpx.Response(200, json={"version": "28.4.0"})
         if request.url.path.endswith("/repos/acme/one"):
             return httpx.Response(
                 200, json={"id": 7, "full_name": "acme/one", "owner": {"id": 2, "login": "acme"}}

@@ -20,6 +20,7 @@ from unittest.mock import patch
 
 import httpx
 from fastapi.testclient import TestClient
+from gitea_compat import PRIMARY_GITEA_VERSION
 from gitferry.api import create_app
 from gitferry.auth import AuthService
 from gitferry.connection_probe import (
@@ -182,7 +183,7 @@ def run_connection_profile_probe() -> dict[str, Any]:
                     service, "target", expected_revision=1, references=references
                 )
                 assertions["real_gitea_version_and_account"] = (
-                    result["version"] == "1.27.2" and result["login"] == ADMIN_USERNAME
+                    result["version"] == PRIMARY_GITEA_VERSION and result["login"] == ADMIN_USERNAME
                 )
                 assertions["check_did_not_approve"] = not service.get("target").locally_approved
                 approve_connection(
@@ -284,7 +285,7 @@ def run_connection_profile_probe() -> dict[str, Any]:
                         system, "system", expected_revision=1, references=references
                     )
                 assertions["system_trust_store_without_ca_reference"] = (
-                    system_result["version"] == "1.27.2"
+                    system_result["version"] == PRIMARY_GITEA_VERSION
                     and system_result["observed_identity"]["ca_digest"] == "system-trust"
                 )
                 for label, ca, endpoint in (

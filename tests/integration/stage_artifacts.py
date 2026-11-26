@@ -30,9 +30,20 @@ _REDACTIONS = (
     ),
 )
 
-_ROOT_FILES = {"project-name", "runtime-image", "report.json", "workflow-cleanup.json"}
+_ROOT_FILES = {
+    "gitea-upgrade-report.json",
+    "project-name",
+    "runtime-image",
+    "report.json",
+    "workflow-cleanup.json",
+}
 _DIAGNOSTIC_FILES = {"compose-ps.json", "compose-images.json", "compose.log"}
-_JSON_FILES = {"report.json", "workflow-cleanup.json", "run-metadata.json"}
+_JSON_FILES = {
+    "gitea-upgrade-report.json",
+    "report.json",
+    "workflow-cleanup.json",
+    "run-metadata.json",
+}
 _SENSITIVE_KEY = re.compile(
     r"(?:password|passwd|secret|token|session|cookie|csrf|authorization|private[_-]?key)", re.I
 )

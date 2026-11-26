@@ -147,13 +147,15 @@ class RepositoryInventory(_Model):
 
 class InventoryDocument(_Model):
     format: Literal["gitferry.content-inventory"] = "gitferry.content-inventory"
-    schema_version: Literal[1, 2] = 1
-    comparison_version: Literal[1, 2] = 1
+    schema_version: Literal[1, 2, 3] = 1
+    comparison_version: Literal[1, 2, 3] = 1
     snapshot_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")]
     created_at: Annotated[str, Field(min_length=1, max_length=64)]
     source_instance_key: Annotated[str, Field(min_length=1, max_length=128)]
     source_installation_marker: Annotated[str, Field(min_length=1, max_length=256)]
-    gitea_version: Literal["1.27.2"]
+    gitea_version: Annotated[
+        str, Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$", min_length=5, max_length=32)
+    ]
     repositories: list[RepositoryInventory] = Field(min_length=1, max_length=128)
     deletion_semantics: Literal["absence-does-not-delete"] = "absence-does-not-delete"
 
@@ -203,7 +205,7 @@ def parse_inventory(value: dict[str, Any]) -> InventoryDocument:
             or type(value.get("comparison_version")) is not int
         ):
             raise ValueError("inventory versions must be integers")
-        if value["schema_version"] not in (1, 2):
+        if value["schema_version"] not in (1, 2, 3):
             raise ValueError("unsupported inventory version")
         if next(_validator(value["schema_version"]).iter_errors(value), None) is not None:
             raise ValueError("inventory does not match its supported local schema")
@@ -251,7 +253,7 @@ def inventory_summary(document: InventoryDocument) -> dict[str, Any]:
             reason = observation.reason
             if observation.status != "observed":
                 reason = reason or "Content was not completely observed"
-            elif observation.content_class in {"lfs", "wiki"} and document.schema_version == 2:
+            elif observation.content_class in {"lfs", "wiki"} and document.schema_version >= 2:
                 reason = _native_transfer_reason(observation)
             elif observation.content_class not in TRANSFER_CLASSES:
                 reason = "Transfer for this class is not implemented"

@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from gitea_compat import PRIMARY_GITEA_VERSION
 from permissions_probe import CONTROL_REPO, SELECTED_REPO
 from support import (
     RESULTS,
@@ -186,7 +187,7 @@ def run_transport_roundtrip_probe() -> dict[str, Any]:
 
     return {
         "status": "passed",
-        "gitea_version": "1.27.2",
+        "gitea_version": PRIMARY_GITEA_VERSION,
         "state_isolation": {
             "gitferry_a_database": "gitferry-a-state",
             "gitferry_b_database": "gitferry-b-state",

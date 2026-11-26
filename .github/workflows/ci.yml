@@ -108,6 +108,10 @@ jobs:
           GITFERRY_IT_INJECT_FAILURE: ${{ (github.event_name == 'workflow_dispatch' && inputs.inject_integration_timeout) && 'timeout-after-environment-start' || (github.event_name == 'workflow_dispatch' && inputs.inject_integration_failure) && 'after-environment-start' || '' }}
           GITFERRY_IT_INJECT_TIMEOUT_SECONDS: ${{ (github.event_name == 'workflow_dispatch' && inputs.inject_integration_timeout) && '30' || '' }}
         run: make test-integration
+      - name: Run historical-source compatibility probe
+        if: ${{ success() && !(github.event_name == 'workflow_dispatch' && inputs.inject_integration_failure) && !(github.event_name == 'workflow_dispatch' && inputs.inject_integration_timeout) }}
+        timeout-minutes: 5
+        run: make test-gitea-upgrade
       - name: Run integration failure contract
         if: ${{ success() && !(github.event_name == 'workflow_dispatch' && inputs.inject_integration_failure) && !(github.event_name == 'workflow_dispatch' && inputs.inject_integration_timeout) }}
         timeout-minutes: 10

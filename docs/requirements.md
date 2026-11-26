@@ -28,7 +28,11 @@ Adapter boundaries may support future forges, but GitLab implementation is not p
 
 ## Foundation assumptions
 
-- Gitea 1.27.2 is the first tested community release because its exact image and versioned official API documentation are available.
+- Gitea is the first supported forge. The application is not pinned to an exact Gitea release;
+  it validates a stable observed version and records the API evidence used by each run. The
+  reproducible primary integration baseline is Gitea 28.4.0 at OCI index digest
+  `sha256:aa90e8f00b755b0d665214ab9c14447ea44d3190dbe6b6d0cb46cd9c4f55d309`. Gitea 1.27.2
+  remains historical compatibility evidence and is not silently rewritten.
 - SQLite is suitable for one GitFerry control-plane instance with serialized state transitions; repository payloads remain on the filesystem.
 - Native `git bundle` is the repository-content transport primitive. Gitea REST is used only for documented metadata operations.
 - Target repositories and organizations are initially absent, except for a technical administrator and deliberately seeded ID offsets.

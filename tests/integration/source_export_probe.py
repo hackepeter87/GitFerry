@@ -13,6 +13,7 @@ from typing import Any
 
 from browser_tunnel import browser_tunnel
 from connection_profile_probe import certificate
+from gitea_compat import PRIMARY_GITEA_VERSION
 from gitferry.application_package import inspect_package
 from gitferry.package_archive import receive_package_archive
 from support import (
@@ -653,7 +654,8 @@ def run_source_export_probe() -> dict[str, Any]:
         "repository": REPOSITORY,
         "archive": {"sha256": archive_digest, "bytes": archive_host.stat().st_size},
         "limits": [
-            "Two selected private repositories and an excluded source control; Gitea 1.27.2",
+            "Two selected private repositories and an excluded source control; "
+            f"Gitea {PRIMARY_GITEA_VERSION}",
             "Capture is read-only after setup; Git upload-pack POSTs are transport reads",
             "Target import uses one fresh package and synthetic local identity bindings",
         ],

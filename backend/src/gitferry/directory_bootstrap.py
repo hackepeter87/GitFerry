@@ -3,7 +3,7 @@
 This module deliberately prepares an argv/env contract only.  A caller with
 authority over the target Gitea installation must execute it and perform the
 version/read-back checks.  Bind-DN passwords are not supported here because
-Gitea 1.27.2 only accepts them as a CLI value; operators must use Gitea's
+The qualified Gitea CLI only accepts them as a CLI value; operators must use Gitea's
 authenticated admin UI for that mode.
 """
 
@@ -44,7 +44,6 @@ class DirectoryBootstrapIntent:
     email_attribute: str
     username_attribute: str | None
     ca_secret_ref: str
-    expected_gitea_version: str
 
 
 @dataclass(frozen=True)
@@ -54,7 +53,6 @@ class DirectoryBootstrapPreflight:
     config_path: Path
     ca_secret_ref: str
     intent_digest: str
-    expected_gitea_version: str
 
 
 def _reject_secret_like(value: Mapping[str, Any]) -> None:
@@ -64,9 +62,7 @@ def _reject_secret_like(value: Mapping[str, Any]) -> None:
                 raise DirectoryBootstrapError(f"secret-bearing field is not allowed: {key}")
 
 
-def parse_ldap_simple_source(
-    source: Mapping[str, Any], expected_version: str
-) -> DirectoryBootstrapIntent:
+def parse_ldap_simple_source(source: Mapping[str, Any]) -> DirectoryBootstrapIntent:
     if source.get("mode") != "simple":
         raise DirectoryBootstrapUnsupported(
             "LDAP BindDN bootstrap is not automated; add the source in Gitea's authenticated "
@@ -117,8 +113,6 @@ def parse_ldap_simple_source(
     username = source.get("usernameAttribute")
     if username is not None and (not isinstance(username, str) or not username.strip()):
         raise DirectoryBootstrapError("usernameAttribute must be a non-empty string")
-    if not isinstance(expected_version, str) or not expected_version.strip():
-        raise DirectoryBootstrapError("expected Gitea version is required")
     return DirectoryBootstrapIntent(
         name=name,
         directory_realm=str(source["directoryRealm"]),
@@ -130,7 +124,6 @@ def parse_ldap_simple_source(
         email_attribute=str(source["emailAttribute"]),
         username_attribute=username,
         ca_secret_ref=ca_ref,
-        expected_gitea_version=expected_version,
     )
 
 
@@ -140,7 +133,6 @@ def prepare_ldap_simple_bootstrap(
     gitea_binary: Path,
     gitea_config: Path,
     ca_path: Path,
-    expected_version: str = "1.27.2",
 ) -> DirectoryBootstrapPreflight:
     """Prepare a secret-free ``gitea admin auth add-ldap-simple`` invocation."""
 
@@ -152,7 +144,7 @@ def prepare_ldap_simple_bootstrap(
         raise DirectoryBootstrapError("target-local binary, config, and CA paths must be absolute")
     if gitea_binary.is_symlink() or gitea_config.is_symlink() or ca_path.is_symlink():
         raise DirectoryBootstrapError("target-local paths must not be symlinks")
-    intent = parse_ldap_simple_source(source, expected_version)
+    intent = parse_ldap_simple_source(source)
     canonical = {
         "name": intent.name,
         "directoryRealm": intent.directory_realm,
@@ -164,7 +156,6 @@ def prepare_ldap_simple_bootstrap(
         "emailAttribute": intent.email_attribute,
         "usernameAttribute": intent.username_attribute,
         "caSecretRef": intent.ca_secret_ref,
-        "expectedGiteaVersion": intent.expected_gitea_version,
     }
     digest = hashlib.sha256(
         json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -199,7 +190,6 @@ def prepare_ldap_simple_bootstrap(
         config_path=gitea_config,
         ca_secret_ref=intent.ca_secret_ref,
         intent_digest=digest,
-        expected_gitea_version=intent.expected_gitea_version,
     )
 
 

@@ -7,7 +7,12 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
-from gitferry.content_inventory import InventoryError, inventory_digest, parse_inventory
+from gitferry.content_inventory import (
+    InventoryError,
+    inventory_digest,
+    inventory_summary,
+    parse_inventory,
+)
 from gitferry.gitea_bundles import GiteaBundleError
 from gitferry.gitea_wiki import GiteaWikiError
 from gitferry.native_inventory import observe_native_payloads
@@ -189,7 +194,23 @@ def test_successful_zero_git_refs_yields_explicit_empty_wiki(tmp_path: Path) -> 
     assert item.objects[0].facts == {"state": "empty", "refs": {}}
 
 
-@pytest.mark.parametrize("schema_version, comparison_version", [(3, 3), (2, 1)])
+def test_v3_native_payloads_remain_transferable(tmp_path: Path) -> None:
+    value = _document(requested_classes=["lfs", "wiki"])
+    value.update(schema_version=3, comparison_version=3, gitea_version="29.1.0")
+    wiki = tmp_path / "wiki.git"
+    wiki.mkdir()
+    observed = _observe(
+        value,
+        _FakeGit(_history_repo(tmp_path), wiki_mirror=wiki),
+        _FakeLFS(),
+        _FakeWiki(),
+    )
+
+    assert observed.schema_version == observed.comparison_version == 3
+    assert inventory_summary(observed)["transfer_ready"] is True
+
+
+@pytest.mark.parametrize("schema_version, comparison_version", [(4, 4), (2, 1)])
 def test_inventory_versions_reject_mismatch_or_unknown(
     schema_version: int, comparison_version: int
 ) -> None:

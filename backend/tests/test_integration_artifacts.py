@@ -36,6 +36,10 @@ def test_staging_allowlist_redacts_secrets_and_excludes_payloads(tmp_path: Path)
         '"session_count":3,"message":"Authorization: Bearer embedded-hidden"}}\n',
         encoding="utf-8",
     )
+    (results / "gitea-upgrade-report.json").write_text(
+        '{"status":"passed","source":{"version":"1.27.2"},"target":{"version":"28.4.0"}}\n',
+        encoding="utf-8",
+    )
     (results / "workflow-diagnostics/compose.log").write_text(
         "Authorization: Bearer hidden\nCookie: session=hidden\n"
         "password=hidden\n-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----\n",
@@ -72,6 +76,10 @@ def test_staging_allowlist_redacts_secrets_and_excludes_payloads(tmp_path: Path)
     assert report["nested"]["authorization"] == "[REDACTED]"  # noqa: S105 -- marker
     assert report["nested"]["session_count"] == 3
     assert report["nested"]["message"] == "Authorization: [REDACTED]"
+    upgrade = json.loads(
+        (output / "integration-results/gitea-upgrade-report.json").read_text(encoding="utf-8")
+    )
+    assert upgrade["status"] == "passed"
 
 
 def test_staging_fails_without_results(tmp_path: Path) -> None:

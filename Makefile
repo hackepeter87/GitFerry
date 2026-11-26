@@ -6,7 +6,7 @@ MYPY := .venv/bin/mypy
 GITFERRY_VERSION := 0.3.0rc1
 GITFERRY_SOURCE_REVISION := $(shell git rev-parse HEAD)
 
-.PHONY: doctor setup test test-browser test-integration test-integration-diagnostics test-integration-failure-contract test-clean container-build
+.PHONY: doctor setup test test-browser test-integration test-gitea-upgrade test-integration-diagnostics test-integration-failure-contract test-clean container-build
 
 doctor:
 	PYTHON_BOOTSTRAP=$(PYTHON_BOOTSTRAP) ./scripts/doctor.sh
@@ -29,6 +29,9 @@ test-browser:
 
 test-integration:
 	./tests/integration/run.sh
+
+test-gitea-upgrade:
+	./tests/integration/run-gitea-upgrade-probe.sh
 
 test-integration-diagnostics:
 	./tests/integration/capture_diagnostics.sh

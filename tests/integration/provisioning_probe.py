@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from gitea_compat import PRIMARY_GITEA_VERSION
 from gitferry.git_bundle import create_git_bundle
 from permissions_probe import CONTROL_REPO, AccessContext
 from support import (
@@ -382,7 +383,7 @@ def run_provisioning_probe(context: AccessContext) -> dict[str, Any]:
         "status": "passed",
         "interfaces": [
             "GitFerry durable provisioning service",
-            "Gitea 1.27.2 REST API",
+            f"Gitea {PRIMARY_GITEA_VERSION} REST API",
             "Git bundle and Git smart HTTP",
         ],
         "assertions": assertions,

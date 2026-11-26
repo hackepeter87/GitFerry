@@ -90,7 +90,6 @@ class DirectorySettingsService:
         gitea: dict[str, Any] = {
             "baseUrl": profile.base_url,
             "credentialSecretRef": profile.credential_ref,
-            "expectedVersion": "1.27.2",
         }
         if profile.ca_ref:
             gitea["caSecretRef"] = profile.ca_ref
@@ -131,7 +130,7 @@ class DirectorySettingsService:
                 ["Add this BindDN source in Gitea's authenticated admin UI over HTTPS."],
             )
         try:
-            parse_ldap_simple_source(source, "1.27.2")
+            parse_ldap_simple_source(source)
         except DirectoryBootstrapError as exc:
             raise DirectorySettingsError("simple source prerequisites are invalid") from exc
         return "ready-for-target-local-bootstrap", [
@@ -308,8 +307,6 @@ class DirectorySettingsService:
         if validated.get("kind") != "InstanceBlueprint":
             raise DirectorySettingsError("expected InstanceBlueprint")
         gitea = validated["spec"]["gitea"]
-        if gitea.get("expectedVersion", "1.27.2") != "1.27.2":
-            raise DirectorySettingsError("unsupported expected Gitea version")
         expected = {
             "baseUrl": profile.base_url,
             "credentialSecretRef": profile.credential_ref,
