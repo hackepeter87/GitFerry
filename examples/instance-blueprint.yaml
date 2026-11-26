@@ -7,7 +7,6 @@ spec:
     baseUrl: https://gitea-source.example.invalid
     credentialSecretRef: secrets/gitea/source-admin-token
     caSecretRef: trust/internal-lab-ca
-    expectedVersion: 1.27.2
   authenticationSources:
     - name: synthetic-directory
       type: ldaps

@@ -7,7 +7,6 @@ spec:
     baseUrl: https://gitea-target.example.invalid
     credentialSecretRef: secrets/gitea/target-admin-token
     caSecretRef: trust/internal-target-ca
-    expectedVersion: 1.27.2
   authenticationSources:
     - name: synthetic-openldap
       type: ldaps

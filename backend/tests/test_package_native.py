@@ -96,10 +96,13 @@ def test_native_contents_rejects_corruption_and_hardlinks(tmp_path: Path) -> Non
         native_contents(tmp_path, value)
 
 
-def test_native_inventory_matching_rejects_other_parent_and_pointer_drift() -> None:
+@pytest.mark.parametrize("inventory_version", [2, 3])
+def test_native_inventory_matching_rejects_other_parent_and_pointer_drift(
+    inventory_version: int,
+) -> None:
     value = _document(requested_classes=["lfs", "wiki"])
-    value["schema_version"] = 2
-    value["comparison_version"] = 2
+    value["schema_version"] = inventory_version
+    value["comparison_version"] = inventory_version
     document = parse_inventory(value)
     repository = document.repositories[0]
     lfs = next(item for item in repository.classes if item.content_class == "lfs")

@@ -1,8 +1,9 @@
-"""Read-only, bounded native payload facts for content-inventory version two."""
+"""Read-only, bounded native payload facts for qualified inventory versions."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Literal
 
 from .content_inventory import ClassObservation, InventoryDocument, InventoryObject, parse_inventory
 from .gitea_bundles import GiteaBundleError, GiteaBundlePusher
@@ -22,13 +23,14 @@ def observe_native_payloads(
 ) -> InventoryDocument:
     """Augment only explicitly selected native classes; never mutate saved baselines.
 
-    V1 wiki page counts remain v1 facts. V2 represents a wiki repository and its
+    V1 wiki page counts remain v1 facts. V2/V3 represent a wiki repository and its
     exact refs; LFS objects are SHA-256 identities discovered across all reachable
     historical blobs. A protocol failure remains unknown, never an empty set.
     """
     result = document.model_copy(deep=True)
-    result.schema_version = 2
-    result.comparison_version = 2
+    native_version: Literal[2, 3] = 2 if result.gitea_version == "1.27.2" else 3
+    result.schema_version = native_version
+    result.comparison_version = native_version
     for repository in result.repositories:
         replacements: dict[str, ClassObservation] = {}
         if "lfs" in repository.requested_classes:

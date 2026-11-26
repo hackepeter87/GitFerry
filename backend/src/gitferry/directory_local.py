@@ -84,7 +84,6 @@ class LocalBootstrap:
         *,
         work_path: Path,
         custom_path: Path,
-        expected_version: str = "1.27.2",
     ) -> None:
         self.state = state
         self.instance_key = instance_key
@@ -93,7 +92,6 @@ class LocalBootstrap:
         self.gitea_binary = gitea_binary
         self.gitea_config = gitea_config
         self.ca_path = ca_path
-        self.expected_version = expected_version
         self.work_path = work_path
         self.custom_path = custom_path
         self.journal = DirectoryBootstrapService(state)
@@ -116,7 +114,6 @@ class LocalBootstrap:
                 gitea_binary=self.gitea_binary,
                 gitea_config=self.gitea_config,
                 ca_path=self.ca_path,
-                expected_version=self.expected_version,
             )
         except Exception as exc:
             raise DirectoryLocalError("LDAP-simple bootstrap preflight failed") from exc
@@ -210,8 +207,8 @@ class LocalBootstrap:
     def _version(self, preflight: DirectoryBootstrapPreflight) -> None:
         output = self._run((os.fspath(self.gitea_binary), "--version"), preflight)
         match = _VERSION.search(output)
-        if match is None or match.group(1) != self.expected_version:
-            raise DirectoryLocalError("Gitea binary version does not match the pinned version")
+        if match is None:
+            raise DirectoryLocalError("Gitea binary version is not a stable release version")
 
     def _list(self, preflight: DirectoryBootstrapPreflight) -> dict[str, LocalAuthSource]:
         argv = (

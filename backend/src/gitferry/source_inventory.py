@@ -194,17 +194,22 @@ def collect_inventory(
     reader = _InventoryReader(base_url, token, context, transport)
     try:
         version = reader._read("/version")
-        if not isinstance(version, dict) or version.get("version") != "1.27.2":
-            raise InventoryCollectionError("source inventory requires qualified Gitea 1.27.2")
+        observed_version = version.get("version") if isinstance(version, dict) else None
+        if not isinstance(observed_version, str) or not re.fullmatch(
+            r"[0-9]+\.[0-9]+\.[0-9]+", observed_version
+        ):
+            raise InventoryCollectionError("source did not report a stable Gitea version")
         repositories = [
             _repository(reader, selection, requested_classes) for selection in selections
         ]
         return InventoryDocument(
+            schema_version=3,
+            comparison_version=3,
             snapshot_id=snapshot_id,
             created_at=created_at,
             source_instance_key=source_instance_key,
             source_installation_marker=installation_marker,
-            gitea_version="1.27.2",
+            gitea_version=observed_version,
             repositories=repositories,
         )
     except (SourceSnapshotError, TypeError, ValueError):

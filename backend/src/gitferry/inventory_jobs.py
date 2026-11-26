@@ -46,6 +46,14 @@ class _Request(BaseModel):
     requested_classes: list[str] = Field(min_length=1, max_length=len(CONTENT_CLASSES))
 
 
+class _InventoryStageError(RuntimeError):
+    """Secret-free stage marker for a failed inventory observation."""
+
+    def __init__(self, stage: str):
+        self.error_code = f"inventory_failed_{stage}"
+        super().__init__(self.error_code)
+
+
 def parse_request(value: Mapping[str, Any]) -> dict[str, Any]:
     try:
         request = _Request.model_validate(value).model_dump()
@@ -166,33 +174,50 @@ class InventoryJobs:
     def _observe(self, job: dict[str, Any]) -> InventoryDocument:
         from gitferry.source_inventory import collect_inventory
 
-        profile, approved = self._authority(job)
+        try:
+            profile, approved = self._authority(job)
+        except Exception as exc:
+            raise _InventoryStageError("authority") from exc
         references = _SourceReferences(self.references, profile.credential_ref, profile.ca_ref)
-        evidence = probe_connection(
-            self.profiles,
-            profile.instance_key,
-            expected_revision=profile.revision,
-            references=references,
-        )
+        try:
+            evidence = probe_connection(
+                self.profiles,
+                profile.instance_key,
+                expected_revision=profile.revision,
+                references=references,
+            )
+        except Exception as exc:
+            raise _InventoryStageError("connection") from exc
         if evidence["requires_approval"] or evidence["observed_identity"] != approved:
-            raise InventoryError("source installation or authority changed")
+            raise _InventoryStageError("authority")
         token = references.token(profile.credential_ref)
         context, _ = references.tls(profile.ca_ref)
         request = job["request"]
-        document = collect_inventory(
-            profile.base_url,
-            token,
-            context,
-            request["repositories"],
-            request["requested_classes"],
-            source_instance_key=profile.instance_key,
-            installation_marker=profile.installation_marker,
-            snapshot_id=job["inventory_id"],
-            created_at=job["created_at"],
-        )
+        try:
+            document = collect_inventory(
+                profile.base_url,
+                token,
+                context,
+                request["repositories"],
+                request["requested_classes"],
+                source_instance_key=profile.instance_key,
+                installation_marker=profile.installation_marker,
+                snapshot_id=job["inventory_id"],
+                created_at=job["created_at"],
+            )
+        except Exception as exc:
+            raise _InventoryStageError("metadata") from exc
         if {"lfs", "wiki"}.intersection(request["requested_classes"]):
-            document = self._native_payloads(document, profile, evidence["login"], token, context)
-        self._authority(job)
+            try:
+                document = self._native_payloads(
+                    document, profile, evidence["login"], token, context
+                )
+            except Exception as exc:
+                raise _InventoryStageError("native_payloads") from exc
+        try:
+            self._authority(job)
+        except Exception as exc:
+            raise _InventoryStageError("authority") from exc
         return document
 
     def _native_payloads(
@@ -304,14 +329,17 @@ class InventoryJobs:
                             identifier,
                         ),
                     )
-            except Exception:
+            except Exception as exc:
                 # Never copy paths, tokens, remote bodies or exception messages into public state.
+                error_code = (
+                    exc.error_code if isinstance(exc, _InventoryStageError) else "inventory_failed"
+                )
                 with self.state.transaction() as connection:
                     connection.execute(
                         "UPDATE source_inventory_jobs SET "
-                        "status='failed',error_code='inventory_failed',updated_at=? WHERE "
+                        "status='failed',error_code=?,updated_at=? WHERE "
                         "inventory_id=? AND status='running'",
-                        (now(), identifier),
+                        (error_code, now(), identifier),
                     )
             return self.get(identifier)
 

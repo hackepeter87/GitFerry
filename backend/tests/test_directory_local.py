@@ -44,7 +44,7 @@ def _setup(tmp_path: Path, *, listing: list[list[str]] | None = None):
         "#!/usr/bin/env python3\n"
         "import json, os, pathlib, sys\n"
         "if sys.argv[1:] == ['--version']:\n"
-        "    print('Gitea version: ' + os.environ.get('FAKE_VERSION', '1.27.2'))\n"
+        "    print('Gitea version: ' + os.environ.get('FAKE_VERSION', '28.4.0'))\n"
         "    raise SystemExit(0)\n"
         "path = pathlib.Path(os.environ['FAKE_LISTING'])\n"
         "rows = json.loads(path.read_text())\n"
@@ -134,27 +134,9 @@ def test_invalid_auth_list_is_rejected(tmp_path: Path) -> None:
         bootstrap.plan()
 
 
-def test_version_mismatch_is_rejected(tmp_path: Path) -> None:
-    state, default_bootstrap = _setup(tmp_path)
-    bootstrap = LocalBootstrap(
-        state,
-        default_bootstrap.instance_key,
-        default_bootstrap.realm_key,
-        SOURCE,
-        default_bootstrap.gitea_binary,
-        default_bootstrap.gitea_config,
-        default_bootstrap.ca_path,
-        work_path=tmp_path,
-        custom_path=tmp_path,
-        expected_version="1.27.3",
-    )
-    with pytest.raises(DirectoryLocalError, match="version"):
-        bootstrap.plan()
-
-
 def test_development_version_suffix_is_rejected(tmp_path: Path) -> None:
     _, bootstrap = _setup(tmp_path)
-    os.environ["FAKE_VERSION"] = "1.27.2-dev"
+    os.environ["FAKE_VERSION"] = "28.4.0-dev"
     try:
         with pytest.raises(DirectoryLocalError, match="version"):
             bootstrap.plan()

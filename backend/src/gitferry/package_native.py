@@ -89,8 +89,8 @@ def native_contents(directory: Path, document: dict[str, Any]) -> dict[str, tupl
 def match_native_inventory(document: InventoryDocument, selected: dict[str, Any]) -> None:
     from .application_package import PackageError
 
-    if document.schema_version != 2:
-        raise PackageError("native payloads require inventory version two")
+    if document.schema_version < 2:
+        raise PackageError("native payloads require a native-capable inventory version")
     repository = next(r for r in document.repositories if r.repository == selected["repository"])
     classes = {c.content_class: c for c in repository.classes}
     if selected["lfs"] is not None:
