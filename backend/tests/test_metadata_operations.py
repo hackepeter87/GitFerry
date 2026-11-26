@@ -1,0 +1,179 @@
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+from typing import Any
+
+import pytest
+from gitferry.metadata_operations import MetadataApplication, prepare_metadata_operation
+from gitferry.operations import OperationExecutor
+from gitferry.state_store import OperationBlocked, OriginKey, StateStore
+
+
+class MetadataClient:
+    def __init__(self) -> None:
+        self.labels: list[dict[str, Any]] = []
+        self.assets: list[dict[str, Any]] = []
+        self.label_posts = 0
+        self.asset_posts = 0
+        self.payload = b""
+
+    def list_labels(self, repository: str) -> list[dict[str, Any]]:
+        return list(self.labels)
+
+    def create_label(self, repository: str, values: dict[str, Any]) -> dict[str, Any]:
+        self.label_posts += 1
+        value = {"id": 41, **values}
+        self.labels.append(value)
+        return value
+
+    def list_assets(
+        self, repository: str, parent_kind: str, parent_id: str
+    ) -> list[dict[str, Any]]:
+        return list(self.assets)
+
+    def upload_asset(
+        self,
+        repository: str,
+        parent_kind: str,
+        parent_id: str,
+        filename: str,
+        path: Path,
+        media_type: str,
+    ) -> dict[str, Any]:
+        self.asset_posts += 1
+        self.payload = path.read_bytes()
+        value = {
+            "id": 71,
+            "uuid": "asset-71",
+            "name": filename,
+            "size": len(self.payload),
+            "created_at": "2026-01-01T00:00:00Z",
+            "browser_download_url": "https://gitea.invalid/attachments/asset-71",
+        }
+        self.assets.append(value)
+        return value
+
+    def download_asset(
+        self, value: dict[str, Any], destination: Path, *, max_bytes: int
+    ) -> tuple[int, str, str]:
+        destination.write_bytes(self.payload)
+        return len(self.payload), hashlib.sha256(self.payload).hexdigest(), "text/plain"
+
+
+def configured(tmp_path: Path) -> tuple[StateStore, str, str]:
+    state = StateStore(tmp_path / "state.sqlite3")
+    state.register_instance("a", "A", "https://a.invalid", "install-a")
+    state.register_instance("b", "B", "https://b.invalid", "install-b")
+    issue = state.register_origin(OriginKey("a", "acme/repo", "issue", "11", 3))
+    state.add_object_mapping(issue.id, "b", "acme/repo", "51", target_issue_index=8)
+    label = state.register_origin(OriginKey("a", "acme/repo", "label", "12"))
+    return state, issue.id, label.id
+
+
+def test_label_create_is_confirmed_once_and_replayed_without_post(tmp_path: Path) -> None:
+    state, _, label = configured(tmp_path)
+    operation = prepare_metadata_operation(
+        state,
+        origin_id=label,
+        target_instance_key="b",
+        target_repository_scope="acme/repo",
+        operation_type="create_label",
+        values={"name": "priority", "color": "AABBCC", "description": "Synthetic"},
+    )
+    client = MetadataClient()
+    app = MetadataApplication(state, client, tmp_path, max_bytes=1024)  # type: ignore[arg-type]
+    with OperationExecutor(state, "first") as executor:
+        confirmed = app.apply(operation.operation_id, executor)
+    assert confirmed.status == "confirmed"
+    assert state.get_object_mapping(label, "b").target_global_id == "41"
+    with OperationExecutor(state, "replay") as executor:
+        replay = app.apply(operation.operation_id, executor)
+    assert replay.status == "confirmed"
+    assert client.label_posts == 1
+    assert client.labels[0]["color"] == "aabbcc"
+
+
+def test_unknown_label_create_stays_blocked_without_second_post(tmp_path: Path) -> None:
+    state, _, label = configured(tmp_path)
+    operation = prepare_metadata_operation(
+        state,
+        origin_id=label,
+        target_instance_key="b",
+        target_repository_scope="acme/repo",
+        operation_type="create_label",
+        values={"name": "priority", "color": "112233", "description": "Synthetic"},
+    )
+    client = MetadataClient()
+    app = MetadataApplication(state, client, tmp_path, max_bytes=1024)  # type: ignore[arg-type]
+    with pytest.raises(RuntimeError, match="crash"):
+        with OperationExecutor(
+            state, "crash", after_remote_hook=lambda: (_ for _ in ()).throw(RuntimeError("crash"))
+        ) as executor:
+            app.apply(operation.operation_id, executor)
+    assert client.label_posts == 1
+    assert state.get_operation(operation.operation_id).status == "executing"
+    with OperationExecutor(state, "restart"):
+        pass
+    assert state.get_operation(operation.operation_id).status == "outcome_unknown"
+    with OperationExecutor(state, "retry") as executor:
+        with pytest.raises(OperationBlocked, match="reconciliation"):
+            app.apply(operation.operation_id, executor)
+    assert client.label_posts == 1
+
+
+def test_attachment_upload_verifies_parent_and_remote_bytes(tmp_path: Path) -> None:
+    state, issue, _ = configured(tmp_path)
+    payload = tmp_path / "payloads" / "asset.bin"
+    payload.parent.mkdir()
+    payload.write_bytes(b"synthetic asset")
+    attachment = state.register_origin(
+        OriginKey("a", "acme/repo", "attachment", "17", parent_origin_id=issue)
+    )
+    operation = prepare_metadata_operation(
+        state,
+        origin_id=attachment.id,
+        target_instance_key="b",
+        target_repository_scope="acme/repo",
+        operation_type="upload_attachment",
+        values={
+            "name": "asset.txt",
+            "size": len(payload.read_bytes()),
+            "sha256": hashlib.sha256(payload.read_bytes()).hexdigest(),
+            "media_type": "text/plain",
+            "member": "payloads/asset.bin",
+            "parent_origin_id": issue,
+        },
+    )
+    client = MetadataClient()
+    app = MetadataApplication(state, client, tmp_path, max_bytes=1024)  # type: ignore[arg-type]
+    with OperationExecutor(state, "asset") as executor:
+        confirmed = app.apply(operation.operation_id, executor)
+    assert confirmed.status == "confirmed"
+    assert client.asset_posts == 1
+    assert client.payload == b"synthetic asset"
+    app.preflight(operation.operation_id)
+
+
+def test_asset_parent_conflict_is_rejected_before_operation(tmp_path: Path) -> None:
+    state, _, _ = configured(tmp_path)
+    release = state.register_origin(OriginKey("a", "acme/repo", "release", "21"))
+    attachment = state.register_origin(
+        OriginKey("a", "acme/repo", "attachment", "22", parent_origin_id=release.id)
+    )
+    with pytest.raises(OperationBlocked, match="parent"):
+        prepare_metadata_operation(
+            state,
+            origin_id=attachment.id,
+            target_instance_key="b",
+            target_repository_scope="acme/repo",
+            operation_type="upload_attachment",
+            values={
+                "name": "asset.txt",
+                "size": 0,
+                "sha256": hashlib.sha256(b"").hexdigest(),
+                "media_type": "text/plain",
+                "member": "payloads/asset.bin",
+                "parent_origin_id": release.id,
+            },
+        )

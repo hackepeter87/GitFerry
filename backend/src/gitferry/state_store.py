@@ -80,6 +80,9 @@ _MAPPING_PRESERVING_OPERATION_TYPES = frozenset(
         "upload_lfs_object",
         "bootstrap_wiki",
         "push_wiki_bundle",
+        "update_label",
+        "assign_issue_labels",
+        "update_release",
     }
 )
 
@@ -96,7 +99,7 @@ SchemaSignature = tuple[
 
 def _apply_migrations(connection: sqlite3.Connection, current: int) -> None:
     for version in range(current + 1, SCHEMA_VERSION + 1):
-        if version in (3, 4, 17):
+        if version in (3, 4, 17, 18):
             # Rebuilding a referenced table is the documented SQLite migration
             # pattern. Foreign keys must be disabled outside the transaction and
             # are checked in full before the connection is accepted again.
@@ -109,7 +112,7 @@ def _apply_migrations(connection: sqlite3.Connection, current: int) -> None:
             + f"PRAGMA user_version = {version};\nCOMMIT;"
         )
         connection.executescript(script)
-        if version in (3, 4, 17):
+        if version in (3, 4, 17, 18):
             connection.execute("PRAGMA foreign_keys = ON")
             violations = list(connection.execute("PRAGMA foreign_key_check"))
             if violations:
