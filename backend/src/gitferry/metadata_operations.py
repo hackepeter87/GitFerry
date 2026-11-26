@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from gitferry.application_package import _digest, _file
+from gitferry.comment_operations import resolve_author_binding
 from gitferry.gitea_metadata import (
     GiteaMetadataClient,
     MetadataTargetConflict,
@@ -119,6 +120,7 @@ def prepare_metadata_operation(
     operation_type: str,
     values: Mapping[str, Any],
     baseline_id: str | None = None,
+    author: Mapping[str, Any] | None = None,
 ) -> OperationRecord:
     if operation_type not in METADATA_OPERATION_TYPES:
         raise ValueError("unsupported metadata operation")
@@ -135,12 +137,18 @@ def prepare_metadata_operation(
     if origin.key.object_type != allowed[operation_type]:
         raise OperationBlocked("metadata operation and origin type differ")
     intent: dict[str, Any]
+    mapping_version = 1
     if operation_type in ("create_label", "update_label"):
         intent = {"values": label_values(values)}
         ruleset = "gitea-label-fields"
     elif operation_type in ("create_release", "update_release"):
         intent = {"values": release_values(values)}
         ruleset = "gitea-release-fields"
+        if author is None:
+            raise OperationBlocked("release operation requires an explicit author binding")
+        binding = resolve_author_binding(state, author, target_instance_key)
+        intent["author_binding_id"] = binding.binding_id
+        mapping_version = binding.mapping_version
     elif operation_type == "assign_issue_labels":
         origins = values.get("label_origin_ids")
         if (
@@ -187,7 +195,7 @@ def prepare_metadata_operation(
         target_instance_key=target_instance_key,
         target_repository_scope=target_repository_scope,
         operation_type=operation_type,
-        mapping_version=1,
+        mapping_version=mapping_version,
         baseline_id=baseline_id,
         intent=intent,
     )
@@ -223,11 +231,19 @@ class MetadataApplication:
             result[name] = item
         return result
 
-    def preflight(self, operation_id: str) -> None:
+    def preflight(
+        self,
+        operation_id: str,
+        *,
+        planned_repository: bool = False,
+        planned_parent_origins: frozenset[str] = frozenset(),
+    ) -> None:
         operation = self.state.get_operation(operation_id)
         if operation.status in ("outcome_unknown", "executing", "conflict", "failed"):
             raise OperationBlocked("metadata operation requires reconciliation")
         if operation.operation_type in ("create_label", "update_label"):
+            if planned_repository and operation.operation_type == "create_label":
+                return
             labels = self._labels(operation)
             if operation.operation_type == "create_label" and operation.status != "confirmed":
                 if operation.intent["values"]["name"] in labels:
@@ -247,6 +263,14 @@ class MetadataApplication:
             verify_label(matches[0], expected)
             return
         if operation.operation_type in ("create_release", "update_release"):
+            binding = self.state.get_identity_binding(operation.intent["author_binding_id"])
+            if (
+                binding.target_instance_key != operation.target_instance_key
+                or binding.target_login != self.client.authenticated_login
+            ):
+                raise OperationBlocked("release write client differs from the explicit author")
+            if planned_repository and operation.operation_type == "create_release":
+                return
             releases = self.client.list_releases(operation.target_repository_scope)
             if operation.operation_type == "create_release" and operation.status != "confirmed":
                 wanted = operation.intent["values"]
@@ -267,7 +291,12 @@ class MetadataApplication:
                 if operation.status == "confirmed"
                 else operation.intent["expected"]
             )
-            verify_release(value, expected)
+            verify_release(
+                value,
+                expected,
+                author_login=binding.target_login,
+                author_id=binding.target_account_id,
+            )
             return
         if operation.operation_type == "assign_issue_labels":
             issue = self._mapping(operation.origin_id, operation.target_instance_key)
@@ -282,7 +311,12 @@ class MetadataApplication:
         path = _file(self.package_root, intent["member"])
         if _digest(path, limit=intent["size"]) != (intent["size"], intent["sha256"]):
             raise OperationBlocked("asset payload differs from the reviewed digest")
-        parent = self._mapping(intent["parent_origin_id"], operation.target_instance_key)
+        try:
+            parent = self._mapping(intent["parent_origin_id"], operation.target_instance_key)
+        except OperationBlocked:
+            if intent["parent_origin_id"] in planned_parent_origins:
+                return
+            raise
         parent_type = self.state.get_origin(intent["parent_origin_id"]).key.object_type
         if parent_type not in ("issue", "comment", "release"):
             raise OperationBlocked("asset parent mapping has an unsupported type")
@@ -350,8 +384,14 @@ class MetadataApplication:
                     observed_state={"label_ids": sorted(label_ids)},
                 )
             if kind == "create_release":
+                binding = self.state.get_identity_binding(operation.intent["author_binding_id"])
                 value = self.client.create_release(scope, operation.intent["values"])
-                identifier = verify_release(value, operation.intent["values"])
+                identifier = verify_release(
+                    value,
+                    operation.intent["values"],
+                    author_login=binding.target_login,
+                    author_id=binding.target_account_id,
+                )
                 created_at = value.get("created_at")
                 return TargetConfirmation(
                     identifier,
@@ -360,11 +400,17 @@ class MetadataApplication:
                     operation.intent["values"],
                 )
             if kind == "update_release":
+                binding = self.state.get_identity_binding(operation.intent["author_binding_id"])
                 mapping = self._mapping(operation.origin_id, operation.target_instance_key)
                 value = self.client.update_release(
                     scope, mapping.target_global_id, operation.intent["values"]
                 )
-                identifier = verify_release(value, operation.intent["values"])
+                identifier = verify_release(
+                    value,
+                    operation.intent["values"],
+                    author_login=binding.target_login,
+                    author_id=binding.target_account_id,
+                )
                 return TargetConfirmation(
                     identifier, None, mapping.target_native_created_at, operation.intent["values"]
                 )

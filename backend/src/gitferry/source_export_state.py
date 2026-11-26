@@ -55,11 +55,21 @@ def record_source_capture(state: StateStore, artifact: PackageArtifact, export_i
             or document["inventory"]["include_members"] != request["include_members"]
         ):
             raise PackageError("captured inventory disagrees with local export intent")
-        if request["version"] == 3 and any(
+        if request["version"] >= 3 and any(
             document["inventory"].get(key) != request[key]
             for key in ("include_lfs", "include_wiki")
         ):
             raise PackageError("captured native selection disagrees with local intent")
+        if request["version"] == 4 and any(
+            document["inventory"].get(key) != request[key]
+            for key in (
+                "include_labels",
+                "include_attachments",
+                "include_releases",
+                "include_release_assets",
+            )
+        ):
+            raise PackageError("captured metadata payload selection disagrees with local intent")
         # Structure origins use the same immutable origin comparison as metadata admission.
         for repository in document["repositories"]:
             organization = repository["organization"]
@@ -163,6 +173,22 @@ def record_source_capture(state: StateStore, artifact: PackageArtifact, export_i
                     )
             _record_in_connection(
                 connection, metadata, local_instance_key=sender, direction="exported"
+            )
+        for item in document.get("content", []):
+            portable = dict(item["origin"])
+            if "parent_origin" in item:
+                portable["parent_origin"] = item["parent_origin"]
+            identifier = _insert_origin(connection, {"origin": portable})
+            _insert_replica(
+                connection,
+                identifier,
+                item["kind"],
+                {
+                    "instance_key": sender,
+                    "repository": item["repository"],
+                    "global_id": item["source_native_id"],
+                    "native_created_at": item.get("source_created_at"),
+                },
             )
         connection.execute(
             "UPDATE source_exports SET status='captured', package_digest=?, "

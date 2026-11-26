@@ -16,7 +16,7 @@ _SHA = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 def validate_native_descriptors(document: dict[str, Any]) -> None:
     from .application_package import PackageError, package_path
 
-    if document["schema_version"] != 3:
+    if document["schema_version"] not in (3, 4):
         return
     files: dict[str, tuple[int, str]] = {}
     for repository in document["repositories"]:
@@ -61,7 +61,7 @@ def native_contents(directory: Path, document: dict[str, Any]) -> dict[str, tupl
     from .application_package import PackageError, _digest, _file
 
     files: dict[str, tuple[int, str]] = {}
-    if document["schema_version"] != 3:
+    if document["schema_version"] not in (3, 4):
         return files
     for repository in document["repositories"]:
         for value in repository["lfs"] or []:

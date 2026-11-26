@@ -142,3 +142,65 @@ def test_selected_parent_repository_is_checked_before_plan_publication(tmp_path:
         prepare_transfer_plan(state, request)
     with state.read_connection() as connection:
         assert connection.execute("SELECT COUNT(*) FROM transfer_plans").fetchone()[0] == 0
+
+
+def test_label_and_attachment_operations_follow_repository_and_issue_dependencies(
+    tmp_path: Path,
+) -> None:
+    state, request = configured_plan(tmp_path)
+    label = state.register_origin(OriginKey("source", "org/repo", "label", "300"))
+    issue = state.get_origin(request["metadata"][1]["origin_id"])
+    attachment = state.register_origin(
+        OriginKey(
+            "source",
+            "org/repo",
+            "attachment",
+            "400",
+            parent_origin_id=issue.id,
+        )
+    )
+    request["package_ref"] = "package-1"
+    request["package_digest"] = "a" * 64
+    request["metadata"][1]["values"]["labels"] = ["priority"]
+    request["content"] = [
+        {
+            "origin_id": attachment.id,
+            "repository": "org/repo",
+            "kind": "attachment",
+            "values": {
+                "name": "asset.txt",
+                "size": 5,
+                "sha256": hashlib.sha256(b"asset").hexdigest(),
+                "media_type": "text/plain",
+                "member": "assets/400",
+                "parent_origin_id": issue.id,
+            },
+        },
+        {
+            "origin_id": label.id,
+            "repository": "org/repo",
+            "kind": "label",
+            "values": {
+                "name": "priority",
+                "color": "112233",
+                "description": "Synthetic",
+            },
+        },
+    ]
+    plan = prepare_transfer_plan(state, request)
+    by_type = {item["operation_type"]: item for item in plan["operations"]}
+    assert set(by_type) == {
+        "create_label",
+        "create_issue",
+        "create_comment",
+        "upload_attachment",
+    }
+    dependencies = plan["document"]["dependencies"]
+    assert (
+        by_type["create_label"]["operation_id"]
+        in dependencies[by_type["create_issue"]["operation_id"]]
+    )
+    assert (
+        by_type["create_issue"]["operation_id"]
+        in dependencies[by_type["upload_attachment"]["operation_id"]]
+    )

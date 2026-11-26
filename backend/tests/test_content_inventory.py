@@ -24,6 +24,37 @@ def _observation(content_class: str, *, status: str = "observed", reason: str = 
             permission="read",
             units_map={"repo.code": "read", "repo.issues": "read"},
         )
+    parent = None
+    native_id = None
+    size_bytes = None
+    if content_class == "labels":
+        native_id = "11"
+        facts = {"name": "priority", "color": "112233", "description": "Synthetic"}
+    elif content_class == "releases":
+        native_id = "21"
+        author = {"account_id": "1", "login": "synthetic-author"}
+        facts = {
+            "tag_name": "v1",
+            "target_commitish": "main",
+            "name": "Release",
+            "body": "Notes",
+            "draft": False,
+            "prerelease": False,
+            "created_at": "2026-01-01T00:00:00Z",
+            "published_at": "2026-01-01T00:00:00Z",
+        }
+    elif content_class in {"attachments", "release_assets"}:
+        native_id = "31" if content_class == "attachments" else "32"
+        parent = {
+            "content_class": "issues" if content_class == "attachments" else "releases",
+            "key": "issues-1" if content_class == "attachments" else "21",
+        }
+        facts = {
+            "uuid": "synthetic-uuid",
+            "name": "asset.txt",
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+        size_bytes = 5
     value: dict = {
         "content_class": content_class,
         "status": status,
@@ -31,10 +62,13 @@ def _observation(content_class: str, *, status: str = "observed", reason: str = 
         "objects": (
             [
                 {
-                    "key": f"{content_class}-1",
+                    "key": native_id or f"{content_class}-1",
                     "namespace": "repo",
                     "facts": facts,
                     "author": author,
+                    "native_id": native_id,
+                    "parent": parent,
+                    "size_bytes": size_bytes,
                 }
             ]
             if status == "observed"
@@ -261,6 +295,17 @@ def test_requested_unsupported_or_failed_content_blocks_transfer(status: str) ->
         item for item in value["repositories"][0]["classes"] if item["content_class"] == "issues"
     )
     observation.update(status=status, count=None, objects=[], reason=f"synthetic {status}")
+    attachments = next(
+        item
+        for item in value["repositories"][0]["classes"]
+        if item["content_class"] == "attachments"
+    )
+    attachments.update(
+        status="not-checked",
+        count=None,
+        objects=[],
+        reason="parent issue was not observed",
+    )
     document = parse_inventory(value)
     summary = inventory_summary(document)
     assert summary["inventory_complete"] is False

@@ -1,0 +1,648 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitferry.io/schemas/v4/application-package.schema.json",
+  "title": "GitFerry application package v4 with selected metadata payloads",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "schema_version",
+    "package_id",
+    "transfer_round_id",
+    "producer_version",
+    "created_at",
+    "mode",
+    "sender",
+    "recipient",
+    "repositories",
+    "realms",
+    "metadata",
+    "inventory_complete",
+    "limitations",
+    "deletion_semantics",
+    "inventory",
+    "content"
+  ],
+  "properties": {
+    "format": {
+      "const": "gitferry.application-package"
+    },
+    "schema_version": {
+      "const": 4
+    },
+    "package_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "transfer_round_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "producer_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "mode": {
+      "const": "first-import"
+    },
+    "sender": {
+      "$ref": "#/$defs/endpoint"
+    },
+    "recipient": {
+      "$ref": "#/$defs/endpoint"
+    },
+    "repositories": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/repository"
+      }
+    },
+    "realms": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 512,
+      "items": {
+        "$ref": "#/$defs/realm"
+      }
+    },
+    "metadata": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/metadata"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "content": {
+      "type": "array",
+      "maxItems": 20000,
+      "items": {"$ref": "#/$defs/content"}
+    },
+    "inventory_complete": {
+      "const": false
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "deletion_semantics": {
+      "const": "absence-does-not-delete"
+    },
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size",
+        "sha256",
+        "content_digest",
+        "snapshot_id",
+        "include_members",
+        "include_lfs",
+        "include_wiki",
+        "include_labels",
+        "include_attachments",
+        "include_releases",
+        "include_release_assets"
+      ],
+      "properties": {
+        "path": {
+          "const": "inventory/document.json"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "content_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "snapshot_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "include_members": {
+          "type": "boolean"
+        },
+        "include_lfs": {
+          "type": "boolean"
+        },
+        "include_wiki": {
+          "type": "boolean"
+        },
+        "include_labels": {
+          "type": "boolean"
+        },
+        "include_attachments": {
+          "type": "boolean"
+        },
+        "include_releases": {
+          "type": "boolean"
+        },
+        "include_release_assets": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "contentOrigin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instance_key", "repository", "object_type", "global_id"],
+      "properties": {
+        "instance_key": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+        "repository": {"type": "string", "minLength": 3, "maxLength": 256},
+        "object_type": {"enum": ["label", "release", "attachment", "release_asset"]},
+        "global_id": {"type": "string", "pattern": "^[1-9][0-9]*$", "maxLength": 128}
+      }
+    },
+    "parentOrigin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instance_key", "repository", "object_type", "global_id"],
+      "properties": {
+        "instance_key": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+        "repository": {"type": "string", "minLength": 3, "maxLength": 256},
+        "object_type": {"enum": ["issue", "issue_comment", "release"]},
+        "global_id": {"type": "string", "pattern": "^[1-9][0-9]*$", "maxLength": 128}
+      }
+    },
+    "labelValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "color", "description"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 255},
+        "color": {"type": "string", "pattern": "^[0-9a-fA-F]{6}$"},
+        "description": {"type": "string", "maxLength": 1024}
+      }
+    },
+    "releaseValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag_name", "target_commitish", "name", "body", "draft", "prerelease"],
+      "properties": {
+        "tag_name": {"type": "string", "minLength": 1, "maxLength": 255},
+        "target_commitish": {"type": "string", "minLength": 1, "maxLength": 255},
+        "name": {"type": "string", "maxLength": 255},
+        "body": {"type": "string", "maxLength": 1048576},
+        "draft": {"type": "boolean"},
+        "prerelease": {"type": "boolean"}
+      }
+    },
+    "content": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "origin", "repository", "source_native_id", "values"],
+          "properties": {
+            "kind": {"const": "label"}, "origin": {"$ref": "#/$defs/contentOrigin"},
+            "repository": {"type": "string", "minLength": 3, "maxLength": 256},
+            "source_native_id": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+            "values": {"$ref": "#/$defs/labelValues"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "origin", "repository", "source_native_id", "author", "values", "source_created_at", "source_published_at"],
+          "properties": {
+            "kind": {"const": "release"}, "origin": {"$ref": "#/$defs/contentOrigin"},
+            "repository": {"type": "string", "minLength": 3, "maxLength": 256},
+            "source_native_id": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+            "author": {"$ref": "#/$defs/selector"}, "values": {"$ref": "#/$defs/releaseValues"},
+            "source_created_at": {"type": ["string", "null"], "format": "date-time"},
+            "source_published_at": {"type": ["string", "null"], "format": "date-time"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "origin", "repository", "source_native_id", "parent_origin", "name", "media_type", "source_created_at", "file"],
+          "properties": {
+            "kind": {"enum": ["attachment", "release_asset"]},
+            "origin": {"$ref": "#/$defs/contentOrigin"},
+            "repository": {"type": "string", "minLength": 3, "maxLength": 256},
+            "source_native_id": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+            "parent_origin": {"$ref": "#/$defs/parentOrigin"},
+            "name": {"type": "string", "minLength": 1, "maxLength": 255},
+            "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
+            "source_created_at": {"type": ["string", "null"], "format": "date-time"},
+            "file": {"$ref": "#/$defs/file"}
+          }
+        }
+      ]
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instance_key",
+        "installation_marker"
+      ],
+      "properties": {
+        "instance_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "installation_marker": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "realm_key",
+        "login",
+        "external_id",
+        "ou_path"
+      ],
+      "properties": {
+        "realm_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "login": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "external_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "ou_path": {
+          "type": "string",
+          "maxLength": 1024
+        }
+      }
+    },
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instance_key",
+        "global_id"
+      ],
+      "properties": {
+        "instance_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "global_id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$",
+          "maxLength": 128
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1099511627776
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "team": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "name",
+        "permission",
+        "members",
+        "source_native_id"
+      ],
+      "properties": {
+        "origin": {
+          "$ref": "#/$defs/origin"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "permission": {
+          "enum": [
+            "read",
+            "write"
+          ]
+        },
+        "members": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 1000,
+          "items": {
+            "$ref": "#/$defs/selector"
+          }
+        },
+        "source_native_id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$",
+          "maxLength": 128
+        }
+      }
+    },
+    "organization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "name",
+        "source_native_id"
+      ],
+      "properties": {
+        "origin": {
+          "$ref": "#/$defs/origin"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source_native_id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$",
+          "maxLength": 128
+        }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "repository",
+        "organization",
+        "teams",
+        "bundle",
+        "source_native_id",
+        "lfs",
+        "wiki"
+      ],
+      "properties": {
+        "origin": {
+          "$ref": "#/$defs/origin"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "organization": {
+          "$ref": "#/$defs/organization"
+        },
+        "teams": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 1000,
+          "items": {
+            "$ref": "#/$defs/team"
+          }
+        },
+        "bundle": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_native_id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$",
+          "maxLength": 128
+        },
+        "lfs": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "maxItems": 10000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "oid",
+                  "size",
+                  "path",
+                  "sha256"
+                ],
+                "properties": {
+                  "oid": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9223372036854776000
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "wiki": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "refs",
+                "bundle"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "disabled",
+                    "empty",
+                    "populated"
+                  ]
+                },
+                "refs": {
+                  "type": "object",
+                  "maxProperties": 10000,
+                  "propertyNames": {
+                    "type": "string",
+                    "pattern": "^refs/"
+                  },
+                  "additionalProperties": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40,64}$"
+                  }
+                },
+                "bundle": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/file"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "directory",
+        "manifest_id",
+        "digest_sha256",
+        "issue_authors"
+      ],
+      "properties": {
+        "directory": {
+          "const": "metadata"
+        },
+        "manifest_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "digest_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "issue_authors": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 2000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "origin",
+              "author"
+            ],
+            "properties": {
+              "origin": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "instance_key",
+                  "repository",
+                  "object_type",
+                  "global_id"
+                ],
+                "properties": {
+                  "instance_key": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+                  },
+                  "repository": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "object_type": {
+                    "const": "issue"
+                  },
+                  "global_id": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$",
+                    "maxLength": 128
+                  }
+                }
+              },
+              "author": {
+                "$ref": "#/$defs/selector"
+              }
+            }
+          }
+        }
+      }
+    },
+    "realm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "realm_key",
+        "kind",
+        "description"
+      ],
+      "properties": {
+        "realm_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "kind": {
+          "enum": [
+            "gitea-local",
+            "external"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    }
+  }
+}

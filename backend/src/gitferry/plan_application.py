@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from gitferry.comment_operations import prepare_comment_operation, resolve_author_binding
 from gitferry.gitea_provisioning import _repository_segments
 from gitferry.issue_operations import prepare_issue_operation
+from gitferry.metadata_operations import prepare_metadata_operation
 from gitferry.provisioning import (
     BundleIntent,
     ProvisioningMember,
@@ -93,6 +94,15 @@ class MetadataInput(_Input):
     baseline_id: Text | None = None
 
 
+class ContentInput(_Input):
+    origin_id: Text
+    repository: Text
+    kind: Literal["label", "release", "attachment", "release_asset"]
+    values: dict[str, Any]
+    author: AuthorInput | None = None
+    baseline_id: Text | None = None
+
+
 class PlanRequest(_Input):
     version: Literal[1]
     target_instance_key: Reference
@@ -102,6 +112,7 @@ class PlanRequest(_Input):
     source_limitations: list[Text] = Field(default_factory=list, max_length=1000)
     repositories: list[RepositoryInput] = Field(default_factory=list, max_length=1000)
     metadata: list[MetadataInput] = Field(default_factory=list, max_length=10000)
+    content: list[ContentInput] = Field(default_factory=list, max_length=20000)
     author_credential_refs: dict[str, Reference] = Field(default_factory=dict)
     unsupported_items: list[Text] = Field(default_factory=list, max_length=1000)
 
@@ -115,16 +126,23 @@ def parse_plan_request(value: Mapping[str, Any]) -> PlanRequest:
         ) from None
     if len({item.repository for item in parsed.repositories}) != len(parsed.repositories):
         raise PlanConflict("selected repository scopes must be unique")
-    if len({item.origin_id for item in parsed.metadata}) != len(parsed.metadata):
+    origins = [item.origin_id for item in parsed.metadata] + [
+        item.origin_id for item in parsed.content
+    ]
+    if len(set(origins)) != len(origins):
         raise PlanConflict("selected metadata origins must be unique")
     for repository in [item.repository for item in parsed.repositories] + [
         item.repository for item in parsed.metadata
     ]:
         _repository_segments(repository)
+    for repository in [item.repository for item in parsed.content]:
+        _repository_segments(repository)
     if any(item.bundle for item in parsed.repositories) and parsed.package_ref is None:
         raise PlanConflict("bundle selections require an owned local package reference")
     if parsed.package_digest is not None and parsed.package_ref is None:
         raise PlanConflict("package digest requires an owned package reference")
+    if parsed.content and parsed.package_ref is None:
+        raise PlanConflict("portable content selections require an owned local package")
     return parsed
 
 
@@ -219,6 +237,63 @@ def _metadata_operation(
     )
 
 
+def _content_operation(
+    state: StateStore, request: PlanRequest, item: ContentInput
+) -> OperationRecord:
+    origin = state.get_origin(item.origin_id)
+    if origin.key.object_type != item.kind:
+        raise PlanConflict("portable content kind differs from its admitted origin")
+    if item.kind == "release":
+        if item.author is None:
+            raise OperationBlocked("selected release has no explicit author")
+        binding = resolve_author_binding(
+            state, item.author.model_dump(), request.target_instance_key
+        )
+        if binding.binding_id not in request.author_credential_refs:
+            raise OperationBlocked("release author requires a local credential reference")
+    elif item.author is not None:
+        raise PlanConflict("only releases carry an author selector")
+    try:
+        state.get_object_mapping(origin.id, request.target_instance_key)
+        mapped = True
+    except KeyError:
+        mapped = False
+    create_type = {
+        "label": "create_label",
+        "release": "create_release",
+        "attachment": "upload_attachment",
+        "release_asset": "upload_release_asset",
+    }[item.kind]
+    if mapped and item.baseline_id is None:
+        with state.read_connection() as connection:
+            rows = connection.execute(
+                "SELECT operation_id FROM operations WHERE origin_id=? "
+                "AND target_instance_key=? AND operation_type=?",
+                (origin.id, request.target_instance_key, create_type),
+            ).fetchall()
+        if len(rows) != 1:
+            raise OperationBlocked("existing portable content requires an explicit baseline")
+        operation = state.get_operation(rows[0][0])
+        if operation.status != "confirmed":
+            raise OperationBlocked("earlier portable content operation needs reconciliation")
+        return operation
+    if item.kind in ("attachment", "release_asset") and mapped:
+        raise OperationBlocked("binary asset replacement is not supported")
+    operation_type = (
+        {"label": "update_label", "release": "update_release"}[item.kind] if mapped else create_type
+    )
+    return prepare_metadata_operation(
+        state,
+        origin_id=origin.id,
+        target_instance_key=request.target_instance_key,
+        target_repository_scope=item.repository,
+        operation_type=operation_type,
+        values=item.values,
+        baseline_id=item.baseline_id,
+        author=item.author.model_dump() if item.author else None,
+    )
+
+
 def prepare_transfer_plan(
     state: StateStore,
     value: Mapping[str, Any],
@@ -264,6 +339,9 @@ def prepare_transfer_plan(
             )
             operations.update({operation.operation_id: operation for operation in native_prepared})
             dependencies.update(graph)
+    for content in sorted(request.content, key=lambda selected: selected.origin_id):
+        operation = _content_operation(state, request, content)
+        operations[operation.operation_id] = operation
     for metadata in sorted(request.metadata, key=lambda selected: selected.origin_id):
         operation = _metadata_operation(state, request, metadata)
         operations[operation.operation_id] = operation
@@ -271,7 +349,14 @@ def prepare_transfer_plan(
         operation.origin_id: operation.operation_id
         for operation in operations.values()
         if operation.operation_type
-        in ("create_organization", "create_repository", "create_team", "create_issue")
+        in (
+            "create_organization",
+            "create_repository",
+            "create_team",
+            "create_issue",
+            "create_comment",
+            "create_release",
+        )
     }
     repositories = {
         operation.target_repository_scope: operation.operation_id
@@ -304,6 +389,41 @@ def prepare_transfer_plan(
             parent_repository = repositories.get(operation.target_repository_scope)
             if parent_repository:
                 parents.append(parent_repository)
+        if operation.operation_type in (
+            "create_label",
+            "update_label",
+            "create_release",
+            "update_release",
+            "upload_attachment",
+            "upload_release_asset",
+        ):
+            parent_repository = repositories.get(operation.target_repository_scope)
+            if parent_repository:
+                parents.append(parent_repository)
+        if operation.operation_type in ("upload_attachment", "upload_release_asset"):
+            parent_origin = str(operation.intent["parent_origin_id"])
+            parent_operation = creators.get(parent_origin)
+            if parent_operation:
+                parents.append(parent_operation)
+            else:
+                try:
+                    state.get_object_mapping(parent_origin, request.target_instance_key)
+                except KeyError:
+                    raise PlanConflict(
+                        "asset parent is neither selected nor locally mapped"
+                    ) from None
+        if operation.operation_type == "create_issue" and operation.intent["values"]["labels"]:
+            names = set(operation.intent["values"]["labels"])
+            labels = [
+                other.operation_id
+                for other in operations.values()
+                if other.operation_type == "create_label"
+                and other.target_repository_scope == operation.target_repository_scope
+                and other.intent["values"]["name"] in names
+            ]
+            if len(labels) != len(names):
+                raise PlanConflict("selected issue labels lack unique planned definitions")
+            parents.extend(labels)
         if operation.operation_type in ("create_comment", "update_comment"):
             parent_origin = str(operation.intent["parent_origin_id"])
             parent_operation = creators.get(parent_origin)
@@ -352,8 +472,14 @@ def prepare_transfer_plan(
             + (item["wiki"]["bundle"]["size"] if item.get("wiki") and item["wiki"]["bundle"] else 0)
             for item in native_payloads
         )
+    metadata_bytes = sum(
+        int(item.values["size"])
+        for item in request.content
+        if item.kind in ("attachment", "release_asset")
+    )
     required_bytes = (
         3 * native_bytes
+        + 2 * metadata_bytes
         + 64 * 1024 * 1024
         + 3 * sum(item.bundle.size for item in request.repositories if item.bundle)
     )

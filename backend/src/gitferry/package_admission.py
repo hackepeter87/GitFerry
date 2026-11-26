@@ -171,6 +171,38 @@ def _facts(
             connection, metadata, local_instance_key=target, direction="received"
         )
         origins.update(admitted.origin_ids)
+    for item in sorted(
+        document.get("content", []),
+        key=lambda value: value["kind"] in ("attachment", "release_asset"),
+    ):
+        identity = item["origin"]
+        _instance(connection, identity["instance_key"])
+        portable = dict(identity)
+        if "parent_origin" in item:
+            portable["parent_origin"] = item["parent_origin"]
+        identifier, _ = _portable_origin({"origin": portable})
+        if (
+            identity["instance_key"] == target
+            and connection.execute(
+                "SELECT 1 FROM object_origins WHERE origin_id=?", (identifier,)
+            ).fetchone()
+            is None
+        ):
+            raise PackageAdmissionConflict("package proposes an unverified local metadata origin")
+        identifier = _insert_origin(connection, {"origin": portable})
+        origins.add(identifier)
+        if identity["instance_key"] != target:
+            _insert_replica(
+                connection,
+                identifier,
+                item["kind"],
+                {
+                    "instance_key": document["sender"]["instance_key"],
+                    "repository": item["repository"],
+                    "global_id": item["source_native_id"],
+                    "native_created_at": item.get("source_created_at"),
+                },
+            )
     blocked: list[dict[str, Any]] = []
     for identifier in sorted(origins):
         blocked.extend(
@@ -367,7 +399,7 @@ class PackageAdmissions:
         if artifact.digest_sha256 != review["digest_sha256"]:
             raise PackageAdmissionConflict("package changed after plan review")
         native_payloads = None
-        if artifact.document["schema_version"] == 3:
+        if artifact.document["schema_version"] in (3, 4):
             native_payloads = [
                 {key: item[key] for key in ("repository", "lfs", "wiki")}
                 for item in artifact.document["repositories"]

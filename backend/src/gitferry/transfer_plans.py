@@ -32,6 +32,13 @@ _TYPES = frozenset(
         "update_issue",
         "create_comment",
         "update_comment",
+        "create_label",
+        "update_label",
+        "assign_issue_labels",
+        "create_release",
+        "update_release",
+        "upload_attachment",
+        "upload_release_asset",
     }
 )
 _STATUSES = frozenset(

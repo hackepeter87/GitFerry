@@ -201,12 +201,26 @@ def verify_label(value: Mapping[str, Any], expected: Mapping[str, Any]) -> str:
     return require_numeric_id(value, "label")
 
 
-def verify_release(value: Mapping[str, Any], expected: Mapping[str, Any]) -> str:
+def verify_release(
+    value: Mapping[str, Any],
+    expected: Mapping[str, Any],
+    *,
+    author_login: str | None = None,
+    author_id: int | None = None,
+) -> str:
     if any(
         value.get(key) != expected.get(key)
         for key in ("tag_name", "name", "body", "draft", "prerelease")
     ):
         raise MetadataTargetConflict("release fields differ from the reviewed intent")
+    if author_login is not None:
+        author = value.get("author")
+        if (
+            not isinstance(author, Mapping)
+            or author.get("login") != author_login
+            or (author_id is not None and str(author.get("id")) != str(author_id))
+        ):
+            raise MetadataTargetConflict("native release author differs from the identity binding")
     return require_numeric_id(value, "release")
 
 

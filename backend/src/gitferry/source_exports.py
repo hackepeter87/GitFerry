@@ -50,7 +50,7 @@ class _Selection(BaseModel):
 
 class _Request(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-    version: Literal[1, 2, 3]
+    version: Literal[1, 2, 3, 4]
     inventory_id: str | None = None
     inventory_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
     source_instance_key: str
@@ -61,6 +61,10 @@ class _Request(BaseModel):
     include_members: bool
     include_lfs: bool = False
     include_wiki: bool = False
+    include_labels: bool = False
+    include_attachments: bool = False
+    include_releases: bool = False
+    include_release_assets: bool = False
 
 
 def parse_export_request(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -72,8 +76,34 @@ def parse_export_request(value: Mapping[str, Any]) -> dict[str, Any]:
             if "include_lfs" in value or "include_wiki" in value:
                 raise ValueError("legacy requests cannot select native payloads")
             del request["include_lfs"], request["include_wiki"]
-        elif not (request["include_lfs"] or request["include_wiki"]):
+        elif request["version"] == 3 and not (request["include_lfs"] or request["include_wiki"]):
             raise ValueError("version three requires a selected native payload class")
+        if request["version"] < 4:
+            extra = (
+                "include_labels",
+                "include_attachments",
+                "include_releases",
+                "include_release_assets",
+            )
+            if any(key in value for key in extra):
+                raise ValueError("legacy requests cannot select metadata payload classes")
+            for key in extra:
+                del request[key]
+        else:
+            if not any(
+                request[key]
+                for key in (
+                    "include_labels",
+                    "include_attachments",
+                    "include_releases",
+                    "include_release_assets",
+                )
+            ):
+                raise ValueError("version four requires a selected metadata payload class")
+            if request["include_attachments"] and not request["include_metadata"]:
+                raise ValueError("attachments require their selected issue/comment parents")
+            if request["include_release_assets"] and not request["include_releases"]:
+                raise ValueError("release assets require selected releases")
         if request["version"] == 1:
             if "inventory_id" in value or "inventory_digest" in value:
                 raise ValueError("legacy requests cannot bind inventory")
@@ -202,6 +232,10 @@ class SourceExports:
                 members=request["include_members"],
                 lfs=request.get("include_lfs", False),
                 wiki=request.get("include_wiki", False),
+                labels=request.get("include_labels", False),
+                attachments=request.get("include_attachments", False),
+                releases=request.get("include_releases", False),
+                release_assets=request.get("include_release_assets", False),
             )
             if job["request"] != expected:
                 raise InventoryError("inventory and export selections differ")
@@ -334,6 +368,10 @@ class SourceExports:
         options = {
             "include_metadata": request["include_metadata"],
             "include_members": request["include_members"],
+            "include_labels": request.get("include_labels", False),
+            "include_attachments": request.get("include_attachments", False),
+            "include_releases": request.get("include_releases", False),
+            "include_release_assets": request.get("include_release_assets", False),
         }
         snapshot = capture_source(profile.base_url, token, context, selections, **options)
         package, metadata = build_source_documents(
@@ -344,6 +382,10 @@ class SourceExports:
             source=source,
             recipient=request["recipient_instance_key"],
             include_metadata=request["include_metadata"],
+            include_labels=request.get("include_labels", False),
+            include_attachments=request.get("include_attachments", False),
+            include_releases=request.get("include_releases", False),
+            include_release_assets=request.get("include_release_assets", False),
         )
         directory = work / "package"
         directory.mkdir(mode=0o700)
@@ -375,7 +417,7 @@ class SourceExports:
                         "size": bundle.size,
                         "sha256": bundle.sha256,
                     }
-            if request["version"] == 3:
+            if request["version"] >= 3:
                 if inventory is None or inventory.schema_version < 2:
                     raise SourceExportConflict(
                         "native payload capture requires a native-capable inventory version"
@@ -446,6 +488,48 @@ class SourceExports:
                             != facts["refs"]
                         ):
                             raise SourceExportConflict("wiki refs differ from reviewed inventory")
+            if request["version"] == 4:
+                from gitferry.gitea_metadata import GiteaMetadataClient
+
+                native_assets: dict[tuple[str, str, str], dict[str, Any]] = {}
+                for repository in snapshot["repositories"]:
+                    scope = repository["repository"]
+                    for issue in repository["issues"]:
+                        for asset in issue["attachments"]:
+                            native_assets[(scope, "attachment", asset["global_id"])] = asset
+                        for comment in issue["comments"]:
+                            for asset in comment["attachments"]:
+                                native_assets[(scope, "attachment", asset["global_id"])] = asset
+                    for release in repository["releases"]:
+                        for asset in release["assets"]:
+                            native_assets[(scope, "release_asset", asset["global_id"])] = asset
+                (directory / "assets").mkdir(mode=0o700, exist_ok=True)
+                content_client = GiteaMetadataClient(
+                    profile.base_url,
+                    username=evidence["login"],
+                    token=token,
+                    verify=context,
+                )
+                with content_client:
+                    for item in package["content"]:
+                        if item["kind"] not in ("attachment", "release_asset"):
+                            continue
+                        source_asset = native_assets[
+                            (item["repository"], item["kind"], item["source_native_id"])
+                        ]
+                        destination = directory / item["file"]["path"]
+                        size, digest, media_type = content_client.download_asset(
+                            {
+                                "uuid": source_asset["uuid"],
+                                "size": source_asset["size"],
+                                "browser_download_url": source_asset["download_url"],
+                            },
+                            destination,
+                            max_bytes=remaining_bytes,
+                        )
+                        remaining_bytes -= size
+                        item["file"].update(size=size, sha256=digest)
+                        item["media_type"] = media_type.split(";", 1)[0]
             observed = capture_source(profile.base_url, token, context, selections, **options)
             if canonical_json(observed) != canonical_json(snapshot):
                 raise SourceExportConflict("selected source data changed while capturing")
@@ -483,6 +567,10 @@ class SourceExports:
                 include_members=request["include_members"],
                 include_lfs=request.get("include_lfs", False),
                 include_wiki=request.get("include_wiki", False),
+                include_labels=request.get("include_labels", False),
+                include_attachments=request.get("include_attachments", False),
+                include_releases=request.get("include_releases", False),
+                include_release_assets=request.get("include_release_assets", False),
             )
         if metadata is not None:
             manifest = write_transport(directory / "metadata", metadata)
