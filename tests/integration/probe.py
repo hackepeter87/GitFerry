@@ -16,6 +16,7 @@ from comment_transport_roundtrip_probe import run_comment_transport_roundtrip_pr
 from connection_profile_probe import run_connection_profile_probe
 from content_inventory_probe import run_content_inventory_probe
 from directory_probe import run_directory_probe
+from gitea_compat import expected_source_version, expected_target_version
 from metadata_roundtrip_probe import run_metadata_roundtrip_probe
 from native_payload_probe import run_native_payload_probe
 from oci_runtime_probe import run_oci_runtime_probe
@@ -290,7 +291,7 @@ def main() -> None:
 
     source_version = api(SOURCE_URL, "GET", "/version")["version"]
     target_version = api(TARGET_URL, "GET", "/version")["version"]
-    if source_version != "1.27.2" or target_version != "1.27.2":
+    if source_version != expected_source_version() or target_version != expected_target_version():
         raise ProbeFailure(f"unexpected Gitea versions: {source_version}, {target_version}")
 
     source_users = {name: create_user(SOURCE_URL, name) for name in ("developer", "viewer")}

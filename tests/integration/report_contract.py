@@ -13,11 +13,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).parents[2]
-PINNED_GITEA_IMAGE = (
-    "docker.gitea.com/gitea:1.27.2@sha256:"
-    "d20286ca2b2e170fdf628e7231b8a31a3220ade39ff462b55041d43d1fc757dd"
+from gitea_compat import (
+    PRIMARY_GITEA_IMAGE,
+    PRIMARY_GITEA_PLATFORM_DIGESTS,
+    PRIMARY_GITEA_VERSION,
 )
+
+ROOT = Path(__file__).parents[2]
+PINNED_GITEA_IMAGE = PRIMARY_GITEA_IMAGE
 
 OCI_RUNTIME_ASSERTION_NAMES = frozenset(
     {
@@ -124,7 +127,7 @@ def _inventory_evidence(report: dict[str, Any]) -> bool:
     counts = _value(report, "content_inventory.counts")
     return (
         _value(report, "content_inventory.status") == "passed"
-        and _value(report, "content_inventory.gitea_version") == "1.27.2"
+        and _value(report, "content_inventory.gitea_version") == PRIMARY_GITEA_VERSION
         and _all_required_true(report, "content_inventory.assertions", INVENTORY_ASSERTIONS)
         and isinstance(counts, dict)
         and set(counts) == INVENTORY_OBSERVED | {"lfs", "other_content"}
@@ -173,7 +176,7 @@ def _native_payload_evidence(report: dict[str, Any]) -> bool:
     if not (
         isinstance(evidence, dict)
         and evidence.get("status") == "passed"
-        and evidence.get("gitea_version") == "1.27.2"
+        and evidence.get("gitea_version") == PRIMARY_GITEA_VERSION
         and _all_required_true(report, "native_payloads.assertions", NATIVE_PAYLOAD_ASSERTIONS)
         and set(evidence.get("assertions", {})) == NATIVE_PAYLOAD_ASSERTIONS
         and isinstance(browser, dict)
@@ -394,6 +397,22 @@ def collect_runtime(results: Path, project: str, compose_file: Path) -> None:
     metadata_path = results / "work" / "run-metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     server = json.loads(_run(["docker", "version", "--format", "{{json .Server}}"]))
+    index = json.loads(
+        _run(["docker", "buildx", "imagetools", "inspect", "--raw", PINNED_GITEA_IMAGE])
+    )
+    manifests = index.get("manifests") if isinstance(index, dict) else None
+    if not isinstance(manifests, list):
+        raise RuntimeError("pinned Gitea image did not resolve to a multi-platform OCI index")
+    resolved: dict[str, str] = {}
+    for manifest in manifests:
+        platform_value = manifest.get("platform") if isinstance(manifest, dict) else None
+        digest = manifest.get("digest") if isinstance(manifest, dict) else None
+        if not isinstance(platform_value, dict) or not isinstance(digest, str):
+            continue
+        os_name = platform_value.get("os")
+        architecture = platform_value.get("architecture")
+        if isinstance(os_name, str) and isinstance(architecture, str):
+            resolved[f"{os_name}/{architecture}"] = digest
     services: dict[str, Any] = {}
     for service in ("source", "target"):
         container_id = _run(
@@ -412,12 +431,14 @@ def collect_runtime(results: Path, project: str, compose_file: Path) -> None:
         image_id = _run(["docker", "inspect", "--format", "{{.Image}}", container_id])
         configured = _run(["docker", "inspect", "--format", "{{.Config.Image}}", container_id])
         image = json.loads(_run(["docker", "image", "inspect", image_id]))[0]
+        platform_key = f"{image.get('Os')}/{image.get('Architecture')}"
         services[service] = {
             "configured_image": configured,
             "image_id": image_id,
             "os": image.get("Os"),
             "architecture": image.get("Architecture"),
             "repo_digests": image.get("RepoDigests", []),
+            "resolved_platform_digest": resolved.get(platform_key),
         }
     image_arches = sorted({value["architecture"] for value in services.values()})
     server_arch = server.get("Arch")
@@ -489,6 +510,8 @@ def run_metadata_is_complete(metadata: dict[str, Any]) -> bool:
             if not isinstance(service.get(field), str) or not service[field]:
                 return False
         expected_digest = PINNED_GITEA_IMAGE.split("@", 1)[1]
+        platform_key = f"{service['os']}/{service['architecture']}"
+        expected_platform_digest = PRIMARY_GITEA_PLATFORM_DIGESTS.get(platform_key)
         repo_digests = service.get("repo_digests")
         if not (
             service["configured_image"] == PINNED_GITEA_IMAGE
@@ -498,6 +521,8 @@ def run_metadata_is_complete(metadata: dict[str, Any]) -> bool:
                 isinstance(digest, str) and digest.endswith(f"@{expected_digest}")
                 for digest in repo_digests
             )
+            and expected_platform_digest is not None
+            and service.get("resolved_platform_digest") == expected_platform_digest
         ):
             return False
     if platform_data["github_actions"]:
@@ -574,8 +599,8 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         "oci_runtime",
     )
     mandatory_sections_passed = (
-        _value(report, "gitea.source") == "1.27.2"
-        and _value(report, "gitea.target") == "1.27.2"
+        _value(report, "gitea.source") == PRIMARY_GITEA_VERSION
+        and _value(report, "gitea.target") == PRIMARY_GITEA_VERSION
         and all(_value(report, f"{section}.status") == "passed" for section in mandatory_sections)
     )
     entries = [
@@ -752,7 +777,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         (
             "real_ldap_simple_authentication",
             _value(report, "directory.status") == "passed"
-            and _value(report, "directory.gitea_version") == "1.27.2"
+            and _value(report, "directory.gitea_version") == PRIMARY_GITEA_VERSION
             and all(
                 _value(report, "directory." + key) is True
                 for key in (

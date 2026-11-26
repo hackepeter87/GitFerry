@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from gitea_compat import PRIMARY_GITEA_VERSION
 from support import WORK, ProbeFailure, docker_copy, docker_service_exec
 
 ASSERTIONS = frozenset(
@@ -145,7 +146,7 @@ def run_native_payload_probe() -> dict[str, Any]:
         raise ProbeFailure("native payload assertions incomplete")
     return {
         "status": "passed",
-        "gitea_version": "1.27.2",
+        "gitea_version": PRIMARY_GITEA_VERSION,
         "assertions": assertions,
         "cases": cases,
         "negatives": negatives,

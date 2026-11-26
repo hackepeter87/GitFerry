@@ -1,4 +1,4 @@
-"""Real Gitea 1.27.2 qualification for the selected-content inventory collector."""
+"""Real primary-Gitea qualification for the selected-content inventory collector."""
 
 from __future__ import annotations
 

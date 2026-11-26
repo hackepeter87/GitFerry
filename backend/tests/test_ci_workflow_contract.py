@@ -83,6 +83,7 @@ def test_injected_failure_still_cleans_and_uploads_diagnostics() -> None:
     steps = job["steps"]
     by_name = {step["name"]: step for step in steps}
     integration = by_name["Run Gitea integration"]
+    upgrade = by_name["Run historical-source compatibility probe"]
     failure_contract = by_name["Run integration failure contract"]
     diagnostics = by_name["Capture final workflow diagnostics"]
     cleanup = by_name["Clean integration resources"]
@@ -93,6 +94,10 @@ def test_injected_failure_still_cleans_and_uploads_diagnostics() -> None:
     assert "inject_integration_timeout" in integration["env"]["GITFERRY_IT_INJECT_FAILURE"]
     assert "GITFERRY_IT_INJECT_TIMEOUT_SECONDS" in integration["env"]
     assert "inject_integration_timeout" in integration["timeout-minutes"]
+    assert upgrade["run"] == "make test-gitea-upgrade"
+    assert upgrade["timeout-minutes"] == 5
+    assert "inject_integration_failure" in upgrade["if"]
+    assert "inject_integration_timeout" in upgrade["if"]
     assert "inject_integration_failure" in failure_contract["if"]
     assert "inject_integration_timeout" in failure_contract["if"]
     assert failure_contract["timeout-minutes"] == 10
