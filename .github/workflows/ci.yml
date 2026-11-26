@@ -146,14 +146,18 @@ jobs:
             exit 1
           fi
           exit "$record_status"
+      - name: Stage safe integration diagnostics
+        if: always()
+        timeout-minutes: 2
+        run: |
+          .venv/bin/python tests/integration/stage_artifacts.py \
+            --results-root . --output integration-artifacts
       - name: Upload integration results
         if: always()
         timeout-minutes: 5
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gitferry-integration-results-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            integration-results/
-            integration-failure-results/
+          path: integration-artifacts/
           if-no-files-found: error
           retention-days: 14
