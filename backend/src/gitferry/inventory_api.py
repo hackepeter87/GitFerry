@@ -69,8 +69,8 @@ def create_inventory_router(settings: AuthCookieSettings) -> APIRouter:
     def capabilities() -> dict[str, Any]:
         return {
             "classes": list(CONTENT_CLASSES),
-            "supported": sorted(TRANSFER_CLASSES),
-            "schema_version": 1,
+            "supported": sorted(TRANSFER_CLASSES | {"lfs", "wiki"}),
+            "schema_version": 2,
         }
 
     @router.get("/{inventory_id}", dependencies=[Depends(read)])

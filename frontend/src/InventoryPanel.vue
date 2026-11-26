@@ -7,12 +7,17 @@ import {
   type InventoryRequest,
 } from "./api";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   sourceProfile?: ConnectionProfile;
   selectedRepositories: Map<string, BrowseEntry>;
   includeMetadata: boolean;
   includeMembers: boolean;
-}>();
+  includeLfs?: boolean;
+  includeWiki?: boolean;
+}>(), {
+  includeLfs: false,
+  includeWiki: false,
+});
 const emit = defineEmits<{
   (event: "session-expired"): void;
   (event: "reviewed", value: { inventory_id: string; digest: string } | null): void;
@@ -51,6 +56,8 @@ const requiredClasses = computed(() => {
   const required = [...CORE];
   if (props.includeMembers || props.includeMetadata) required.push("identities");
   if (props.includeMetadata) required.push(...metadataClasses);
+  if (props.includeLfs) required.push("lfs");
+  if (props.includeWiki) required.push("wiki");
   return new Set(required);
 });
 const unsupportedSelected = computed(() => selectedClasses.value.filter((item) => !capabilities.value.supported.includes(item)));
@@ -71,12 +78,16 @@ onUnmounted(() => { disposed = true; stopPolling(); });
 
 watch(() => props.includeMetadata, () => { resetDefaults(); invalidateReview(); });
 watch(() => props.includeMembers, () => { resetDefaults(); invalidateReview(); });
+watch(() => props.includeLfs, () => { resetDefaults(); invalidateReview(); });
+watch(() => props.includeWiki, () => { resetDefaults(); invalidateReview(); });
 watch([scopeKey, currentRequestKey], () => invalidateReview());
 
 function resetDefaults(): void {
   const next = [...CORE];
   if (props.includeMembers || props.includeMetadata) next.push("identities");
   if (props.includeMetadata) next.push(...metadataClasses);
+  if (props.includeLfs) next.push("lfs");
+  if (props.includeWiki) next.push("wiki");
   selectedClasses.value = [...new Set(next)].filter((item) => classes.value.includes(item));
 }
 function invalidateReview(): void { emit("reviewed", null); }

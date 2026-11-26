@@ -139,3 +139,4 @@ class TargetConfirmation:
     target_global_id: str
     target_issue_index: int | None
     target_native_created_at: str | None = None
+    observed_state: dict[str, Any] | None = None

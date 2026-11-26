@@ -132,7 +132,7 @@ def _issue_key(value: dict[str, Any]) -> tuple[str, str, str]:
 
 def _validate(document: dict[str, Any]) -> None:
     version = document.get("schema_version")
-    if type(version) is not int or version not in (1, 2):
+    if type(version) is not int or version not in (1, 2, 3):
         raise PackageError("unsupported application package version")
     errors = Draft202012Validator(_schema(version), format_checker=FormatChecker()).iter_errors(
         document
@@ -196,6 +196,9 @@ def _validate(document: dict[str, Any]) -> None:
             if not member.startswith("bundles/") or member in members:
                 raise PackageError("bundles need distinct paths below bundles/")
             members.add(member)
+    from gitferry.package_native import validate_native_descriptors
+
+    validate_native_descriptors(document)
     metadata = document["metadata"]
     if metadata:
         authors = metadata["issue_authors"]
@@ -210,7 +213,7 @@ def _contents(directory: Path, document: dict[str, Any]) -> dict[str, tuple[int,
     from gitferry.package_inventory import validate_inventory_contents
 
     files: dict[str, tuple[int, str]] = {}
-    if document["schema_version"] == 2:
+    if document["schema_version"] >= 2:
         reference = document["inventory"]
         files[reference["path"]] = (reference["size"], reference["sha256"])
     for repository in document["repositories"]:
@@ -221,6 +224,9 @@ def _contents(directory: Path, document: dict[str, Any]) -> dict[str, tuple[int,
             if facts != (bundle["size"], bundle["sha256"]):
                 raise PackageError("bundle size or digest mismatch")
             files[member] = facts
+    from gitferry.package_native import native_contents
+
+    files.update(native_contents(directory, document))
     reference = document["metadata"]
     if reference is None:
         validate_inventory_contents(directory, document, None)

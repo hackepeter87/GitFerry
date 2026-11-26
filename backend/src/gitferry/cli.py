@@ -258,6 +258,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 return 0
             if args.state_command == "resolve-unknown":
+                from gitferry.native_operations import NATIVE_OPERATION_TYPES
+
+                if state.get_operation(args.operation_id).operation_type in NATIVE_OPERATION_TYPES:
+                    raise ValueError(
+                        "native payloads require plans resolve-native with live target verification"
+                    )
                 operation = state.resolve_unknown_operation(
                     args.operation_id,
                     target_global_id=args.target_global_id,

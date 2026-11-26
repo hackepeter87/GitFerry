@@ -28,6 +28,7 @@ from gitferry.runtime import RuntimePaths
 from gitferry.source_export_jobs import SourceExportJobs
 from gitferry.source_exports import SourceExports
 from gitferry.state_store import StateStore
+from native_browser_fixture import seed as seed_native_browser
 
 ROOT = Path("/state/source-export")
 DATABASE = ROOT / "state" / "state.sqlite3"
@@ -233,7 +234,7 @@ def capture() -> dict[str, Any]:
     profiles = ProfileService(state)
     plan_worker.ROOT = ROOT
     plan_worker.URL = "http://source:3000"
-    with plan_worker.proxy():
+    with plan_worker.proxy(preserve_origin=True):
         profiles.create(
             ConnectionProfile(
                 SOURCE,
@@ -256,6 +257,8 @@ def capture() -> dict[str, Any]:
         approve_connection(
             profiles, SOURCE, expected_revision=1, evidence_digest=evidence["evidence_digest"]
         )
+        seed_native_browser(ROOT, token)
+        (ROOT / "remote-events.jsonl").unlink(missing_ok=True)
         return {"status": "prepared"}
 
 
@@ -303,6 +306,9 @@ def capture_result() -> dict[str, Any]:
             for call in events
             if call["method"] in {"POST", "PUT", "PATCH", "DELETE"}
             and "/git-upload-pack" not in call["path"]
+            and not (
+                call["path"].endswith("/objects/batch") and call.get("lfs_operation") == "download"
+            )
         ],
         "git_upload_pack_posts": [
             call
@@ -362,7 +368,7 @@ def serve_browser() -> None:
         }
     )
     plan_worker.ROOT, plan_worker.URL = ROOT, "http://source:3000"
-    with plan_worker.proxy():
+    with plan_worker.proxy(preserve_origin=True):
         serve(ROOT)
 
 

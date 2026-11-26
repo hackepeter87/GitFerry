@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import ssl
+import tempfile
 import uuid
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -186,8 +190,54 @@ class InventoryJobs:
             snapshot_id=job["inventory_id"],
             created_at=job["created_at"],
         )
+        if {"lfs", "wiki"}.intersection(request["requested_classes"]):
+            document = self._native_payloads(document, profile, evidence["login"], token, context)
         self._authority(job)
         return document
+
+    def _native_payloads(
+        self,
+        document: InventoryDocument,
+        profile: Any,
+        login: str,
+        token: str,
+        context: ssl.SSLContext,
+    ) -> InventoryDocument:
+        from gitferry.gitea_bundles import GiteaBundlePusher
+        from gitferry.gitea_lfs import GiteaLFSClient
+        from gitferry.gitea_wiki import GiteaWikiClient
+        from gitferry.native_inventory import observe_native_payloads
+
+        # Managed runtimes supply their configured work volume; standalone callers
+        # retain the same private local state parent rather than a hidden host path.
+        work_root = Path(os.environ.get("GITFERRY_WORK_DIR", str(self.state.path.parent)))
+        if work_root.is_symlink() or not work_root.is_dir():
+            raise InventoryError("native inventory needs an existing local work directory")
+        try:
+            maximum = int(os.environ.get("GITFERRY_EXPORT_MAX_GIT_BYTES", str(1024**3)))
+        except ValueError:
+            raise InventoryError("native inventory size bound must be positive") from None
+        if maximum <= 0:
+            raise InventoryError("native inventory size bound must be positive")
+        anchors = context.get_ca_certs(binary_form=True)
+        if not anchors:
+            raise InventoryError("native inventory needs approved CA trust anchors")
+        with tempfile.TemporaryDirectory(prefix="inventory-", dir=work_root) as temporary:
+            work = Path(temporary)
+            ca = work / "captured-ca.pem"
+            ca.write_text("".join(ssl.DER_cert_to_PEM_cert(c) for c in anchors), encoding="ascii")
+            git = GiteaBundlePusher(work, work, profile.base_url, login, token, ca_file=ca)
+            wiki = GiteaWikiClient(profile.base_url, username=login, token=token, verify=context)
+            with git, wiki:
+                return observe_native_payloads(
+                    document,
+                    git,
+                    lambda repository: GiteaLFSClient(
+                        profile.base_url, repository, login, token, verify=context
+                    ),
+                    wiki,
+                    max_bytes=maximum,
+                )
 
     def _validate_result(self, job: dict[str, Any], document: InventoryDocument) -> None:
         parse_inventory(document.model_dump(mode="json"))

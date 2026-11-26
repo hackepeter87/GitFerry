@@ -50,7 +50,7 @@ class _Selection(BaseModel):
 
 class _Request(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-    version: Literal[1, 2]
+    version: Literal[1, 2, 3]
     inventory_id: str | None = None
     inventory_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
     source_instance_key: str
@@ -59,6 +59,8 @@ class _Request(BaseModel):
     repositories: list[_Selection] = Field(min_length=1, max_length=128)
     include_metadata: bool
     include_members: bool
+    include_lfs: bool = False
+    include_wiki: bool = False
 
 
 def parse_export_request(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -66,6 +68,12 @@ def parse_export_request(value: Mapping[str, Any]) -> dict[str, Any]:
         request = _Request.model_validate(value).model_dump()
         if type(value.get("version")) is not int:
             raise ValueError("version must be an integer")
+        if request["version"] < 3:
+            if "include_lfs" in value or "include_wiki" in value:
+                raise ValueError("legacy requests cannot select native payloads")
+            del request["include_lfs"], request["include_wiki"]
+        elif not (request["include_lfs"] or request["include_wiki"]):
+            raise ValueError("version three requires a selected native payload class")
         if request["version"] == 1:
             if "inventory_id" in value or "inventory_digest" in value:
                 raise ValueError("legacy requests cannot bind inventory")
@@ -190,7 +198,10 @@ class SourceExports:
                 for key in ("source_instance_key", "source_profile_revision", "repositories")
             }
             expected["requested_classes"] = export_classes(
-                metadata=request["include_metadata"], members=request["include_members"]
+                metadata=request["include_metadata"],
+                members=request["include_members"],
+                lfs=request.get("include_lfs", False),
+                wiki=request.get("include_wiki", False),
             )
             if job["request"] != expected:
                 raise InventoryError("inventory and export selections differ")
@@ -364,6 +375,77 @@ class SourceExports:
                         "size": bundle.size,
                         "sha256": bundle.sha256,
                     }
+            if request["version"] == 3:
+                if inventory is None or inventory.schema_version != 2:
+                    raise SourceExportConflict(
+                        "native payload capture requires inventory version two"
+                    )
+                from gitferry.gitea_lfs import GiteaLFSClient
+                from gitferry.lfs_payloads import LFSPointer
+
+                for selected in package["repositories"]:
+                    reviewed = next(
+                        r for r in inventory.repositories if r.repository == selected["repository"]
+                    )
+                    classes = {c.content_class: c for c in reviewed.classes}
+                    selected["lfs"] = None
+                    selected["wiki"] = None
+                    if request["include_lfs"]:
+                        selected["lfs"] = []
+                        with GiteaLFSClient(
+                            profile.base_url,
+                            selected["repository"],
+                            evidence["login"],
+                            token,
+                            verify=context,
+                        ) as lfs:
+                            for item in classes["lfs"].objects:
+                                if item.size_bytes is None:
+                                    raise SourceExportConflict("LFS inventory has no verified size")
+                                pointer = LFSPointer(item.key, item.size_bytes)
+                                member = "lfs/" + pointer.oid
+                                # Content-addressed objects can be shared by selected repositories.
+                                if not (directory / member).exists():
+                                    lfs.fetch(pointer, directory, member, max_bytes=remaining_bytes)
+                                    remaining_bytes -= pointer.size
+                                else:
+                                    lfs.inspect(pointer)
+                                selected["lfs"].append(
+                                    {
+                                        "oid": pointer.oid,
+                                        "size": pointer.size,
+                                        "sha256": pointer.oid,
+                                        "path": member,
+                                    }
+                                )
+                    if request["include_wiki"]:
+                        facts = classes["wiki"].objects[0].facts
+                        wiki_bundle = git.export_bundle(
+                            selected["repository"],
+                            member=f"wikis/{reviewed.native_id}.bundle",
+                            expected_repository_id=reviewed.native_id,
+                            max_bytes=remaining_bytes,
+                            wiki=True,
+                        )
+                        selected["wiki"] = {
+                            "state": facts["state"],
+                            "refs": facts["refs"],
+                            "bundle": None,
+                        }
+                        if wiki_bundle is not None:
+                            remaining_bytes -= wiki_bundle.size
+                            selected["wiki"]["bundle"] = {
+                                "path": wiki_bundle.member,
+                                "size": wiki_bundle.size,
+                                "sha256": wiki_bundle.sha256,
+                            }
+                        if (
+                            git._git_remote(
+                                "ls-remote", git._wiki_url(selected["repository"]), None
+                            )
+                            != facts["refs"]
+                        ):
+                            raise SourceExportConflict("wiki refs differ from reviewed inventory")
             observed = capture_source(profile.base_url, token, context, selections, **options)
             if canonical_json(observed) != canonical_json(snapshot):
                 raise SourceExportConflict("selected source data changed while capturing")
@@ -394,7 +476,13 @@ class SourceExports:
 
             self._inventory(request, reobserve=True)
             attach_inventory(
-                directory, package, inventory, snapshot, include_members=request["include_members"]
+                directory,
+                package,
+                inventory,
+                snapshot,
+                include_members=request["include_members"],
+                include_lfs=request.get("include_lfs", False),
+                include_wiki=request.get("include_wiki", False),
             )
         if metadata is not None:
             manifest = write_transport(directory / "metadata", metadata)

@@ -29,6 +29,8 @@ def attach_inventory(
     snapshot: dict[str, Any],
     *,
     include_members: bool,
+    include_lfs: bool = False,
+    include_wiki: bool = False,
 ) -> None:
     """Write one immutable payload; source replica IDs do not replace permanent origins."""
     raw = (canonical_json(document.model_dump(mode="json")) + "\n").encode("utf-8")
@@ -49,6 +51,9 @@ def attach_inventory(
         "content_digest": inventory_digest(document),
         "snapshot_id": document.snapshot_id,
     }
+    if include_lfs or include_wiki:
+        package["schema_version"] = 3
+        package["inventory"].update(include_lfs=include_lfs, include_wiki=include_wiki)
     native = {item["repository"]: item for item in snapshot["repositories"]}
     for selected in package["repositories"]:
         captured = native[selected["repository"]]
@@ -126,8 +131,17 @@ def validate_inventory_contents(
         classes = {item.content_class: item for item in observed.classes}
         # Membership presence cannot decide whether an empty membership selection was requested.
         members = package["inventory"]["include_members"]
-        if sorted(observed.requested_classes) != export_classes(metadata=metadata, members=members):
+        if sorted(observed.requested_classes) != export_classes(
+            metadata=metadata,
+            members=members,
+            lfs=package["inventory"].get("include_lfs", False),
+            wiki=package["inventory"].get("include_wiki", False),
+        ):
             raise PackageError("inventory classes differ from bounded package capabilities")
+        if package["schema_version"] == 3:
+            from gitferry.package_native import match_native_inventory
+
+            match_native_inventory(document, selected)
         if bool(expected_git_refs(document, observed.repository)) != (
             selected["bundle"] is not None
         ):

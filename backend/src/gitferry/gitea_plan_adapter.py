@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 from contextlib import ExitStack
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,8 @@ from gitferry.gitea_provisioning import (
 )
 from gitferry.identity_observations import require_current_account
 from gitferry.issue_operations import execute_issue_operation, preflight_issue_operation
+from gitferry.native_application import NativePayloadApplication
+from gitferry.native_operations import NATIVE_OPERATION_TYPES
 from gitferry.operations import OperationExecutor
 from gitferry.package_inventory import expected_git_refs, read_inventory
 from gitferry.plan_application import PlanRequest, parse_plan_request
@@ -46,6 +50,8 @@ class GiteaPlanAdapter:
         self.preflight_digest: str | None = None
         self.scope: str | None = None
         self.content_inventory: InventoryDocument | None = None
+        self.native: NativePayloadApplication | None = None
+        self.native_payloads: list[dict[str, Any]] | None = None
         # Imported lazily so the existing issue/comment operations remain independent.
         from gitferry.gitea_bundles import GiteaBundlePusher
 
@@ -82,6 +88,7 @@ class GiteaPlanAdapter:
         if request.unsupported_items:
             raise OperationBlocked("selected unsupported contents require a revised selection")
         self.content_inventory = None
+        self.native_payloads = None
         if request.package_digest is not None:
             from gitferry.package_admission import PackageAdmissions
 
@@ -93,6 +100,13 @@ class GiteaPlanAdapter:
                 expected_digest=request.package_digest,
             )
             self.content_inventory = read_inventory(artifact.directory, artifact.document)
+            if artifact.document["schema_version"] == 3:
+                self.native_payloads = [
+                    {key: item[key] for key in ("repository", "lfs", "wiki")}
+                    for item in artifact.document["repositories"]
+                ]
+        if document["inventory"].get("native_payloads") != self.native_payloads:
+            raise OperationBlocked("native plan facts differ from the admitted package")
         # The estimate is explicit, not a claim about arbitrary Git expansion. A
         # bounded initial import still needs both payload and working space.
         self.check = PreflightCheck.STORAGE
@@ -183,11 +197,46 @@ class GiteaPlanAdapter:
         self.check = PreflightCheck.METADATA
         for operation in metadata:
             self._preflight_metadata(operation, planned_parents)
-        if any(repository.bundle for repository in request.repositories):
+        if self.native_payloads is not None or any(
+            repository.bundle for repository in request.repositories
+        ):
             self.check = PreflightCheck.BUNDLE
             self._preflight_bundles(
                 plan, profile.base_url, evidence["login"], token, profile.ca_ref, ca_digest
             )
+        if self.native_payloads is not None:
+            from gitferry.gitea_lfs import GiteaLFSClient
+            from gitferry.gitea_wiki import GiteaWikiClient
+            from gitferry.provisioning import BundleIntent
+
+            if self.bundles is None:
+                raise OperationBlocked("native payloads require bounded Git preflight")
+            wiki_client = GiteaWikiClient(
+                profile.base_url, username=evidence["login"], token=token, verify=context
+            )
+            self.resources.enter_context(wiki_client)
+            wiki_client.verify_native_settings(
+                lfs=any(selected["lfs"] is not None for selected in self.native_payloads)
+            )
+            maximum = int(os.environ.get("GITFERRY_EXPORT_MAX_GIT_BYTES", str(1024**3)))
+            if maximum <= 0:
+                raise OperationBlocked("native payload bound must be positive")
+            self.native = NativePayloadApplication(
+                self.state,
+                self.bundles,
+                wiki_client,
+                lambda scope: GiteaLFSClient(
+                    profile.base_url, scope, evidence["login"], token, verify=context
+                ),
+                max_bytes=maximum,
+            )
+            by_scope = {r.repository: r for r in request.repositories}
+            for selected in self.native_payloads:
+                repository = by_scope[selected["repository"]]
+                self.native.preflight(
+                    selected,
+                    BundleIntent(**repository.bundle.model_dump()) if repository.bundle else None,
+                )
         self.preflight_digest = plan["digest"]
 
     def _preflight_metadata(
@@ -317,10 +366,26 @@ class GiteaPlanAdapter:
                 self.state,
                 executor,
                 self.admin,
-                repository.provisioning(self.request.target_instance_key),
+                replace(repository.provisioning(self.request.target_instance_key), bundle=None)
+                if self.native is not None
+                else repository.provisioning(self.request.target_instance_key),
                 bundle_pusher=self.bundles,
                 references=self.references,
             )
+        if self.native is not None:
+            for step in plan["operations"]:
+                if step["operation_type"] in NATIVE_OPERATION_TYPES:
+                    self.native.apply(self.state.get_operation(step["operation_id"]), executor)
+            # Publish ordinary refs only after referenced LFS objects are confirmed.
+            for repository in self.request.repositories:
+                provision_selected_repository(
+                    self.state,
+                    executor,
+                    self.admin,
+                    repository.provisioning(self.request.target_instance_key),
+                    bundle_pusher=self.bundles,
+                    references=self.references,
+                )
         # PlanService stored the dependency order, independent of input ordering.
         for operation in self._metadata(plan):
             binding_id = str(operation.intent["author_binding_id"])

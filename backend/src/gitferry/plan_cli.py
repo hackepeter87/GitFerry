@@ -8,8 +8,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from gitferry.gitea_bundles import GiteaBundleError
+from gitferry.gitea_lfs import GiteaLFSError
 from gitferry.gitea_plan_adapter import GiteaPlanAdapter
 from gitferry.gitea_provisioning import ProvisioningTargetConflict
+from gitferry.gitea_wiki import GiteaWikiError
 from gitferry.operations import ExecutorBusy
 from gitferry.plan_application import prepare_transfer_plan
 from gitferry.plan_runner import PlanRunner
@@ -50,6 +53,11 @@ def configure(parser: argparse.ArgumentParser, database_default: str | None) -> 
     run = actions.add_parser("run")
     database(run)
     run.add_argument("--plan-id")
+    resolve = actions.add_parser("resolve-native")
+    database(resolve)
+    resolve.add_argument("--operation-id", required=True)
+    resolve.add_argument("--evidence", required=True)
+    resolve.add_argument("--wiki-commit")
 
 
 def _input(path: Path) -> dict[str, Any]:
@@ -71,7 +79,18 @@ def execute(args: argparse.Namespace) -> int:
         service = PlanService(state)
         action = args.plan_action
         result: dict[str, Any] | list[dict[str, Any]] | None
-        if action == "prepare":
+        if action == "resolve-native":
+            from gitferry.native_reconciliation import resolve_native_operation
+
+            operation = resolve_native_operation(
+                state,
+                _paths(args.database),
+                args.operation_id,
+                evidence=args.evidence,
+                wiki_commit=args.wiki_commit,
+            )
+            result = {"operation_id": operation.operation_id, "status": operation.status}
+        elif action == "prepare":
             result = prepare_transfer_plan(state, _input(args.input))
         elif action == "list":
             result = service.list()
@@ -114,10 +133,14 @@ def execute(args: argparse.Namespace) -> int:
         StateStoreError,
         ExecutorBusy,
         ProvisioningTargetConflict,
+        GiteaLFSError,
+        GiteaBundleError,
     ) as exc:
         message = (
             "Transfer plan selection is invalid or unavailable"
             if isinstance(exc, (ValueError, PlanConflict, OperationBlocked))
+            else "Native target verification failed; operation remains unresolved"
+            if isinstance(exc, (GiteaLFSError, GiteaBundleError, GiteaWikiError))
             else "Local plan state unavailable"
         )
         print(json.dumps({"status": "failed", "error": message}, sort_keys=True))

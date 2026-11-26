@@ -2,6 +2,8 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Locator } from "@playwright/test";
 import { writeFileSync } from "node:fs";
 
+import { inventoryPollAttempt } from "./inventory-poll";
+
 const archive = process.env.GITFERRY_INTEGRATION_ARCHIVE;
 const evidencePath = process.env.GITFERRY_INTEGRATION_EVIDENCE;
 const sourceDownload = process.env.GITFERRY_INTEGRATION_SOURCE_DOWNLOAD;
@@ -57,6 +59,7 @@ function record(value: Record<string, unknown>): void {
   if (!evidencePath) throw new Error("browser evidence path is required");
   writeFileSync(evidencePath, JSON.stringify({ status: "passed", secure_session: secureSessionChecked, keyboard_interactions: keyboardInteractions, ...value }));
 }
+
 async function login(page: Page): Promise<void> {
   expect((await page.request.get("/api/v1/plans")).status()).toBe(401);
   await page.goto("/");
@@ -120,6 +123,8 @@ test("phase0 selects an approved repository and downloads its export", async ({ 
   }
   await choose(page, page.getByLabel("Recipient registration"), "target");
   await check(page, page.getByLabel("Include membership records"));
+  await check(page, page.getByLabel("Include Git LFS objects"));
+  await check(page, page.getByLabel("Include native wiki history"));
   const inventoryQueuedResponse = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/v1/inventories");
   await activate(page, page.getByRole("button", { name: "Inspect selected content" }));
   const inventoryQueued = await inventoryQueuedResponse;
@@ -127,7 +132,14 @@ test("phase0 selects an approved repository and downloads its export", async ({ 
   const inventoryId = (await inventoryQueued.json()).inventory_id;
   let inventoryState: Record<string, unknown> = {};
   await expect.poll(async () => {
-    inventoryState = await (await page.request.get(`/api/v1/inventories/${inventoryId}`)).json();
+    const attempt = await inventoryPollAttempt<Record<string, unknown>>(
+      async () => (await page.request.get(`/api/v1/inventories/${inventoryId}`)).json(),
+    );
+    // The isolated browser ingress creates a bounded forwarding process per
+    // connection. A lost forwarding connection is retryable inside this
+    // already bounded poll; application responses and the final state are not.
+    if (attempt.kind === "transport-retry") return attempt.kind;
+    inventoryState = attempt.value;
     return inventoryState.status;
   }, { timeout: 120_000, intervals: [1000, 2000, 5000] }).toMatch(/^(ready|blocked|failed)$/);
   if (evidencePath) writeFileSync(`${evidencePath}.inventory.json`, JSON.stringify(inventoryState));
@@ -139,7 +151,9 @@ test("phase0 selects an approved repository and downloads its export", async ({ 
   const queued = await queuedResponse;
   expect(queued.ok()).toBeTruthy();
   const queuedJob = await queued.json();
-  expect(queuedJob.request.version).toBe(2);
+  expect(queuedJob.request.version).toBe(3);
+  expect(queuedJob.request.include_lfs).toBe(true);
+  expect(queuedJob.request.include_wiki).toBe(true);
   expect(queuedJob.request.inventory_digest).toMatch(/^[0-9a-f]{64}$/);
   const row = page.locator(".export-list li").last();
   await expect(row.locator(".export-status")).toHaveText("ready", { timeout: 60_000 });

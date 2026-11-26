@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from gitferry.cli import main
 from gitferry.state_store import OriginKey, StateStore
 from test_transport_manifest import manifest
@@ -163,3 +164,43 @@ def test_cli_creates_verifies_and_admits_transport(tmp_path: Path, capsys: objec
     )
     admitted = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
     assert admitted["status"] == "admitted"
+
+
+@pytest.mark.parametrize("kind", ["lfs", "wiki", "git"])
+def test_native_resolution_cli_sanitizes_remote_verification_failure(
+    tmp_path, monkeypatch, capsys, kind
+):
+    from gitferry import native_reconciliation
+    from gitferry.gitea_bundles import GiteaBundleError
+    from gitferry.gitea_lfs import GiteaLFSError
+    from gitferry.gitea_wiki import GiteaWikiError
+
+    def unavailable(*args, **kwargs):
+        raise {"lfs": GiteaLFSError, "wiki": GiteaWikiError, "git": GiteaBundleError}[kind](
+            "synthetic-private-remote-detail"
+        )
+
+    (tmp_path / "packages").mkdir()
+    (tmp_path / "work").mkdir()
+    monkeypatch.setattr(native_reconciliation, "resolve_native_operation", unavailable)
+    monkeypatch.setenv("GITFERRY_PACKAGE_DIR", str(tmp_path / "packages"))
+    monkeypatch.setenv("GITFERRY_WORK_DIR", str(tmp_path / "work"))
+    assert (
+        main(
+            [
+                "plans",
+                "resolve-native",
+                "--database",
+                str(tmp_path / "state.sqlite3"),
+                "--operation-id",
+                "native-unknown",
+                "--evidence",
+                "Synthetic verification",
+            ]
+        )
+        == 2
+    )
+    output = capsys.readouterr().out
+    assert json.loads(output)["status"] == "failed"
+    assert "operation remains unresolved" in output
+    assert "synthetic-private-remote-detail" not in output

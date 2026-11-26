@@ -54,22 +54,38 @@ def remote(method: str, path: str, *, username: str = ADMIN, **kwargs: Any) -> A
 
 
 @contextmanager
-def proxy(*, lose_comment_response: bool = False):
+def proxy(
+    *,
+    lose_comment_response: bool = False,
+    preserve_origin: bool = False,
+    lose_lfs_response: bool = False,
+):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args: Any) -> None:
             pass
 
         def forward(self) -> None:
             body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            forwarded = {
+                key: value
+                for key, value in self.headers.items()
+                if key.lower() not in ("host", "content-length", "connection")
+            }
+            if preserve_origin:
+                # The approved TLS fixture has one fixed public origin. Gitea's
+                # LFS action URLs must describe that origin, not its internal hop.
+                forwarded.update(
+                    {
+                        "Host": "localhost:34443",
+                        "X-Forwarded-Host": "localhost:34443",
+                        "X-Forwarded-Proto": "https",
+                    }
+                )
             response = httpx.request(
                 self.command,
                 URL + self.path,
                 content=body,
-                headers={
-                    key: value
-                    for key, value in self.headers.items()
-                    if key.lower() not in ("host", "content-length", "connection")
-                },
+                headers=forwarded,
                 timeout=30,
                 trust_env=False,
                 follow_redirects=False,
@@ -82,12 +98,33 @@ def proxy(*, lose_comment_response: bool = False):
                                 "method": self.command,
                                 "path": self.path,
                                 "status": response.status_code,
+                                **(
+                                    {"lfs_operation": json.loads(body).get("operation")}
+                                    if self.path.endswith("/objects/batch")
+                                    else {}
+                                ),
                             }
                         )
                         + "\n"
                     )
                     stream.flush()
                     os.fsync(stream.fileno())
+            if (
+                lose_lfs_response
+                and self.command == "PUT"
+                and "/info/lfs/objects/" in self.path
+                and response.status_code in (200, 201, 204)
+            ):
+                marker = ROOT / "lfs-response-lost.json"
+                with marker.open("w") as stream:
+                    json.dump(
+                        {"remote_status": response.status_code, "response_dropped": True}, stream
+                    )
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                self.connection.shutdown(socket.SHUT_RDWR)
+                self.connection.close()
+                return
             if (
                 lose_comment_response
                 and self.command == "POST"

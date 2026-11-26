@@ -200,6 +200,10 @@ def run_source_export_probe() -> dict[str, Any]:
     docker_copy(worker_path, "gitferry-a:/probe/source_export_worker.py")
     for service in ("gitferry-a", "gitferry-b"):
         docker_copy(
+            worker_path.with_name("native_browser_fixture.py"),
+            f"{service}:/probe/native_browser_fixture.py",
+        )
+        docker_copy(
             worker_path.with_name("browser_runtime.py"), f"{service}:/probe/browser_runtime.py"
         )
     docker_copy(worker_path.with_name("plan_worker.py"), "gitferry-a:/probe/plan_worker.py")
@@ -504,8 +508,8 @@ def run_source_export_probe() -> dict[str, Any]:
     )
     assertions["guided_browser_inventory_bound_export"] = (
         source_browser.get("inventory_reviewed") is True
-        and source_browser.get("inventory_request_version") == 2
-        and captured["job"]["request"].get("version") == 2
+        and source_browser.get("inventory_request_version") == 3
+        and captured["job"]["request"].get("version") == 3
     )
     assertions["guided_browser_target_collision"] = (
         collision_browser["collision_blocked"]
@@ -638,6 +642,8 @@ def run_source_export_probe() -> dict[str, Any]:
         raise ProbeFailure(f"Source export assertions failed: {assertions}")
     return {
         "status": "passed",
+        "native_payloads": target_package["native_payloads"],
+        "source_browser": source_browser,
         "identity_recovery": identity_recovery,
         "ad_identity_recovery": ad_identity,
         "assertions": assertions,
