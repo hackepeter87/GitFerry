@@ -18,6 +18,7 @@ from gitea_compat import (
     PRIMARY_GITEA_PLATFORM_DIGESTS,
     PRIMARY_GITEA_VERSION,
 )
+from scope_acceptance import build_scope_acceptance
 
 ROOT = Path(__file__).parents[2]
 PINNED_GITEA_IMAGE = PRIMARY_GITEA_IMAGE
@@ -175,6 +176,44 @@ ADVANCED_METADATA_CLASSIFICATION = {
     },
 }
 
+SCOPE_ACCEPTANCE_CLASSES = frozenset(
+    {
+        "attachments",
+        "comments",
+        "git_refs",
+        "identities",
+        "issues",
+        "labels",
+        "lfs",
+        "milestones",
+        "organizations",
+        "other_content",
+        "permissions",
+        "pull_comments",
+        "pull_requests",
+        "reactions",
+        "release_assets",
+        "releases",
+        "review_comments",
+        "reviews",
+        "teams",
+        "timelines",
+        "wiki",
+    }
+)
+SCOPE_ACCEPTANCE_ASSERTIONS = frozenset(
+    {
+        "exact_gitea_baseline",
+        "all_classes_catalogued",
+        "inventory_counts_reconciled",
+        "supported_first_imports_reconciled",
+        "unsupported_classes_blocked_before_write",
+        "omission_never_deletes",
+        "control_repository_unchanged",
+        "desktop_inventory_reviewed",
+    }
+)
+
 
 def _inventory_evidence(report: dict[str, Any]) -> bool:
     counts = _value(report, "content_inventory.counts")
@@ -221,6 +260,17 @@ def _advanced_metadata_evidence(report: dict[str, Any]) -> bool:
             ADVANCED_METADATA_ASSERTIONS,
         )
         and classifications == ADVANCED_METADATA_CLASSIFICATION
+    )
+
+
+def _scope_acceptance_evidence(report: dict[str, Any]) -> bool:
+    actual = report.get("scope_acceptance")
+    expected = build_scope_acceptance(report)
+    return (
+        actual == expected
+        and expected["status"] == "passed"
+        and len(expected["catalog"]) == len(SCOPE_ACCEPTANCE_CLASSES)
+        and set(expected["assertions"]) == SCOPE_ACCEPTANCE_ASSERTIONS
     )
 
 
@@ -682,6 +732,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         "comment_transport_roundtrip",
         "openapi_and_migration",
         "oci_runtime",
+        "scope_acceptance",
     )
     mandatory_sections_passed = (
         _value(report, "gitea.source") == PRIMARY_GITEA_VERSION
@@ -689,6 +740,12 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         and all(_value(report, f"{section}.status") == "passed" for section in mandatory_sections)
     )
     entries = [
+        (
+            "complete_agreed_scope_acceptance",
+            _scope_acceptance_evidence(report),
+            "tests/integration/scope_acceptance.py",
+            "scope_acceptance",
+        ),
         (
             "selected_content_inventory_and_portable_plan",
             _inventory_evidence(report)

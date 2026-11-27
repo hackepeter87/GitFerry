@@ -989,3 +989,18 @@ This is native-adapter feasibility only: no application return plan, deletion,
 branch conversion, wiki authorization transfer or general merge capability follows.
 Exact commits, runs, failure diagnostics and final acceptance belong to #18/its PR
 and the common Actions report rather than a separate evidence-only commit chain.
+
+## Complete 0.4 content-scope acceptance
+
+The integration report contains `scope_acceptance`, a generated catalog for every one of the 21
+agreed inventory classes. Each entry records the concrete inventory result, first-import status,
+return status, payload-integrity disposition, release ownership, evidence sections and a nonempty
+limitation. The catalog reconciles the live Gitea inventory with the separate application-plan and
+native LFS/wiki probes; it does not turn inventory-only classes into supported transfer operations.
+
+The final contract rebuilds the catalog from raw probe facts and requires an exact match. The report
+fails when a class disappears, a supported first import lacks class-specific target evidence, an
+unsupported selected class is not blocked before writes, a limitation is omitted, or the run claims
+a complete transfer. The desktop inventory test separately verifies that unsupported selections are
+visible and cannot be exported. Package omission remains non-destructive, and the selected control
+repository must remain unchanged. See [the acceptance contract](verification-complete-scope.md).
