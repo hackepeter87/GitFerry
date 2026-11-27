@@ -478,6 +478,85 @@ def test_push_return_ref_updates_one_fast_forward_and_preserves_other_refs(
         assert refs["refs/heads/master"] == new_oid
 
 
+def test_push_return_ref_preserves_a_new_annotated_tag_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, remote, _bundle, _old_oid, _new_oid = _return_source(tmp_path)
+    _git("tag", "-a", "offline-v1", "-m", "offline version", cwd=source)
+    package = tmp_path / "return-package"
+    (package / "return.bundle").unlink()
+    created = create_git_bundle(source, package, "return.bundle")
+    tag_oid = subprocess.run(  # noqa: S603, S607
+        ["git", "rev-parse", "refs/tags/offline-v1"],  # noqa: S607
+        cwd=source,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    with GiteaBundlePusher(
+        package,
+        tmp_path / "return-work",
+        "https://target.invalid",
+        "actor",
+        "token",
+    ) as pusher:
+        monkeypatch.setattr(pusher, "_repository_url", lambda _: str(remote))
+        monkeypatch.setattr(pusher, "_verify_repository_id", lambda *_: None)
+        pusher.push_return_ref(
+            "org/repo",
+            bundle_member=created.member,
+            bundle_sha256=created.sha256,
+            bundle_size=created.size,
+            expected_repository_id="42",
+            ref="refs/tags/offline-v1",
+            expected_old_oid=None,
+            desired_oid=tag_oid,
+        )
+        assert pusher._git_remote("ls-remote", str(remote), None)["refs/tags/offline-v1"] == tag_oid
+
+
+def test_push_return_ref_rejects_repository_identity_mismatch_before_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, remote, bundle, old_oid, new_oid = _return_source(tmp_path)
+    with GiteaBundlePusher(
+        tmp_path / "return-package",
+        tmp_path / "return-work",
+        "https://target.invalid",
+        "actor",
+        "token",
+    ) as pusher:
+        monkeypatch.setattr(pusher, "_repository_url", lambda _: str(remote))
+
+        def reject_identity(*_: object) -> None:
+            raise GiteaBundleError("repository identity mismatch")
+
+        monkeypatch.setattr(pusher, "_verify_repository_id", reject_identity)
+        pushes: list[list[str]] = []
+        original = pusher._run_git
+
+        def capture(args: list[str], *, cwd: Path | None):
+            if args and args[0] == "push":
+                pushes.append(args)
+            return original(args, cwd=cwd)
+
+        monkeypatch.setattr(pusher, "_run_git", capture)
+        with pytest.raises(RemoteWriteConflict, match="identity mismatch") as mismatch:
+            pusher.push_return_ref(
+                "org/repo",
+                bundle_member=bundle.member,
+                bundle_sha256=bundle.sha256,
+                bundle_size=bundle.size,
+                expected_repository_id="wrong",
+                ref="refs/heads/master",
+                expected_old_oid=old_oid,
+                desired_oid=new_oid,
+            )
+        assert mismatch.value.evidence["write_attempted"] is False
+        assert pushes == []
+
+
 def test_push_return_ref_rejects_drift_and_protected_refs_before_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
