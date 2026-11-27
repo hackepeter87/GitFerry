@@ -166,11 +166,16 @@ def _target_worker(mode: str, context: str = "normal") -> dict[str, Any]:
     return json.loads(result.stdout)
 
 
-def _git_return_worker(service: str, mode: str, *, allow_failure: bool = False) -> dict[str, Any]:
+def _git_return_worker(
+    service: str,
+    mode: str,
+    *,
+    expected_exit_code: int | None = None,
+) -> dict[str, Any]:
     result = docker_service_exec(
         service, ["python", "/probe/git_return_worker.py", mode], timeout=240, check=False
     )
-    if result.returncode and allow_failure:
+    if expected_exit_code is not None and result.returncode == expected_exit_code:
         return {
             "status": "expected_crash",
             "returncode": result.returncode,
@@ -183,6 +188,11 @@ def _git_return_worker(service: str, mode: str, *, allow_failure: bool = False) 
                 evidence.update(json.loads(line.removeprefix("GITFERRY_PROBE_ERROR ")))
         (WORK / "git-return-worker-failure.json").write_text(json.dumps(evidence, indent=2))
         raise ProbeFailure(f"Git return worker {service}/{mode} failed")
+    if expected_exit_code is not None:
+        raise ProbeFailure(
+            f"Git return worker {service}/{mode} returned normally; "
+            f"expected exit {expected_exit_code}"
+        )
     return json.loads(result.stdout)
 
 
@@ -352,7 +362,7 @@ def run_source_export_probe() -> dict[str, Any]:
     docker_copy(return_archive, "gitferry-a:/state/source-export/git-return-real.zip")
     return_drift = _git_return_worker("gitferry-a", "drift-a")
     return_protected = _git_return_worker("gitferry-a", "protected-a")
-    return_crash = _git_return_worker("gitferry-a", "crash-a", allow_failure=True)
+    return_crash = _git_return_worker("gitferry-a", "crash-a", expected_exit_code=42)
     return_recovery = _git_return_worker("gitferry-a", "recover-a")
     return_replay = _git_return_worker("gitferry-a", "replay-a")
     (WORK / "git-return-evidence.json").write_text(

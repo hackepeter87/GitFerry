@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -176,6 +177,23 @@ def _set_branch_protection(base_url: str, *, enabled: bool) -> None:
         response = httpx.delete(f"{path}/offline-return", auth=auth, timeout=20, trust_env=False)
         if response.status_code not in (200, 204, 404):
             response.raise_for_status()
+    deadline = time.monotonic() + 10
+    while True:
+        observed = httpx.get(path, auth=auth, timeout=20, trust_env=False)
+        observed.raise_for_status()
+        rules = observed.json()
+        if not isinstance(rules, list):
+            raise RuntimeError("branch protection verification returned a non-list response")
+        present = any(
+            isinstance(rule, dict)
+            and (rule.get("rule_name") or rule.get("branch_name")) == "offline-return"
+            for rule in rules
+        )
+        if present is enabled:
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError("branch protection state did not reach the requested value")
+        time.sleep(0.1)
 
 
 def _create_offline_commit() -> dict[str, str]:
@@ -415,19 +433,30 @@ def _run_return_plan(
     plan_worker.ROOT = A_ROOT
     plan_worker.URL = A_URL
 
+    adapters: list[DiagnosticReturnAdapter] = []
+
     def adapter(_: dict[str, Any]) -> DiagnosticReturnAdapter:
-        return DiagnosticReturnAdapter(
+        created = DiagnosticReturnAdapter(
             state, paths, LocalReferences(A_ROOT / "secrets", A_ROOT / "ca")
         )
+        adapters.append(created)
+        return created
 
     def crash() -> None:
         if crash_after_remote:
             os._exit(42)
 
     with plan_worker.proxy(preserve_origin=True):
-        return PlanRunner(
+        result = PlanRunner(
             service, adapter, after_remote_hook=crash if crash_after_remote else None
         ).run(plan["plan_id"])
+    if crash_after_remote:
+        diagnostic = adapters[-1].preflight_failure if adapters else "adapter was not created"
+        raise RuntimeError(
+            "crash hook was not reached: "
+            f"plan={result['status']} reason={result.get('reason')} preflight={diagnostic}"
+        )
+    return result
 
 
 def drift_return() -> dict[str, Any]:
