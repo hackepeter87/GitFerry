@@ -110,9 +110,15 @@ def _git_refs(root: Path, base_url: str, repository: str) -> dict[str, str]:
 
 
 def _clone_and_verify_return(
-    root: Path, base_url: str, repository: str, ref: str, oid: str
+    root: Path,
+    base_url: str,
+    repository: str,
+    ref: str,
+    oid: str,
+    *,
+    content_oid: str,
 ) -> bool:
-    """Verify the returned ref through a real clone and reachable object read."""
+    """Verify the reconciled ref and offline content through one real clone."""
 
     with tempfile.TemporaryDirectory(prefix="gitferry-return-clone-", dir=root / "work") as raw:
         clone = Path(raw) / "repository"
@@ -137,18 +143,20 @@ def _clone_and_verify_return(
                 capture_output=True,
                 text=True,
             )
-            subprocess.run(  # noqa: S603
+            content = subprocess.run(  # noqa: S603
                 [
                     shutil.which("git") or "/usr/bin/git",
                     "show",
                     "--format=",
-                    f"{oid}:OFFLINE-RETURN.txt",
+                    f"{content_oid}:OFFLINE-RETURN.txt",
                 ],
                 cwd=clone,
                 check=True,
                 capture_output=True,
                 text=True,
             )
+            if content.stdout != "synthetic offline return\n":
+                raise RuntimeError("returned clone content differs from the offline commit")
             result = subprocess.run(  # noqa: S603
                 [shutil.which("git") or "/usr/bin/git", "ls-remote", "--refs", "origin", ref],
                 cwd=clone,
@@ -619,8 +627,16 @@ def recover_return() -> dict[str, Any]:
     with plan_worker.proxy(preserve_origin=True):
         resumed = PlanRunner(service, adapter).run(plan_id)
     final_refs = _git_refs(A_ROOT, A_URL, REPOSITORY)
+    offline_oid = final_refs.get("refs/heads/offline-return")
+    if offline_oid is None:
+        raise RuntimeError("returned offline content ref is missing")
     clone_reachable = _clone_and_verify_return(
-        A_ROOT, A_URL, REPOSITORY, operation.intent["ref"], str(operation.intent["new_oid"])
+        A_ROOT,
+        A_URL,
+        REPOSITORY,
+        operation.intent["ref"],
+        str(operation.intent["new_oid"]),
+        content_oid=offline_oid,
     )
     with state.read_connection() as connection:
         push_attempts = connection.execute(
