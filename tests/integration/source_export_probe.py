@@ -635,7 +635,9 @@ def run_source_export_probe() -> dict[str, Any]:
         and return_recovery["return_digest"] == return_export["package_digest"]
     )
     assertions["git_return_ref_object_exact"] = (
-        return_recovery["remote_oid"] == return_export["offline_oid"]
+        return_recovery["remote_oid"] == return_recovery["intended_oid"]
+        and return_recovery["final_refs"].get("refs/heads/offline-return")
+        == return_export["offline_oid"]
     )
     assertions["git_return_selected_drift_blocks_before_push"] = (
         return_drift["status"] == "blocked"

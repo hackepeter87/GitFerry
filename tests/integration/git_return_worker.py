@@ -511,10 +511,13 @@ def recover_return() -> dict[str, Any]:
     with OperationExecutor(state, "git-return-recovery"):
         pass
     with state.read_connection() as connection:
-        operation_id = connection.execute(
+        unknown = connection.execute(
             "SELECT operation_id FROM operations WHERE operation_type='push_git_ref' "
-            "ORDER BY created_at DESC LIMIT 1"
-        ).fetchone()[0]
+            "AND status='outcome_unknown' ORDER BY operation_id"
+        ).fetchall()
+    if len(unknown) != 1:
+        raise RuntimeError(f"expected one interrupted Git return operation, got {len(unknown)}")
+    operation_id = unknown[0][0]
     operation = state.get_operation(operation_id)
     if operation.status != "outcome_unknown":
         raise RuntimeError(f"expected unknown operation after crash, got {operation.status}")
@@ -564,6 +567,7 @@ def recover_return() -> dict[str, Any]:
 
     with plan_worker.proxy(preserve_origin=True):
         resumed = PlanRunner(service, adapter).run(plan_id)
+    final_refs = _git_refs(A_ROOT, A_URL, REPOSITORY)
     with state.read_connection() as connection:
         push_attempts = connection.execute(
             "SELECT count(*) FROM operation_events e JOIN operations o "
@@ -575,7 +579,10 @@ def recover_return() -> dict[str, Any]:
         "restart_status": operation.status,
         "wrong_target_rejected": all(rejected.values()),
         "rejected": rejected,
+        "remote_ref": operation.intent["ref"],
         "remote_oid": refs.get(operation.intent["ref"]),
+        "intended_oid": operation.intent["new_oid"],
+        "final_refs": final_refs,
         "return_digest": PackageAdmissions(state, paths)
         .artifact("received-git-return")
         .digest_sha256,
