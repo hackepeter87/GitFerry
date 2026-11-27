@@ -18,7 +18,7 @@ from gitferry.connection_profiles import ProfileConflict
 from gitferry.runtime import RuntimePaths
 from gitferry.source_export_state import record_source_capture
 from gitferry.source_exports import SourceExportConflict, SourceExports
-from gitferry.source_package import build_source_documents
+from gitferry.source_package import build_return_package, build_source_documents
 from gitferry.source_snapshot import capture_source
 from gitferry.state_store import OriginKey
 from test_connection_probe import setup
@@ -91,6 +91,53 @@ def requested() -> dict[str, Any]:
         "include_metadata": True,
         "include_members": True,
     }
+
+
+def test_build_return_package_preserves_forward_facts_and_reverses_endpoints(
+    tmp_path: Path,
+) -> None:
+    service = configure(tmp_path)
+    package = build_return_package(
+        service.state,
+        package_id="return-1",
+        transfer_round_id="round-1",
+        created_at=STAMP,
+        sender="b",
+        recipient="a",
+        forward_package_id="forward-1",
+        forward_package_digest="a" * 64,
+        repositories=[
+            {
+                "origin": {"instance_key": "a", "global_id": "7"},
+                "repository": "synthetic/selected",
+                "comparison": {
+                    "original_baseline": {"refs/heads/main": "1" * 40},
+                    "confirmed_import": {"refs/heads/main": "1" * 40},
+                    "desired": {"refs/heads/main": "2" * 40},
+                },
+            }
+        ],
+    )
+    assert package["mode"] == "return"
+    assert package["sender"]["instance_key"] == "b"
+    assert package["recipient"]["instance_key"] == "a"
+    assert (
+        package["repositories"][0]["comparison"]["original_baseline"]["refs/heads/main"]
+        == "1" * 40
+    )
+
+
+def test_return_export_request_requires_forward_digest() -> None:
+    value = requested()
+    value.update(
+        version=5,
+        mode="return",
+        forward_package_id="forward-1",
+        include_metadata=False,
+        include_members=False,
+    )
+    with pytest.raises(SourceExportConflict, match="invalid source export selection"):
+        exports.parse_export_request(value)
 
 
 def configure(tmp_path: Path) -> SourceExports:

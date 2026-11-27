@@ -50,7 +50,10 @@ class _Selection(BaseModel):
 
 class _Request(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-    version: Literal[1, 2, 3, 4]
+    version: Literal[1, 2, 3, 4, 5]
+    mode: Literal["first-import", "return"] = "first-import"
+    forward_package_id: str | None = None
+    forward_package_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
     inventory_id: str | None = None
     inventory_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
     source_instance_key: str
@@ -72,6 +75,16 @@ def parse_export_request(value: Mapping[str, Any]) -> dict[str, Any]:
         request = _Request.model_validate(value).model_dump()
         if type(value.get("version")) is not int:
             raise ValueError("version must be an integer")
+        if request["version"] == 5:
+            if request["mode"] != "return":
+                raise ValueError("version five is reserved for return packages")
+            _identifier(request["forward_package_id"])
+            if request["forward_package_digest"] is None:
+                raise ValueError("return export requires the forward package digest")
+            if request["include_metadata"] or request["include_members"]:
+                raise ValueError("return export currently supports Git refs only")
+        elif request["mode"] != "first-import":
+            raise ValueError("return mode requires version five")
         if request["version"] < 3:
             if "include_lfs" in value or "include_wiki" in value:
                 raise ValueError("legacy requests cannot select native payloads")
@@ -89,7 +102,7 @@ def parse_export_request(value: Mapping[str, Any]) -> dict[str, Any]:
                 raise ValueError("legacy requests cannot select metadata payload classes")
             for key in extra:
                 del request[key]
-        else:
+        elif request["version"] == 4:
             if not any(
                 request[key]
                 for key in (
@@ -108,7 +121,7 @@ def parse_export_request(value: Mapping[str, Any]) -> dict[str, Any]:
             if "inventory_id" in value or "inventory_digest" in value:
                 raise ValueError("legacy requests cannot bind inventory")
             del request["inventory_id"], request["inventory_digest"]
-        else:
+        elif request["version"] < 5:
             _identifier(request["inventory_id"])
             if request["inventory_digest"] is None:
                 raise ValueError("inventory digest is required")
