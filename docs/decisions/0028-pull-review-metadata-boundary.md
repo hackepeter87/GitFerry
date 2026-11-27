@@ -12,6 +12,8 @@ commit, diff-position, parent, author or ordering meaning. Gitea 28.4.0 exposes 
 state-transition routes plus a PR `content_version` guard, but route availability alone does not
 establish a safe offline roundtrip. The guard rejects already stale content and performs a DB
 content check; Gitea still documents a transaction gap around a multi-field PR PATCH.
+The real merged-PR fixture also shows that native merge state, times and commit are available while
+the PR response's `merged_by` remains null; the timeline separately identifies the merge actor.
 
 ## Decision
 

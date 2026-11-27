@@ -20,9 +20,11 @@ comments, reviews and inline review comments remain different inventory classes.
 
 ## Runtime evidence
 
-`tests/integration/content_inventory_probe.py` creates a real PR, PR conversation comment, review
-and inline review comment, then reads timelines and reactions. It verifies typed parents, distinct
-namespaces, direct counts, read-only collection and an unchanged control repository.
+`tests/integration/content_inventory_probe.py` creates open and merged PRs, PR conversation
+comments, COMMENT and APPROVE reviews, equal-text inline comments by different authors and a reply,
+then reads timelines and reactions. It verifies typed parents, distinct namespaces, direct counts,
+read-only collection and an unchanged control repository. Resolve, unresolve and re-resolve are
+executed and read back against the real inline comment.
 
 `tests/integration/openapi_migration_probe.py` records the exact request/response properties and
 available methods from both running Gitea instances, including reply and resolve/unresolve routes.
@@ -31,6 +33,11 @@ one returns 409, and stale title/body values are not applied. The common report 
 fields, route methods, live guard evidence or the exact support classification change. The existing
 server-side repository migration probe remains an initial-import experiment; it is not treated as a
 single-object return path.
+
+For the merged fixture, Gitea 28.4.0 returns native closed/merged state, `closed_at`, `merged_at`
+and `merge_commit_sha`, while `merged_by` remains `null` in the PR response. The ordered native
+timeline retains the administrative merge actor. GitFerry records both facts and does not replace
+the null response field with the timeline actor.
 
 The desktop inventory and plan review render these classes and the package limitations before any
 write. GitFerry does not create operations for the blocked classes, so restart, replay or a new
@@ -43,6 +50,8 @@ package ID cannot bypass the block. No target POST/PATCH/DELETE is attempted for
 - PR `content_version` is a real optimistic guard, not a general GitFerry return capability. Gitea's
   own handler notes that all multi-field mutations are not yet wrapped in one transaction.
 - Reviews and inline comments have no equivalent general content-version PATCH contract.
+- A timeline merge actor is corroborating relationship evidence, not restoration of the null
+  native PR `merged_by` response field.
 - Timeline ordering is observed from the API response only; it is not recreated.
 - Reactions are inventoried with a natural key, not misrepresented as stable native-ID objects.
 - Repository migration still needs live source/target access and is unsuitable for incremental

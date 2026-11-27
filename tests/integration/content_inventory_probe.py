@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import ssl
+import time
 from typing import Any
 
 import httpx
@@ -239,12 +240,12 @@ def _seed_metadata(repo: dict[str, Any]) -> dict[str, Any]:
             _get(SOURCE_URL, root + f"/pulls/{pidx}/reviews/{review['id']}/comments") or []
         )
     ]
+    first_inline = next(
+        comment
+        for comment in review_comments
+        if comment.get("body") == "Synthetic equal-body inline comment"
+    )
     if not any(comment.get("body") == "Synthetic review reply" for comment in review_comments):
-        first_inline = next(
-            comment
-            for comment in review_comments
-            if comment.get("body") == "Synthetic equal-body inline comment"
-        )
         api(
             SOURCE_URL,
             "POST",
@@ -252,12 +253,144 @@ def _seed_metadata(repo: dict[str, Any]) -> dict[str, Any]:
             auth=("developer", USER_PASSWORD),
             json_body={"body": "Synthetic review reply"},
         )
+    review_id = first_inline["pull_request_review_id"]
+
+    def current_inline() -> dict[str, Any]:
+        comments = (
+            _get(
+                SOURCE_URL,
+                root + f"/pulls/{pidx}/reviews/{review_id}/comments",
+            )
+            or []
+        )
+        return next(item for item in comments if item.get("id") == first_inline["id"])
+
+    api(SOURCE_URL, "POST", root + f"/pulls/comments/{first_inline['id']}/resolve")
+    resolved_once = (current_inline().get("resolver") or {}).get("login") == ADMIN[0]
+    api(SOURCE_URL, "POST", root + f"/pulls/comments/{first_inline['id']}/unresolve")
+    unresolved = current_inline().get("resolver") is None
+    api(SOURCE_URL, "POST", root + f"/pulls/comments/{first_inline['id']}/resolve")
+    resolved_again = (current_inline().get("resolver") or {}).get("login") == ADMIN[0]
+
+    merged_pulls = _get(SOURCE_URL, root + "/pulls", params={"state": "all"}) or []
+    merged_pull = next(
+        (item for item in merged_pulls if item.get("title") == "Inventory merged pull"),
+        None,
+    )
+    if merged_pull is None:
+        if _get(SOURCE_URL, root + "/branches/inventory-merged") is None:
+            api(
+                SOURCE_URL,
+                "POST",
+                root + "/branches",
+                json_body={"new_branch_name": "inventory-merged", "old_ref_name": "main"},
+            )
         api(
             SOURCE_URL,
             "POST",
-            root + f"/pulls/comments/{first_inline['id']}/resolve",
+            root + "/contents/merged-review.txt",
+            json_body={
+                "branch": "inventory-merged",
+                "message": "Synthetic merged review fixture",
+                "content": base64.b64encode(b"merged review fixture\n").decode(),
+            },
         )
-    return {"label": label, "issue": issue, "comment": comment, "release": release, "pull": pull}
+        merged_pull = api(
+            SOURCE_URL,
+            "POST",
+            root + "/pulls",
+            json_body={
+                "title": "Inventory merged pull",
+                "head": "inventory-merged",
+                "base": "main",
+                "body": "Synthetic merged PR",
+            },
+        )
+    merged_reviews = (
+        _get(
+            SOURCE_URL,
+            root + f"/pulls/{merged_pull['number']}/reviews",
+        )
+        or []
+    )
+    if not any(item.get("state") == "APPROVED" for item in merged_reviews):
+        approval_review = api(
+            SOURCE_URL,
+            "POST",
+            root + f"/pulls/{merged_pull['number']}/reviews",
+            auth=("developer", USER_PASSWORD),
+            json_body={
+                "event": "PENDING",
+                "body": "Synthetic approval decision",
+                "commit_id": merged_pull["head"]["sha"],
+            },
+        )
+        if approval_review.get("state") != "APPROVED":
+            api(
+                SOURCE_URL,
+                "POST",
+                root + f"/pulls/{merged_pull['number']}/reviews/{approval_review['id']}",
+                auth=("developer", USER_PASSWORD),
+                json_body={"event": "APPROVED", "body": "Synthetic approval decision"},
+            )
+    if not merged_pull.get("merged"):
+        merge_style = next(
+            style
+            for flag, style in (
+                (repo.get("allow_merge_commits"), "merge"),
+                (repo.get("allow_rebase"), "rebase"),
+                (repo.get("allow_rebase_explicit"), "rebase-merge"),
+                (repo.get("allow_squash_merge"), "squash"),
+                (repo.get("allow_fast_forward_only_merge"), "fast-forward-only"),
+            )
+            if flag
+        )
+        mergeability_deadline = time.monotonic() + 20
+        while merged_pull.get("mergeable") is not True:
+            if time.monotonic() >= mergeability_deadline:
+                raise ProbeFailure(
+                    "synthetic pull did not reach a confirmed mergeable state within 20 seconds"
+                )
+            time.sleep(0.25)
+            current_pull = _get(SOURCE_URL, root + f"/pulls/{merged_pull['number']}")
+            if not isinstance(current_pull, dict):
+                raise ProbeFailure("synthetic pull disappeared during mergeability check")
+            merged_pull = current_pull
+        merge_deadline = time.monotonic() + 20
+        while True:
+            merge = request(
+                SOURCE_URL,
+                "POST",
+                root + f"/pulls/{merged_pull['number']}/merge",
+                auth=ADMIN,
+                json_body={"do": merge_style, "force_merge": True},
+            )
+            if merge.status_code in (200, 201):
+                break
+            retryable_not_ready = (
+                merge.status_code == 405 and '"message":"Please try again later"' in merge.text
+            )
+            if not retryable_not_ready or time.monotonic() >= merge_deadline:
+                raise ProbeFailure(
+                    f"synthetic pull merge failed: {merge.status_code} {merge.text[:300]}"
+                )
+            time.sleep(0.25)
+    merged_pull = _get(SOURCE_URL, root + f"/pulls/{merged_pull['number']}")
+    if not isinstance(merged_pull, dict):
+        raise ProbeFailure("merged pull could not be read back")
+    return {
+        "label": label,
+        "issue": issue,
+        "comment": comment,
+        "release": release,
+        "pull": pull,
+        "merged_pull": merged_pull,
+        "resolution_transitions": {
+            "resolved_once": resolved_once,
+            "unresolved": unresolved,
+            "resolved_again": resolved_again,
+        },
+    }
 
 
 def _upload_if_empty(path: str, filename: str, content: bytes) -> None:
@@ -625,9 +758,61 @@ def run_content_inventory_probe() -> dict[str, Any]:
         or not isinstance(pull_object.facts.get("updated_at"), str)
     ):
         raise ProbeFailure("pull fixture refs, state or merge facts were not preserved")
+    merged_pull_object = next(
+        item
+        for item in by_class["pull_requests"].objects
+        if item.native_id == str(fixture["merged_pull"]["id"])
+    )
+    if (
+        merged_pull_object.facts.get("state") != "closed"
+        or merged_pull_object.facts.get("merged") is not True
+        or not isinstance(merged_pull_object.facts.get("closed_at"), str)
+        or not isinstance(merged_pull_object.facts.get("merged_at"), str)
+        or merged_pull_object.facts.get("merged_by") is not None
+        or not isinstance(merged_pull_object.facts.get("merge_commit_sha"), str)
+        or not merged_pull_object.facts.get("merge_commit_sha")
+    ):
+        merge_facts = {
+            key: merged_pull_object.facts.get(key)
+            for key in (
+                "state",
+                "merged",
+                "closed_at",
+                "merged_at",
+                "merged_by",
+                "merge_commit_sha",
+            )
+        }
+        raise ProbeFailure(
+            "merged pull state, actor, timestamps or commit were not preserved: "
+            + json.dumps(merge_facts, sort_keys=True)
+        )
     review_authors = {item.author["login"] for item in by_class["reviews"].objects if item.author}
     if not {"developer", "viewer"} <= review_authors:
         raise ProbeFailure("review fixtures did not retain distinct non-importer native authors")
+    if not any(
+        item.facts.get("state") == "APPROVED"
+        and item.author
+        and item.author.get("login") == "developer"
+        and item.facts.get("commit_id")
+        and isinstance(item.facts.get("submitted_at") or item.facts.get("updated_at"), str)
+        for item in by_class["reviews"].objects
+    ):
+        review_facts = [
+            {
+                "state": item.facts.get("state"),
+                "author": item.author,
+                "commit_id": item.facts.get("commit_id"),
+                "submitted_at": item.facts.get("submitted_at"),
+                "updated_at": item.facts.get("updated_at"),
+                "body": item.facts.get("body"),
+            }
+            for item in by_class["reviews"].objects
+        ]
+        raise ProbeFailure(
+            "approval review decision and native facts were not preserved: "
+            + json.dumps(review_facts, sort_keys=True)
+        )
     review_bodies = [item.facts.get("body") for item in by_class["reviews"].objects]
     inline_bodies = [item.facts.get("body") for item in by_class["review_comments"].objects]
     if (
@@ -649,11 +834,25 @@ def run_content_inventory_probe() -> dict[str, Any]:
         for item in inline
     ):
         raise ProbeFailure("review commit or inline diff-position relationships were not retained")
-    if not any(
-        item.facts.get("body") == "Synthetic review reply"
-        for item in by_class["review_comments"].objects
+    inline_authors = {item.author["login"] for item in inline if item.author}
+    reply = next(
+        (
+            item
+            for item in by_class["review_comments"].objects
+            if item.facts.get("body") == "Synthetic review reply"
+        ),
+        None,
+    )
+    if inline_authors != {"developer", "viewer"} or not (
+        reply and reply.author and reply.author.get("login") == "developer"
     ):
-        raise ProbeFailure("review reply route did not create a separately inventoried comment")
+        raise ProbeFailure("inline comments and reply did not retain their native authors")
+    if fixture["resolution_transitions"] != {
+        "resolved_once": True,
+        "unresolved": True,
+        "resolved_again": True,
+    }:
+        raise ProbeFailure("resolve, unresolve and re-resolve transitions were not observed live")
     if not any(item.facts.get("resolver", {}).get("login") == ADMIN[0] for item in inline):
         raise ProbeFailure(
             "review resolve transition was not retained as an explicit resolver fact"
@@ -672,6 +871,30 @@ def run_content_inventory_probe() -> dict[str, Any]:
     ]
     if captured_timeline_ids != [str(item["id"]) for item in live_timeline]:
         raise ProbeFailure("pull timeline API ordering was not preserved by inventory")
+    merged_timeline = [
+        item
+        for item in by_class["timelines"].objects
+        if item.parent
+        == {"content_class": "pull_requests", "key": str(fixture["merged_pull"]["id"])}
+    ]
+    merge_timeline_event = next(
+        (
+            item
+            for item in merged_timeline
+            if "merge" in str(item.facts.get("type", "")).lower()
+            and item.author
+            and item.author.get("login") == ADMIN[0]
+        ),
+        None,
+    )
+    if merge_timeline_event is None:
+        timeline_facts = [
+            {"type": item.facts.get("type"), "author": item.author} for item in merged_timeline
+        ]
+        raise ProbeFailure(
+            "merged pull timeline did not retain the native merge actor: "
+            + json.dumps(timeline_facts, sort_keys=True)
+        )
     if not by_class["comments"].objects or any(
         item.parent is None for item in by_class["comments"].objects
     ):
@@ -747,6 +970,8 @@ def run_content_inventory_probe() -> dict[str, Any]:
                 "distinct_review_authors_and_equal_text_origins",
                 "pull_refs_state_review_positions_and_timeline_order",
                 "review_reply_and_resolution_routes",
+                "pull_merged_state_and_approval_decision",
+                "inline_reply_authors_and_resolution_transitions",
                 "pull_content_version_rejects_stale_without_mutation",
                 "unsupported_counts_unknown",
             )
@@ -761,4 +986,13 @@ def run_content_inventory_probe() -> dict[str, Any]:
         "source_writes_during_collection": sum(method != "GET" for method, _ in calls),
         "empty_reaction_endpoint": empty_reactions,
         "pull_content_version": pull_content_version,
+        "pull_merge_evidence": {
+            "state": merged_pull_object.facts["state"],
+            "merged": merged_pull_object.facts["merged"],
+            "closed_at": merged_pull_object.facts["closed_at"],
+            "merged_at": merged_pull_object.facts["merged_at"],
+            "merge_commit_sha": merged_pull_object.facts["merge_commit_sha"],
+            "merged_by_response": merged_pull_object.facts.get("merged_by"),
+            "timeline_merge_actor": merge_timeline_event.author["login"],
+        },
     }

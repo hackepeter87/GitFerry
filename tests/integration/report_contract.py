@@ -70,6 +70,8 @@ INVENTORY_ASSERTIONS = frozenset(
         "distinct_review_authors_and_equal_text_origins",
         "pull_refs_state_review_positions_and_timeline_order",
         "review_reply_and_resolution_routes",
+        "pull_merged_state_and_approval_decision",
+        "inline_reply_authors_and_resolution_transitions",
         "pull_content_version_rejects_stale_without_mutation",
         "unsupported_counts_unknown",
     }
@@ -177,6 +179,7 @@ ADVANCED_METADATA_CLASSIFICATION = {
 def _inventory_evidence(report: dict[str, Any]) -> bool:
     counts = _value(report, "content_inventory.counts")
     pull_guard = _value(report, "content_inventory.pull_content_version")
+    pull_merge = _value(report, "content_inventory.pull_merge_evidence")
     return (
         _value(report, "content_inventory.status") == "passed"
         and _value(report, "content_inventory.gitea_version") == PRIMARY_GITEA_VERSION
@@ -195,6 +198,15 @@ def _inventory_evidence(report: dict[str, Any]) -> bool:
         and type(pull_guard.get("after")) is int
         and pull_guard["after"] > pull_guard["before"]
         and pull_guard.get("stale_title_and_body_unchanged") is True
+        and isinstance(pull_merge, dict)
+        and pull_merge.get("state") == "closed"
+        and pull_merge.get("merged") is True
+        and isinstance(pull_merge.get("closed_at"), str)
+        and isinstance(pull_merge.get("merged_at"), str)
+        and isinstance(pull_merge.get("merge_commit_sha"), str)
+        and bool(pull_merge["merge_commit_sha"])
+        and pull_merge.get("merged_by_response") is None
+        and pull_merge.get("timeline_merge_actor") == "gitferry-admin"
     )
 
 

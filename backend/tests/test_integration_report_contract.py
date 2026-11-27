@@ -63,6 +63,15 @@ def complete_probe_report() -> dict[str, object]:
                 "after": 2,
                 "stale_title_and_body_unchanged": True,
             },
+            "pull_merge_evidence": {
+                "state": "closed",
+                "merged": True,
+                "closed_at": "2026-11-27T04:26:34Z",
+                "merged_at": "2026-11-27T04:26:34Z",
+                "merge_commit_sha": "7804ae35a5297bff75a4815dff272ba2046286cc",
+                "merged_by_response": None,
+                "timeline_merge_actor": "gitferry-admin",
+            },
         },
         "native_payloads": {
             "status": "passed",
@@ -1065,6 +1074,17 @@ def test_advanced_metadata_classification_cannot_silently_change() -> None:
 def test_pull_content_version_live_evidence_is_mandatory() -> None:
     report = complete_probe_report()
     report["content_inventory"]["pull_content_version"]["stale_status"] = 200
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "selected_content_inventory_and_portable_plan"
+    )
+    assert entry["status"] == "failed"
+
+
+def test_pull_merge_live_evidence_is_mandatory() -> None:
+    report = complete_probe_report()
+    report["content_inventory"]["pull_merge_evidence"]["timeline_merge_actor"] = "developer"
     entry = next(
         item
         for item in report_contract().evidence_catalog(report, True)
