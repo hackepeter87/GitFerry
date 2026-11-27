@@ -9,7 +9,7 @@ import time
 from typing import Any
 
 import httpx
-from gitferry.content_inventory import CONTENT_CLASSES
+from gitferry.content_inventory import CONTENT_CLASSES, inventory_summary
 from gitferry.source_inventory import collect_inventory
 from support import (
     ADMIN,
@@ -984,6 +984,7 @@ def run_content_inventory_probe() -> dict[str, Any]:
         "observed_classes": sorted(observed),
         "unsupported_classes": sorted(unsupported),
         "counts": {name: item.count for name, item in by_class.items()},
+        "selection_summary": inventory_summary(document),
         "source_writes_during_collection": sum(method != "GET" for method, _ in calls),
         "empty_reaction_endpoint": empty_reactions,
         "pull_content_version": pull_content_version,

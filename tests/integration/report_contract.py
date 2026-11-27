@@ -175,6 +175,44 @@ ADVANCED_METADATA_CLASSIFICATION = {
     },
 }
 
+SCOPE_ACCEPTANCE_CLASSES = frozenset(
+    {
+        "attachments",
+        "comments",
+        "git_refs",
+        "identities",
+        "issues",
+        "labels",
+        "lfs",
+        "milestones",
+        "organizations",
+        "other_content",
+        "permissions",
+        "pull_comments",
+        "pull_requests",
+        "reactions",
+        "release_assets",
+        "releases",
+        "review_comments",
+        "reviews",
+        "teams",
+        "timelines",
+        "wiki",
+    }
+)
+SCOPE_ACCEPTANCE_ASSERTIONS = frozenset(
+    {
+        "exact_gitea_baseline",
+        "all_classes_catalogued",
+        "inventory_counts_reconciled",
+        "supported_first_imports_reconciled",
+        "unsupported_classes_blocked_before_write",
+        "omission_never_deletes",
+        "control_repository_unchanged",
+        "desktop_inventory_reviewed",
+    }
+)
+
 
 def _inventory_evidence(report: dict[str, Any]) -> bool:
     counts = _value(report, "content_inventory.counts")
@@ -221,6 +259,37 @@ def _advanced_metadata_evidence(report: dict[str, Any]) -> bool:
             ADVANCED_METADATA_ASSERTIONS,
         )
         and classifications == ADVANCED_METADATA_CLASSIFICATION
+    )
+
+
+def _scope_acceptance_evidence(report: dict[str, Any]) -> bool:
+    catalog = _value(report, "scope_acceptance.catalog")
+    if not isinstance(catalog, list) or len(catalog) != len(SCOPE_ACCEPTANCE_CLASSES):
+        return False
+    by_class = {item.get("content_class"): item for item in catalog if isinstance(item, dict)}
+    if set(by_class) != SCOPE_ACCEPTANCE_CLASSES:
+        return False
+    valid_first_import = {"supported-with-limits", "not-supported"}
+    valid_return = {"supported-with-limits", "not-implemented", "not-checked", "not-supported"}
+    return (
+        _value(report, "scope_acceptance.status") == "passed"
+        and _value(report, "scope_acceptance.gitea_version") == PRIMARY_GITEA_VERSION
+        and _value(report, "scope_acceptance.complete_transfer_claimed") is False
+        and _value(report, "scope_acceptance.limited_scope_required") is True
+        and _all_required_true(report, "scope_acceptance.assertions", SCOPE_ACCEPTANCE_ASSERTIONS)
+        and all(
+            item.get("release_owner") == "0.4.0"
+            and item.get("inventory_verified") is True
+            and item.get("first_import_verified") is True
+            and item.get("first_import_status") in valid_first_import
+            and item.get("return_status") in valid_return
+            and item.get("payload_integrity") in {"verified", "not-applicable-no-payload"}
+            and isinstance(item.get("limitation"), str)
+            and bool(item["limitation"])
+            and isinstance(item.get("evidence"), list)
+            and bool(item["evidence"])
+            for item in by_class.values()
+        )
     )
 
 
@@ -682,6 +751,7 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         "comment_transport_roundtrip",
         "openapi_and_migration",
         "oci_runtime",
+        "scope_acceptance",
     )
     mandatory_sections_passed = (
         _value(report, "gitea.source") == PRIMARY_GITEA_VERSION
@@ -689,6 +759,12 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
         and all(_value(report, f"{section}.status") == "passed" for section in mandatory_sections)
     )
     entries = [
+        (
+            "complete_agreed_scope_acceptance",
+            _scope_acceptance_evidence(report),
+            "tests/integration/scope_acceptance.py",
+            "scope_acceptance",
+        ),
         (
             "selected_content_inventory_and_portable_plan",
             _inventory_evidence(report)

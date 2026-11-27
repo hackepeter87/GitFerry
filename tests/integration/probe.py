@@ -24,6 +24,7 @@ from openapi_migration_probe import run_openapi_migration_probe
 from permissions_probe import run_permissions_probe
 from persistent_state_probe import run_persistent_state_probe
 from provisioning_probe import run_provisioning_probe
+from scope_acceptance import build_scope_acceptance
 from source_export_probe import run_source_export_probe
 from support import (
     ADMIN,
@@ -330,6 +331,7 @@ def main() -> None:
         "openapi_and_migration": run_openapi_migration_probe(access_context),
         "oci_runtime": run_oci_runtime_probe(),
     }
+    report["scope_acceptance"] = build_scope_acceptance(report)
     (RESULTS / "report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
     )

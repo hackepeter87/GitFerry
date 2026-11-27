@@ -56,6 +56,23 @@ def complete_probe_report() -> dict[str, object]:
                 "other_content": None,
             },
             "source_writes_during_collection": 0,
+            "selection_summary": {
+                "transfer_ready": False,
+                "full_transfer": False,
+                "blockers": [
+                    {"content_class": name, "reason": "Transfer adapter is not supported"}
+                    for name in (
+                        "milestones",
+                        "pull_comments",
+                        "pull_requests",
+                        "reviews",
+                        "review_comments",
+                        "timelines",
+                        "reactions",
+                        "other_content",
+                    )
+                ],
+            },
             "pull_content_version": {
                 "accepted_status": 201,
                 "stale_status": 409,
@@ -262,7 +279,7 @@ def complete_probe_report() -> dict[str, object]:
         },
         "source_exports": {
             "status": "passed",
-            "source_browser": {"inventory_request_version": 3},
+            "source_browser": {"inventory_request_version": 3, "inventory_reviewed": True},
             "native_payloads": {
                 "status": "passed",
                 "lfs": {"a" * 64: 128, "b" * 64: 256},
@@ -498,6 +515,9 @@ def complete_probe_report() -> dict[str, object]:
     }
     report["comment_transport_roundtrip"]["status"] = "passed"
     report["portable_transport_roundtrip"]["status"] = "passed"
+    from scope_acceptance import build_scope_acceptance
+
+    report["scope_acceptance"] = build_scope_acceptance(report)
     return report
 
 
@@ -1185,6 +1205,31 @@ def test_inventory_partial_or_mismatched_evidence_cannot_pass(change: str) -> No
         item
         for item in report_contract().evidence_catalog(report, True)
         if item["id"] == "selected_content_inventory_and_portable_plan"
+    )
+    assert entry["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["missing-class", "unverified", "complete-claim", "missing-limit", "missing-assertion"],
+)
+def test_scope_acceptance_cannot_hide_incomplete_or_unsupported_content(mutation: str) -> None:
+    report = complete_probe_report()
+    acceptance = report["scope_acceptance"]
+    if mutation == "missing-class":
+        acceptance["catalog"].pop()
+    elif mutation == "unverified":
+        acceptance["catalog"][0]["first_import_verified"] = False
+    elif mutation == "complete-claim":
+        acceptance["complete_transfer_claimed"] = True
+    elif mutation == "missing-limit":
+        acceptance["catalog"][0]["limitation"] = ""
+    else:
+        del acceptance["assertions"]["unsupported_classes_blocked_before_write"]
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "complete_agreed_scope_acceptance"
     )
     assert entry["status"] == "failed"
 
