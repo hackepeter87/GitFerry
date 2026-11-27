@@ -19,7 +19,8 @@ from gitferry.state_store import OriginKey, StateStore
 
 def _forward_package(state: StateStore, paths: RuntimePaths) -> tuple[str, str, str]:
     package_id = "forward-1"
-    directory = paths.package_directory / package_id
+    package_ref = "received-forward-archive"
+    directory = paths.package_directory / package_ref
     directory.mkdir()
     payload = b"synthetic forward bundle"
     bundle = directory / "bundles/forward.bundle"
@@ -115,7 +116,7 @@ def _forward_package(state: StateStore, paths: RuntimePaths) -> tuple[str, str, 
                 package_id,
                 artifact.digest_sha256,
                 "b",
-                package_id,
+                package_ref,
                 canonical_json(artifact.document),
                 "2026-11-27T09:01:00Z",
             ),

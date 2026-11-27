@@ -620,8 +620,16 @@ class SourceExports:
         forward_id = request["forward_package_id"]
         forward_digest = request["forward_package_digest"]
         try:
+            with self.state.read_connection() as connection:
+                receipt = connection.execute(
+                    "SELECT package_ref FROM package_receipts WHERE package_id=? "
+                    "AND digest_sha256=? AND target_instance_key=?",
+                    (forward_id, forward_digest, request["source_instance_key"]),
+                ).fetchone()
+            if receipt is None:
+                raise ValueError("forward receipt is unavailable")
             forward = PackageAdmissions(self.state, self.paths).verify_receipt(
-                forward_id,
+                str(receipt["package_ref"]),
                 target_instance_key=request["source_instance_key"],
                 expected_digest=forward_digest,
             )
