@@ -469,9 +469,7 @@ class GiteaPlanAdapter:
                         or repository_id is None
                         or str(remote.get("id")) != str(repository_id)
                     ):
-                        raise OperationBlocked(
-                            "return repository identity does not match target"
-                        )
+                        raise OperationBlocked("return repository identity does not match target")
                     refs = self.bundles._local_refs(imported.destination)
                     for step in plan["operations"]:
                         operation = self.state.get_operation(step["operation_id"])

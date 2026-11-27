@@ -122,19 +122,21 @@ def test_return_plan_uses_existing_repository_mapping_without_provisioning(tmp_p
         "round_key": "return-1",
         "package_ref": "return-package",
         "package_digest": "d" * 64,
-        "repositories": [{
-            "repository_origin_id": origin.id,
-            "repository": "org/repo",
-            "target_repository_id": "84",
-            "bundle": {"member": "bundles/return.bundle", "sha256": "e" * 64, "size": 42},
-            "comparison": {
-                "ruleset": "git-refs",
-                "ruleset_version": 1,
-                "original_baseline": {"refs/heads/main": "1" * 40},
-                "confirmed_import": {"refs/heads/main": "1" * 40},
-                "desired": {"refs/heads/main": "2" * 40},
-            },
-        }],
+        "repositories": [
+            {
+                "repository_origin_id": origin.id,
+                "repository": "org/repo",
+                "target_repository_id": "84",
+                "bundle": {"member": "bundles/return.bundle", "sha256": "e" * 64, "size": 42},
+                "comparison": {
+                    "ruleset": "git-refs",
+                    "ruleset_version": 1,
+                    "original_baseline": {"refs/heads/main": "1" * 40},
+                    "confirmed_import": {"refs/heads/main": "1" * 40},
+                    "desired": {"refs/heads/main": "2" * 40},
+                },
+            }
+        ],
     }
 
     plan = prepare_transfer_plan(state, request)

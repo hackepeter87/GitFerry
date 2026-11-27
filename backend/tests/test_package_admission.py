@@ -157,9 +157,7 @@ def test_return_package_admission_requires_forward_receipt_and_existing_replica(
     state.register_instance("a", "A", "https://a.invalid", "a-install")
     state.register_instance("b", "B", "https://b.invalid", "b-install")
     profiles = ProfileService(state)
-    profiles.create(
-        ConnectionProfile("a", "A", "https://a.invalid", "a-install", "admin")
-    )
+    profiles.create(ConnectionProfile("a", "A", "https://a.invalid", "a-install", "admin"))
     identity = json.dumps(
         {
             "account_id": "1",
@@ -199,17 +197,20 @@ def test_return_package_admission_requires_forward_receipt_and_existing_replica(
         "sender": {"instance_key": "b", "installation_marker": "b-install"},
         "recipient": {"instance_key": "a", "installation_marker": "a-install"},
         "forward_reference": {"package_id": "forward-package-1", "digest_sha256": "a" * 64},
-        "repositories": [{
-            "origin": {"instance_key": "a", "global_id": "41"},
-            "repository": "org/repo",
-            "bundle": None,
-            "comparison": {
-                "ruleset": "git-refs", "ruleset_version": 1,
-                "original_baseline": {"refs/heads/main": "1" * 40},
-                "confirmed_import": {"refs/heads/main": "1" * 40},
-                "desired": {"refs/heads/main": "2" * 40},
-            },
-        }],
+        "repositories": [
+            {
+                "origin": {"instance_key": "a", "global_id": "41"},
+                "repository": "org/repo",
+                "bundle": None,
+                "comparison": {
+                    "ruleset": "git-refs",
+                    "ruleset_version": 1,
+                    "original_baseline": {"refs/heads/main": "1" * 40},
+                    "confirmed_import": {"refs/heads/main": "1" * 40},
+                    "desired": {"refs/heads/main": "2" * 40},
+                },
+            }
+        ],
         "limitations": ["No deletion"],
         "deletion_semantics": "absence-does-not-delete",
     }

@@ -17,9 +17,7 @@ def test_fast_forward_change_is_planned_only_when_a_matches_baseline() -> None:
         is_ancestor=lambda old, new: (old, new) == (SHA_A, SHA_B),
     )
 
-    assert plan.changes == (
-        {"ref": "refs/heads/main", "old_oid": SHA_A, "new_oid": SHA_B},
-    )
+    assert plan.changes == ({"ref": "refs/heads/main", "old_oid": SHA_A, "new_oid": SHA_B},)
     assert plan.conflicts == ()
 
 
@@ -101,4 +99,3 @@ def test_symbolic_or_internal_selected_ref_is_a_visible_limitation() -> None:
 def test_ref_maps_are_strict(value: dict[str, str]) -> None:
     with pytest.raises(ValueError, match="invalid ref map"):
         compare_return_refs(value, {}, {}, {})
-

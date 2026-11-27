@@ -113,4 +113,3 @@ def compare_return_refs(
         changes.append({"ref": ref, "old_oid": target_oid, "new_oid": desired_oid})
     unselected = tuple(sorted((set(imported) | set(desired) | set(target)) - selected))
     return RefReturnPlan(tuple(changes), tuple(conflicts), unselected)
-

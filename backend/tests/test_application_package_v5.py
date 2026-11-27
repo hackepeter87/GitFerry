@@ -116,9 +116,7 @@ def test_v5_rejects_self_forward_reference(tmp_path: Path) -> None:
 
 def test_v5_rejects_git_invalid_ref_names(tmp_path: Path) -> None:
     document = return_package()
-    document["repositories"][0]["comparison"]["desired"] = {
-        "refs/heads/invalid..name": "4" * 40
-    }
+    document["repositories"][0]["comparison"]["desired"] = {"refs/heads/invalid..name": "4" * 40}
     with pytest.raises(PackageError, match="invalid ref"):
         write_package(tmp_path, document)
 

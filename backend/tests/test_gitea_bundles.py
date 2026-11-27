@@ -490,15 +490,26 @@ def test_push_return_ref_rejects_drift_and_protected_refs_before_write(
         monkeypatch.setattr(pusher, "_verify_repository_id", lambda *_: None)
         with pytest.raises(GiteaBundleError, match="protected"):
             pusher.push_return_ref(
-                "org/repo", bundle_member=bundle.member, bundle_sha256=bundle.sha256,
-                bundle_size=bundle.size, expected_repository_id="42", ref="refs/heads/master",
-                expected_old_oid=old_oid, desired_oid=new_oid, protected_refs={"refs/heads/master"},
+                "org/repo",
+                bundle_member=bundle.member,
+                bundle_sha256=bundle.sha256,
+                bundle_size=bundle.size,
+                expected_repository_id="42",
+                ref="refs/heads/master",
+                expected_old_oid=old_oid,
+                desired_oid=new_oid,
+                protected_refs={"refs/heads/master"},
             )
         with pytest.raises(GiteaBundleError, match="baseline"):
             pusher.push_return_ref(
-                "org/repo", bundle_member=bundle.member, bundle_sha256=bundle.sha256,
-                bundle_size=bundle.size, expected_repository_id="42", ref="refs/heads/master",
-                expected_old_oid="0" * 40, desired_oid=new_oid,
+                "org/repo",
+                bundle_member=bundle.member,
+                bundle_sha256=bundle.sha256,
+                bundle_size=bundle.size,
+                expected_repository_id="42",
+                ref="refs/heads/master",
+                expected_old_oid="0" * 40,
+                desired_oid=new_oid,
             )
         assert pusher._git_remote("ls-remote", str(remote), None)["refs/heads/master"] == old_oid
 
@@ -517,9 +528,14 @@ def test_push_return_ref_accepts_exact_replay_without_second_push(
         monkeypatch.setattr(pusher, "_repository_url", lambda _: str(remote))
         monkeypatch.setattr(pusher, "_verify_repository_id", lambda *_: None)
         pusher.push_return_ref(
-            "org/repo", bundle_member=bundle.member, bundle_sha256=bundle.sha256,
-            bundle_size=bundle.size, expected_repository_id="42", ref="refs/heads/master",
-            expected_old_oid=old_oid, desired_oid=new_oid,
+            "org/repo",
+            bundle_member=bundle.member,
+            bundle_sha256=bundle.sha256,
+            bundle_size=bundle.size,
+            expected_repository_id="42",
+            ref="refs/heads/master",
+            expected_old_oid=old_oid,
+            desired_oid=new_oid,
         )
         original_run = pusher._run_git
         pushes = 0
@@ -533,9 +549,14 @@ def test_push_return_ref_accepts_exact_replay_without_second_push(
         monkeypatch.setattr(pusher, "_run_git", capture)
         # The method reads the remote first and recognizes the already-confirmed ref.
         result = pusher.push_return_ref(
-            "org/repo", bundle_member=bundle.member, bundle_sha256=bundle.sha256,
-            bundle_size=bundle.size, expected_repository_id="42", ref="refs/heads/master",
-            expected_old_oid=new_oid, desired_oid=new_oid,
+            "org/repo",
+            bundle_member=bundle.member,
+            bundle_sha256=bundle.sha256,
+            bundle_size=bundle.size,
+            expected_repository_id="42",
+            ref="refs/heads/master",
+            expected_old_oid=new_oid,
+            desired_oid=new_oid,
         )
         assert result.target_global_id == "42"
         assert pushes == 0

@@ -351,8 +351,7 @@ def _build_return_selection(
             comparison["original_baseline"],
         )
         conflicts.extend(
-            {"ref": item.ref, "code": item.code, "reason": item.reason}
-            for item in plan.conflicts
+            {"ref": item.ref, "code": item.code, "reason": item.reason} for item in plan.conflicts
         )
         bundle = selected.get("bundle")
         repository_item = {

@@ -325,8 +325,12 @@ def _return_facts(
         connection.execute(
             "INSERT INTO package_receipts VALUES (?,?,?,?,?,?)",
             (
-                document["package_id"], artifact.digest_sha256, target, package_ref,
-                canonical_json(document), now(),
+                document["package_id"],
+                artifact.digest_sha256,
+                target,
+                package_ref,
+                canonical_json(document),
+                now(),
             ),
         )
     return {
