@@ -10,7 +10,16 @@ from typing import Any
 import httpx
 from gitferry.content_inventory import CONTENT_CLASSES
 from gitferry.source_inventory import collect_inventory
-from support import ADMIN, SOURCE_URL, WORK, ProbeFailure, api, flush_fixture_queues, request
+from support import (
+    ADMIN,
+    SOURCE_URL,
+    USER_PASSWORD,
+    WORK,
+    ProbeFailure,
+    api,
+    flush_fixture_queues,
+    request,
+)
 
 ORG = "inventory-qualification"
 SELECTED = f"{ORG}/selected"
@@ -188,6 +197,13 @@ def _seed_metadata(repo: dict[str, Any]) -> dict[str, Any]:
     else:
         pull = pulls[0]
     pidx = pull["number"]
+    for username, permission in (("developer", "write"), ("viewer", "read")):
+        api(
+            SOURCE_URL,
+            "PUT",
+            root + f"/collaborators/{username}",
+            json_body={"permission": permission},
+        )
     if not (_get(SOURCE_URL, root + f"/issues/{pidx}/comments") or []):
         api(
             SOURCE_URL,
@@ -197,18 +213,24 @@ def _seed_metadata(repo: dict[str, Any]) -> dict[str, Any]:
         )
     reviews = _get(SOURCE_URL, root + f"/pulls/{pidx}/reviews") or []
     if not reviews:
-        api(
-            SOURCE_URL,
-            "POST",
-            root + f"/pulls/{pidx}/reviews",
-            json_body={
-                "event": "COMMENT",
-                "body": "Synthetic review",
-                "comments": [
-                    {"path": "README.md", "body": "Synthetic inline comment", "new_position": 1}
-                ],
-            },
-        )
+        for username in ("developer", "viewer"):
+            api(
+                SOURCE_URL,
+                "POST",
+                root + f"/pulls/{pidx}/reviews",
+                auth=(username, USER_PASSWORD),
+                json_body={
+                    "event": "COMMENT",
+                    "body": "Synthetic equal-body review",
+                    "comments": [
+                        {
+                            "path": "README.md",
+                            "body": "Synthetic equal-body inline comment",
+                            "new_position": 1,
+                        }
+                    ],
+                },
+            )
     return {"label": label, "issue": issue, "comment": comment, "release": release, "pull": pull}
 
 
@@ -252,10 +274,17 @@ def _direct_counts() -> dict[str, int | None]:
     reviews = [
         (parent, r) for parent in pulls for r in values(root + f"/pulls/{parent['number']}/reviews")
     ]
+    review_comments = [
+        (parent, review, comment)
+        for parent, review in reviews
+        for comment in values(root + f"/pulls/{parent['number']}/reviews/{review['id']}/comments")
+    ]
     teams = values(root + "/teams")
     releases = values(root + "/releases")
     users = {str(item["user"]["id"]) for item in issues + pulls}
     users.update(str(c["user"]["id"]) for _, c in comments + pull_comments)
+    users.update(str(review["user"]["id"]) for _, review in reviews)
+    users.update(str(comment["user"]["id"]) for _, _, comment in review_comments)
     for team in teams:
         users.update(str(u["id"]) for u in values(f"/teams/{team['id']}/members"))
     counts: dict[str, int | None] = {
@@ -273,10 +302,7 @@ def _direct_counts() -> dict[str, int | None]:
         "releases": len(releases),
         "milestones": len(values(root + "/milestones", state="all")),
         "reviews": len(reviews),
-        "review_comments": sum(
-            len(values(root + f"/pulls/{p['number']}/reviews/{r['id']}/comments"))
-            for p, r in reviews
-        ),
+        "review_comments": len(review_comments),
         "release_assets": sum(len(values(root + f"/releases/{r['id']}/assets")) for r in releases),
         "attachments": sum(
             len(values(root + f"/issues/{p['number']}/assets")) for p in issues + pulls
@@ -458,6 +484,16 @@ def run_content_inventory_probe() -> dict[str, Any]:
     for class_name, native_id in expected_ids.items():
         if not any(item.native_id == native_id for item in by_class[class_name].objects):
             raise ProbeFailure(f"fixture identity missing from {class_name}")
+    review_authors = {item.author["login"] for item in by_class["reviews"].objects if item.author}
+    if not {"developer", "viewer"} <= review_authors:
+        raise ProbeFailure("review fixtures did not retain distinct non-importer native authors")
+    review_bodies = [item.facts.get("body") for item in by_class["reviews"].objects]
+    inline_bodies = [item.facts.get("body") for item in by_class["review_comments"].objects]
+    if (
+        review_bodies.count("Synthetic equal-body review") < 2
+        or inline_bodies.count("Synthetic equal-body inline comment") < 2
+    ):
+        raise ProbeFailure("equal-text reviews/comments were not retained as distinct objects")
     if not by_class["comments"].objects or any(
         item.parent is None for item in by_class["comments"].objects
     ):
@@ -529,6 +565,7 @@ def run_content_inventory_probe() -> dict[str, Any]:
                 "read_only_collection",
                 "control_unread_unchanged",
                 "qualified_empty_reactions",
+                "distinct_review_authors_and_equal_text_origins",
                 "unsupported_counts_unknown",
             )
         },

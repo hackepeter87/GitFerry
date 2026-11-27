@@ -472,6 +472,26 @@ def complete_probe_report() -> dict[str, object]:
         "openapi_and_migration",
     ):
         report[section] = {"status": "passed"}
+    report["openapi_and_migration"]["runtime_openapi"] = {
+        "assertions": {name: True for name in report_contract().ADVANCED_METADATA_ASSERTIONS},
+        "advanced_metadata": {
+            "classification": {
+                name: {
+                    "inventory": "supported",
+                    "first_import": "blocked",
+                    "return_update": "not-supported",
+                    "deletion": "not-supported",
+                }
+                for name in (
+                    "pull_requests",
+                    "reviews",
+                    "inline_review_comments",
+                    "timelines",
+                    "reactions",
+                )
+            }
+        },
+    }
     report["comment_transport_roundtrip"]["status"] = "passed"
     report["portable_transport_roundtrip"]["status"] = "passed"
     return report
@@ -1019,6 +1039,18 @@ def test_ad_gitea_failed_or_missing_status_cannot_pass(status: str | None) -> No
         report["directory_ad"]["gitea"]["status"] = status
     entries = report_contract().evidence_catalog(report, True)
     entry = next(item for item in entries if item["id"] == "separate_samba_ad_claim_qualification")
+    assert entry["status"] == "failed"
+
+
+@pytest.mark.parametrize("assertion", sorted(report_contract().ADVANCED_METADATA_ASSERTIONS))
+def test_advanced_metadata_contract_assertions_are_mandatory(assertion: str) -> None:
+    report = complete_probe_report()
+    del report["openapi_and_migration"]["runtime_openapi"]["assertions"][assertion]
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "advanced_pull_review_timeline_reaction_contract"
+    )
     assert entry["status"] == "failed"
 
 

@@ -55,6 +55,19 @@ def property_names(spec: Mapping[str, Any], name: str) -> tuple[str, ...]:
     return tuple(sorted(str(key) for key in properties))
 
 
+def path_methods(spec: Mapping[str, Any], path: str) -> tuple[str, ...]:
+    paths = spec.get("paths")
+    if not isinstance(paths, Mapping) or not isinstance(paths.get(path), Mapping):
+        raise ProbeFailure(f"runtime Swagger path {path!r} is missing")
+    return tuple(
+        sorted(
+            str(method).upper()
+            for method in paths[path]
+            if str(method).lower() in {"get", "post", "patch", "put", "delete"}
+        )
+    )
+
+
 def runtime_openapi_probe() -> dict[str, Any]:
     source = swagger(SOURCE_URL)
     target = swagger(TARGET_URL)
@@ -72,6 +85,41 @@ def runtime_openapi_probe() -> dict[str, Any]:
     migrate = property_names(source, "MigrateRepoOptions")
     migrate_service = definition(source, "MigrateRepoOptions")["properties"]["service"]
     migrate_service_enum = tuple(migrate_service.get("enum", ()))
+    advanced_requests = {
+        name: property_names(source, name)
+        for name in (
+            "CreatePullRequestOption",
+            "EditPullRequestOption",
+            "CreatePullReviewOptions",
+            "CreatePullReviewComment",
+            "SubmitPullReviewOptions",
+            "DismissPullReviewOptions",
+            "EditReactionOption",
+        )
+    }
+    advanced_responses = {
+        name: property_names(source, name)
+        for name in (
+            "PullRequest",
+            "PullReview",
+            "PullReviewComment",
+            "TimelineComment",
+            "Reaction",
+        )
+    }
+    advanced_paths = {
+        path: path_methods(source, path)
+        for path in (
+            "/repos/{owner}/{repo}/pulls",
+            "/repos/{owner}/{repo}/pulls/{index}",
+            "/repos/{owner}/{repo}/pulls/{index}/reviews",
+            "/repos/{owner}/{repo}/pulls/{index}/reviews/{id}",
+            "/repos/{owner}/{repo}/pulls/{index}/reviews/{id}/comments",
+            "/repos/{owner}/{repo}/issues/{index}/timeline",
+            "/repos/{owner}/{repo}/issues/{index}/reactions",
+            "/repos/{owner}/{repo}/issues/comments/{id}/reactions",
+        )
+    }
 
     assertions = {
         "source_target_schema_digest_equal": source_digest == target_digest,
@@ -87,6 +135,63 @@ def runtime_openapi_probe() -> dict[str, Any]:
         "comment_response_exposes_native_author": "user" in comment_response,
         "repository_migration_accepts_issues": "issues" in migrate,
         "repository_migration_accepts_gitea_service": "gitea" in migrate_service_enum,
+        "pull_create_requires_refs_without_author_or_time": (
+            {"base", "head", "title"} <= set(advanced_requests["CreatePullRequestOption"])
+            and {"id", "number", "user", "created_at", "updated_at"}.isdisjoint(
+                advanced_requests["CreatePullRequestOption"]
+            )
+        ),
+        "pull_response_exposes_refs_identity_author_and_times": (
+            {"id", "number", "user", "created_at", "updated_at", "head", "base"}
+            <= set(advanced_responses["PullRequest"])
+        ),
+        "pull_patch_has_no_atomic_version_precondition": (
+            {"title", "body", "state", "base"} <= set(advanced_requests["EditPullRequestOption"])
+            and {"etag", "if_match", "updated_at"}.isdisjoint(
+                advanced_requests["EditPullRequestOption"]
+            )
+        ),
+        "review_create_accepts_nested_positions_without_author_or_time": (
+            {"body", "comments", "commit_id", "event"}
+            <= set(advanced_requests["CreatePullReviewOptions"])
+            and {"body", "path", "new_position", "old_position"}
+            <= set(advanced_requests["CreatePullReviewComment"])
+            and {"id", "user", "submitted_at", "created_at"}.isdisjoint(
+                advanced_requests["CreatePullReviewOptions"]
+            )
+        ),
+        "review_response_exposes_identity_author_state_and_times": (
+            {"id", "user", "state", "commit_id", "submitted_at", "updated_at"}
+            <= set(advanced_responses["PullReview"])
+        ),
+        "inline_response_exposes_review_parent_positions_author_and_times": (
+            {
+                "id",
+                "user",
+                "pull_request_review_id",
+                "path",
+                "position",
+                "original_position",
+                "created_at",
+                "updated_at",
+            }
+            <= set(advanced_responses["PullReviewComment"])
+        ),
+        "review_comments_have_no_update_or_delete_route": advanced_paths[
+            "/repos/{owner}/{repo}/pulls/{index}/reviews/{id}/comments"
+        ]
+        == ("GET",),
+        "timeline_is_read_only": advanced_paths["/repos/{owner}/{repo}/issues/{index}/timeline"]
+        == ("GET",),
+        "reaction_contract_is_natural_key_without_native_id": (
+            advanced_paths["/repos/{owner}/{repo}/issues/{index}/reactions"]
+            == ("DELETE", "GET", "POST")
+            and advanced_paths["/repos/{owner}/{repo}/issues/comments/{id}/reactions"]
+            == ("DELETE", "GET", "POST")
+            and set(advanced_requests["EditReactionOption"]) == {"content"}
+            and {"content", "created_at", "user"} <= set(advanced_responses["Reaction"])
+            and {"id", "updated_at"}.isdisjoint(advanced_responses["Reaction"])
+        ),
     }
     if not all(assertions.values()):
         raise ProbeFailure(f"runtime OpenAPI assertion failed: {assertions}")
@@ -110,6 +215,43 @@ def runtime_openapi_probe() -> dict[str, Any]:
                 for field in ("id", "user", "original_author", "created_at", "updated_at")
                 if field in comment_response
             ),
+        },
+        "advanced_metadata": {
+            "request_fields": advanced_requests,
+            "response_fields": advanced_responses,
+            "path_methods": advanced_paths,
+            "classification": {
+                "pull_requests": {
+                    "inventory": "supported",
+                    "first_import": "blocked-required-refs-and-author-fidelity",
+                    "return_update": "blocked-no-atomic-version-precondition",
+                    "deletion": "not-supported",
+                },
+                "reviews": {
+                    "inventory": "supported",
+                    "first_import": "blocked-commit-and-author-fidelity",
+                    "return_update": "not-supported",
+                    "deletion": "draft-review-only-not-portable",
+                },
+                "inline_review_comments": {
+                    "inventory": "supported",
+                    "first_import": "blocked-review-parent-and-diff-position",
+                    "return_update": "not-supported",
+                    "deletion": "not-supported",
+                },
+                "timelines": {
+                    "inventory": "supported",
+                    "first_import": "not-supported-read-only-api",
+                    "return_update": "not-supported-read-only-api",
+                    "deletion": "not-supported-read-only-api",
+                },
+                "reactions": {
+                    "inventory": "supported-with-natural-key",
+                    "first_import": "blocked-no-native-id-or-historical-time",
+                    "return_update": "not-applicable-create-delete-set",
+                    "deletion": "available-but-not-enabled",
+                },
+            },
         },
         "assertions": assertions,
     }

@@ -67,6 +67,7 @@ INVENTORY_ASSERTIONS = frozenset(
         "read_only_collection",
         "control_unread_unchanged",
         "qualified_empty_reactions",
+        "distinct_review_authors_and_equal_text_origins",
         "unsupported_counts_unknown",
     }
 )
@@ -122,6 +123,20 @@ NATIVE_NEGATIVE_ASSERTIONS = frozenset(
     }
 )
 
+ADVANCED_METADATA_ASSERTIONS = frozenset(
+    {
+        "pull_create_requires_refs_without_author_or_time",
+        "pull_response_exposes_refs_identity_author_and_times",
+        "pull_patch_has_no_atomic_version_precondition",
+        "review_create_accepts_nested_positions_without_author_or_time",
+        "review_response_exposes_identity_author_state_and_times",
+        "inline_response_exposes_review_parent_positions_author_and_times",
+        "review_comments_have_no_update_or_delete_route",
+        "timeline_is_read_only",
+        "reaction_contract_is_natural_key_without_native_id",
+    }
+)
+
 
 def _inventory_evidence(report: dict[str, Any]) -> bool:
     counts = _value(report, "content_inventory.counts")
@@ -136,6 +151,27 @@ def _inventory_evidence(report: dict[str, Any]) -> bool:
         and counts.get("lfs") is None
         and counts.get("other_content") is None
         and _value(report, "content_inventory.source_writes_during_collection") == 0
+    )
+
+
+def _advanced_metadata_evidence(report: dict[str, Any]) -> bool:
+    contract = _value(report, "openapi_and_migration.runtime_openapi.advanced_metadata")
+    classifications = contract.get("classification") if isinstance(contract, dict) else None
+    return (
+        _all_required_true(
+            report,
+            "openapi_and_migration.runtime_openapi.assertions",
+            ADVANCED_METADATA_ASSERTIONS,
+        )
+        and isinstance(classifications, dict)
+        and set(classifications)
+        == {"pull_requests", "reviews", "inline_review_comments", "timelines", "reactions"}
+        and all(
+            isinstance(value, dict)
+            and set(value) == {"inventory", "first_import", "return_update", "deletion"}
+            and all(isinstance(item, str) and item for item in value.values())
+            for value in classifications.values()
+        )
     )
 
 
@@ -611,6 +647,12 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
             is True,
             "tests/integration/content_inventory_probe.py",
             "content_inventory",
+        ),
+        (
+            "advanced_pull_review_timeline_reaction_contract",
+            _advanced_metadata_evidence(report),
+            "tests/integration/openapi_migration_probe.py",
+            "openapi_and_migration.runtime_openapi.advanced_metadata",
         ),
         (
             "native_payload_capture_and_restart_safety",

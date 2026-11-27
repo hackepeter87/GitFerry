@@ -233,6 +233,23 @@ def test_summary_distinguishes_complete_ready_full_transfer_and_exclusions() -> 
     ) - set(TRANSFER_CLASSES)
 
 
+def test_advanced_pr_metadata_is_visible_but_never_transfer_ready() -> None:
+    advanced = {
+        "pull_requests",
+        "pull_comments",
+        "reviews",
+        "review_comments",
+        "timelines",
+        "reactions",
+    }
+    assert advanced.isdisjoint(TRANSFER_CLASSES)
+    document = parse_inventory(_document(requested_classes=sorted(advanced)))
+    summary = inventory_summary(document)
+    assert summary["inventory_complete"] is True
+    assert summary["transfer_ready"] is False
+    assert {item["content_class"] for item in summary["blockers"]} == advanced
+
+
 @pytest.mark.parametrize(
     ("content_class", "mutate", "reason"),
     [
