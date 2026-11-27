@@ -23,6 +23,7 @@ from .git_bundle import (
     import_git_bundle,
 )
 from .git_refs import is_ref_map, ref_confirmation
+from .operations import RemoteWriteConflict
 from .provisioning import BundleIntent
 from .source_snapshot import SourceSnapshotError, read_repository_identity
 from .state_store import TargetConfirmation
@@ -322,33 +323,24 @@ class GiteaBundlePusher(AbstractContextManager["GiteaBundlePusher"]):
         selected ref may change; all other refs must remain byte-for-byte equal.
         """
 
-        if not is_ref_map({ref: desired_oid}):
-            raise GiteaBundleError("invalid return ref or object id")
-        if expected_old_oid is not None and not is_ref_map({ref: expected_old_oid}):
-            raise GiteaBundleError("invalid expected return ref object id")
-        if ref not in protected_refs and not (
-            ref.startswith("refs/heads/") or ref.startswith("refs/tags/")
-        ):
-            raise GiteaBundleError("only branch and tag refs can be returned")
-        if ref in protected_refs:
-            raise GiteaBundleError("selected ref is protected")
-        if ref.startswith("refs/tags/") and expected_old_oid is not None:
-            raise GiteaBundleError("existing tag changes are not supported")
-
         bundle = BundleIntent(bundle_member, bundle_sha256, bundle_size)
-        imported = self.preflight(bundle)
         try:
-            self._run_git(["cat-file", "-e", desired_oid], cwd=imported.destination)
-        except GiteaBundleError:
-            raise GiteaBundleError(
-                "desired Git object is not present in the return bundle"
+            imported = self.preflight(bundle)
+            current = self._check_return_ref(
+                repository,
+                imported.destination,
+                expected_repository_id=expected_repository_id,
+                ref=ref,
+                expected_old_oid=expected_old_oid,
+                desired_oid=desired_oid,
+                protected_refs=protected_refs,
+            )
+        except GiteaBundleError as exc:
+            raise RemoteWriteConflict(
+                str(exc),
+                conflict_type="git-ref-precondition",
+                evidence={"write_attempted": False, "repository": repository, "ref": ref},
             ) from None
-
-        self._verify_repository_id(repository, expected_repository_id)
-        url = self._repository_url(repository)
-        current = self._git_remote("ls-remote", url, None)
-        if current.get(ref) != expected_old_oid:
-            raise GiteaBundleError("target selected ref differs from the expected baseline")
         if current.get(ref) == desired_oid:
             return TargetConfirmation(
                 expected_repository_id,
@@ -356,15 +348,7 @@ class GiteaBundlePusher(AbstractContextManager["GiteaBundlePusher"]):
                 observed_state=ref_confirmation(current),
             )
 
-        if ref.startswith("refs/heads/") and expected_old_oid is not None:
-            try:
-                self._run_git(
-                    ["merge-base", "--is-ancestor", expected_old_oid, desired_oid],
-                    cwd=imported.destination,
-                )
-            except GiteaBundleError:
-                raise GiteaBundleError("return branch update is not a fast-forward") from None
-
+        url = self._repository_url(repository)
         self._run_git(["push", "--atomic", url, f"{desired_oid}:{ref}"], cwd=imported.destination)
         observed = self._git_remote("ls-remote", url, None)
         if observed.get(ref) != desired_oid:
@@ -378,6 +362,75 @@ class GiteaBundlePusher(AbstractContextManager["GiteaBundlePusher"]):
             None,
             observed_state=ref_confirmation(observed),
         )
+
+    def preflight_return_ref(
+        self,
+        repository: str,
+        *,
+        bundle_member: str,
+        bundle_sha256: str,
+        bundle_size: int,
+        expected_repository_id: str,
+        ref: str,
+        expected_old_oid: str | None,
+        desired_oid: str,
+        protected_refs: set[str] | frozenset[str] = frozenset(),
+    ) -> dict[str, str]:
+        """Prove every deterministic return precondition without a remote write."""
+
+        imported = self.preflight(BundleIntent(bundle_member, bundle_sha256, bundle_size))
+        return self._check_return_ref(
+            repository,
+            imported.destination,
+            expected_repository_id=expected_repository_id,
+            ref=ref,
+            expected_old_oid=expected_old_oid,
+            desired_oid=desired_oid,
+            protected_refs=protected_refs,
+        )
+
+    def _check_return_ref(
+        self,
+        repository: str,
+        imported_repository: Path,
+        *,
+        expected_repository_id: str,
+        ref: str,
+        expected_old_oid: str | None,
+        desired_oid: str,
+        protected_refs: set[str] | frozenset[str],
+    ) -> dict[str, str]:
+        if not is_ref_map({ref: desired_oid}):
+            raise GiteaBundleError("invalid return ref or object id")
+        if expected_old_oid is not None and not is_ref_map({ref: expected_old_oid}):
+            raise GiteaBundleError("invalid expected return ref object id")
+        if ref not in protected_refs and not (
+            ref.startswith("refs/heads/") or ref.startswith("refs/tags/")
+        ):
+            raise GiteaBundleError("only branch and tag refs can be returned")
+        if ref in protected_refs:
+            raise GiteaBundleError("selected ref is protected")
+        if ref.startswith("refs/tags/") and expected_old_oid is not None:
+            raise GiteaBundleError("existing tag changes are not supported")
+        try:
+            self._run_git(["cat-file", "-e", desired_oid], cwd=imported_repository)
+        except GiteaBundleError:
+            raise GiteaBundleError(
+                "desired Git object is not present in the return bundle"
+            ) from None
+        self._verify_repository_id(repository, expected_repository_id)
+        current = self._git_remote("ls-remote", self._repository_url(repository), None)
+        if current.get(ref) != expected_old_oid:
+            raise GiteaBundleError("target selected ref differs from the expected baseline")
+        if ref.startswith("refs/heads/") and expected_old_oid is not None:
+            try:
+                self._run_git(
+                    ["merge-base", "--is-ancestor", expected_old_oid, desired_oid],
+                    cwd=imported_repository,
+                )
+            except GiteaBundleError:
+                raise GiteaBundleError("return branch update is not a fast-forward") from None
+        return current
 
     def _verify_repository_id(self, repository: str, expected: str) -> None:
         if not _REPOSITORY.fullmatch(repository):

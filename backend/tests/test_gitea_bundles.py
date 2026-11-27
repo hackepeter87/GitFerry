@@ -7,6 +7,7 @@ import pytest
 from gitferry.git_bundle import create_git_bundle
 from gitferry.git_refs import ref_confirmation
 from gitferry.gitea_bundles import GiteaBundleError, GiteaBundlePusher
+from gitferry.operations import RemoteWriteConflict
 from gitferry.provisioning import BundleIntent
 
 
@@ -490,7 +491,7 @@ def test_push_return_ref_rejects_drift_and_protected_refs_before_write(
     ) as pusher:
         monkeypatch.setattr(pusher, "_repository_url", lambda _: str(remote))
         monkeypatch.setattr(pusher, "_verify_repository_id", lambda *_: None)
-        with pytest.raises(GiteaBundleError, match="protected"):
+        with pytest.raises(RemoteWriteConflict, match="protected") as protected:
             pusher.push_return_ref(
                 "org/repo",
                 bundle_member=bundle.member,
@@ -502,7 +503,8 @@ def test_push_return_ref_rejects_drift_and_protected_refs_before_write(
                 desired_oid=new_oid,
                 protected_refs={"refs/heads/master"},
             )
-        with pytest.raises(GiteaBundleError, match="baseline"):
+        assert protected.value.evidence["write_attempted"] is False
+        with pytest.raises(RemoteWriteConflict, match="baseline") as drift:
             pusher.push_return_ref(
                 "org/repo",
                 bundle_member=bundle.member,
@@ -513,6 +515,7 @@ def test_push_return_ref_rejects_drift_and_protected_refs_before_write(
                 expected_old_oid="0" * 40,
                 desired_oid=new_oid,
             )
+        assert drift.value.evidence["write_attempted"] is False
         assert pusher._git_remote("ls-remote", str(remote), None)["refs/heads/master"] == old_oid
 
 

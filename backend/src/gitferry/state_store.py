@@ -1480,7 +1480,7 @@ class StateStore:
         reason: str,
         evidence: Mapping[str, Any],
     ) -> OperationRecord:
-        """Atomically halt a prepared operation and retain its conflict evidence."""
+        """Atomically halt a prepared or verified-not-written operation."""
 
         _require_text(conflict_type, "conflict_type")
         _require_text(reason, "reason")
@@ -1497,10 +1497,11 @@ class StateStore:
             if row["status"] == "conflict":
                 connection.commit()
                 return self.get_operation(operation_id)
-            if row["status"] != "prepared":
+            if row["status"] not in {"prepared", "executing"}:
                 raise OperationBlocked(
                     f"operation {operation_id} cannot conflict from {row['status']}"
                 )
+            from_status = str(row["status"])
             connection.execute(
                 "UPDATE operations SET status = 'conflict', error_reason = ?, updated_at = ? "
                 "WHERE operation_id = ?",
@@ -1509,8 +1510,8 @@ class StateStore:
             connection.execute(
                 "INSERT INTO operation_events "
                 "(operation_id, from_status, to_status, reason, evidence_json, created_at) "
-                "VALUES (?, 'prepared', 'conflict', ?, ?, ?)",
-                (operation_id, reason, evidence_json, timestamp),
+                "VALUES (?, ?, 'conflict', ?, ?, ?)",
+                (operation_id, from_status, reason, evidence_json, timestamp),
             )
             connection.execute(
                 "INSERT INTO conflicts VALUES (?, ?, ?, ?, ?, 'open', ?, NULL)",

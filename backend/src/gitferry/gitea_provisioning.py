@@ -5,10 +5,13 @@ from __future__ import annotations
 import re
 import ssl
 from collections.abc import Mapping
+from fnmatch import fnmatchcase
 from typing import Any
 from urllib.parse import quote
 
 import httpx
+
+from .git_refs import valid_ref
 
 
 class ProvisioningTargetConflict(RuntimeError):
@@ -132,6 +135,23 @@ class GiteaProvisioningClient:
     def find_repository(self, repository: str) -> dict[str, Any] | None:
         owner, name = _repository_segments(repository)
         return self._optional_object(f"/repos/{owner}/{name}")
+
+    def is_branch_protected(self, repository: str, branch: str) -> bool:
+        """Read live target rules; malformed rules fail closed."""
+
+        owner, name = _repository_segments(repository)
+        if not valid_ref(f"refs/heads/{branch}"):
+            raise ProvisioningTargetConflict("invalid Gitea branch")
+        value = self._request("GET", f"/repos/{owner}/{name}/branch_protections").json()
+        if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+            raise ProvisioningTargetConflict("Gitea branch protection response is invalid")
+        for item in value:
+            rule = item.get("rule_name") or item.get("branch_name")
+            if not isinstance(rule, str) or not rule:
+                raise ProvisioningTargetConflict("Gitea branch protection rule is invalid")
+            if fnmatchcase(branch, rule):
+                return True
+        return False
 
     def assign_team_repository(self, team_id: str, repository: str) -> dict[str, Any]:
         team_path = _numeric_path_segment(team_id, "team id")

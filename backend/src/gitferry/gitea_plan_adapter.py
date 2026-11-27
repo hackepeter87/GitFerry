@@ -489,6 +489,23 @@ class GiteaPlanAdapter:
                             raise OperationBlocked(
                                 "return bundle does not contain the intended ref"
                             )
+                        ref = str(operation.intent["ref"])
+                        protected_refs: set[str] = set()
+                        if ref.startswith("refs/heads/") and self.admin.is_branch_protected(
+                            repository.repository, ref.removeprefix("refs/heads/")
+                        ):
+                            protected_refs.add(ref)
+                        self.bundles.preflight_return_ref(
+                            repository.repository,
+                            bundle_member=operation.intent["bundle"]["member"],
+                            bundle_sha256=operation.intent["bundle"]["sha256"],
+                            bundle_size=operation.intent["bundle"]["size"],
+                            expected_repository_id=str(operation.intent["repository_id"]),
+                            ref=ref,
+                            expected_old_oid=operation.intent["old_oid"],
+                            desired_oid=str(operation.intent["new_oid"]),
+                            protected_refs=protected_refs,
+                        )
                     continue
                 if self.content_inventory is not None and self.bundles._local_refs(
                     imported.destination
@@ -538,17 +555,24 @@ class GiteaPlanAdapter:
                 def remote_write(
                     intent: dict[str, Any], scope: str = target_scope
                 ) -> TargetConfirmation:
-                    if self.bundles is None:
+                    if self.bundles is None or self.admin is None:
                         raise OperationBlocked("return execution requires bundle preflight")
+                    ref = str(intent["ref"])
+                    protected_refs: set[str] = set()
+                    if ref.startswith("refs/heads/") and self.admin.is_branch_protected(
+                        scope, ref.removeprefix("refs/heads/")
+                    ):
+                        protected_refs.add(ref)
                     return self.bundles.push_return_ref(
                         scope,
                         bundle_member=intent["bundle"]["member"],
                         bundle_sha256=intent["bundle"]["sha256"],
                         bundle_size=intent["bundle"]["size"],
                         expected_repository_id=str(intent["repository_id"]),
-                        ref=str(intent["ref"]),
+                        ref=ref,
                         expected_old_oid=intent["old_oid"],
                         desired_oid=str(intent["new_oid"]),
+                        protected_refs=protected_refs,
                     )
 
                 result = executor.execute(operation.operation_id, remote_write)

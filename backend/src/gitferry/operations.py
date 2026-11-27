@@ -27,6 +27,21 @@ class OutcomeUnknownError(RuntimeError):
     """Signals that a remote write may have succeeded without a usable response."""
 
 
+class RemoteWriteConflict(RuntimeError):
+    """Signals a verified pre-write refusal; the external write was not attempted."""
+
+    def __init__(
+        self,
+        reason: str,
+        *,
+        conflict_type: str = "remote-precondition",
+        evidence: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(reason)
+        self.conflict_type = conflict_type
+        self.evidence = evidence or {"write_attempted": False}
+
+
 class OperationExecutor:
     """Own the local writer lock while external calls run outside SQLite transactions."""
 
@@ -103,6 +118,16 @@ class OperationExecutor:
             return operation
         try:
             target = remote_write(operation.intent)
+        except RemoteWriteConflict as exc:
+            self.state.mark_operation_conflict(
+                operation_id,
+                conflict_type=exc.conflict_type,
+                reason=str(exc),
+                evidence=exc.evidence,
+            )
+            raise OperationBlocked(
+                f"operation {operation_id} has a verified pre-write conflict"
+            ) from exc
         except Exception as exc:
             reason = f"remote write outcome is unknown: {exc}"
             self.state.mark_outcome_unknown(operation_id, reason)
@@ -119,5 +144,6 @@ __all__ = [
     "OperationBlocked",
     "OperationExecutor",
     "OutcomeUnknownError",
+    "RemoteWriteConflict",
     "TargetConfirmation",
 ]

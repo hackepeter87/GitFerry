@@ -10,6 +10,7 @@ from gitferry.operations import (
     OperationBlocked,
     OperationExecutor,
     OutcomeUnknownError,
+    RemoteWriteConflict,
     TargetConfirmation,
 )
 from gitferry.state_store import MappingConflict, OriginKey, StateStore
@@ -82,6 +83,28 @@ def test_lost_response_is_persisted_unknown_and_never_retried(tmp_path: Path) ->
 
     assert calls == 1
     assert state.get_operation("op-create-17").status == "outcome_unknown"
+
+
+def test_verified_pre_write_refusal_is_conflict_not_unknown(tmp_path: Path) -> None:
+    state = prepared_store(tmp_path)
+
+    def refused(_: dict[str, Any]) -> TargetConfirmation:
+        raise RemoteWriteConflict(
+            "target ref differs from the reviewed baseline",
+            conflict_type="git-ref-drift",
+            evidence={"write_attempted": False, "ref": "refs/heads/main"},
+        )
+
+    with OperationExecutor(state, "executor-conflict") as executor:
+        with pytest.raises(OperationBlocked, match="verified pre-write conflict"):
+            executor.execute("op-create-17", refused)
+
+    operation = state.get_operation("op-create-17")
+    assert operation.status == "conflict"
+    assert operation.error_reason == "target ref differs from the reviewed baseline"
+    evidence = state.operation_evidence(operation.operation_id)
+    assert evidence["events"][-1]["from"] == "executing"
+    assert evidence["conflicts"][-1]["type"] == "git-ref-drift"
 
 
 def test_interrupted_executing_state_becomes_unknown_on_next_executor_session(
