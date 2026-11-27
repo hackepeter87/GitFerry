@@ -244,6 +244,7 @@ def test_return_package_admission_requires_forward_receipt_and_existing_replica(
     selection = reviewed["selection"]
     request = parse_plan_request(selection["request"])
     assert request.mode == "return"
+    assert request.unsupported_items == []
     assert request.repositories[0].return_repository_id == "41"
     assert request.repositories[0].return_comparison is not None
     prepared = service.prepare_plan(

@@ -381,7 +381,10 @@ def _build_return_selection(
         "metadata": [],
         "content": [],
         "author_credential_refs": {},
-        "unsupported_items": list(document["limitations"]),
+        # Package limitations remain visible in the admission review, but they
+        # are not selected content. Only an actual unsupported selection may
+        # block plan execution.
+        "unsupported_items": [],
     }
     return {
         "request": request,
