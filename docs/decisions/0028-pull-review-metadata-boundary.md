@@ -8,8 +8,10 @@ Accepted
 
 Gitea exposes pull requests, reviews, inline review comments, timelines and reactions through
 different APIs and identity namespaces. Treating them as ordinary issues/comments would lose ref,
-commit, diff-position, parent, author or ordering meaning. Gitea 28.4.0 exposes useful create routes,
-but route availability alone does not establish a safe offline roundtrip.
+commit, diff-position, parent, author or ordering meaning. Gitea 28.4.0 exposes useful create and
+state-transition routes plus a PR `content_version` guard, but route availability alone does not
+establish a safe offline roundtrip. The guard rejects already stale content and performs a DB
+content check; Gitea still documents a transaction gap around a multi-field PR PATCH.
 
 ## Decision
 

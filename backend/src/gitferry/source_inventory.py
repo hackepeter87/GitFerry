@@ -474,18 +474,31 @@ def _issues(
                 "state",
                 "created_at",
                 "updated_at",
+                "closed_at",
                 "is_locked",
                 "merged",
+                "merged_at",
                 "merge_commit_sha",
+                "content_version",
             ),
             issue=True,
         )
+        if value.get("merged_by") is not None:
+            item.facts["merged_by"] = _user(value["merged_by"], "pull merger")
         for side in ("head", "base"):
             if side in value:
                 ref = value[side]
                 if not isinstance(ref, dict):
                     raise SourceSnapshotError("pull ref is malformed")
                 item.facts[side] = {key: ref[key] for key in ("sha", "ref") if key in ref}
+                repo = ref.get("repo")
+                if repo is not None:
+                    if not isinstance(repo, dict) or not isinstance(repo.get("full_name"), str):
+                        raise SourceSnapshotError("pull ref repository is malformed")
+                    item.facts[side]["repository"] = {
+                        "global_id": str(_id(repo.get("id"), "pull ref repository")),
+                        "full_name": repo["full_name"],
+                    }
         objects.append(item)
     return _observed(name, objects)
 
@@ -656,23 +669,24 @@ def _review_comments(
         ):
             if value.get("pull_request_review_id") != int(parent.native_id or "0"):
                 raise SourceSnapshotError("review comment parent differs")
-            objects.append(
-                _object(
-                    value,
-                    "global-review-comment-id",
-                    (
-                        "body",
-                        "path",
-                        "position",
-                        "original_position",
-                        "created_at",
-                        "updated_at",
-                        "commit_id",
-                        "original_commit_id",
-                    ),
-                    parent=_parent("reviews", parent),
-                )
+            item = _object(
+                value,
+                "global-review-comment-id",
+                (
+                    "body",
+                    "path",
+                    "position",
+                    "original_position",
+                    "created_at",
+                    "updated_at",
+                    "commit_id",
+                    "original_commit_id",
+                ),
+                parent=_parent("reviews", parent),
             )
+            if value.get("resolver") is not None:
+                item.facts["resolver"] = _user(value["resolver"], "review comment resolver")
+            objects.append(item)
     return _observed("review_comments", objects)
 
 
@@ -706,6 +720,12 @@ def _identities(
                 add(item.author)
             for assignee in item.facts.get("assignees", []):
                 add({"account_id": assignee["global_id"], "login": assignee["login"]})
+            resolver = item.facts.get("resolver")
+            if isinstance(resolver, dict):
+                add({"account_id": resolver["global_id"], "login": resolver["login"]})
+            merged_by = item.facts.get("merged_by")
+            if isinstance(merged_by, dict):
+                add({"account_id": merged_by["global_id"], "login": merged_by["login"]})
     for team in observations["teams"].objects if "teams" in required else []:
         for member in team.facts["members"]:
             add({"account_id": member["global_id"], "login": member["login"]})

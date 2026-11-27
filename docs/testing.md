@@ -928,6 +928,13 @@ methods from both live Gitea 28.4.0 instances. The report contract requires the 
 assertions and support classification, so a missing endpoint or silently skipped check fails the
 integration gate.
 
+The same fixture verifies captured head/base refs and SHAs, PR state/merge facts, review commit and
+inline-position relationships, timeline API ordering, reply and resolve transitions, and distinct
+review authors. A live `content_version` PATCH succeeds with the current value; reusing the stale
+value returns 409 without applying stale title/body fields. This is an optimistic PR-content guard,
+not a complete GitFerry PR return adapter or a claim that Gitea wraps every multi-field mutation in
+one transaction.
+
 These classes are inventory-only. Export and plan review disclose the ref/author/position/timestamp
 limits before execution; they do not enqueue target writes. Details and the separate
 first-import/update/deletion classification are in

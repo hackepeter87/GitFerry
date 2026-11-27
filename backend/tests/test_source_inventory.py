@@ -8,6 +8,7 @@ from gitferry.content_inventory import CONTENT_CLASSES, ClassObservation, Invent
 from gitferry.source_inventory import (
     InventoryCollectionError,
     _comments,
+    _identities,
     _InventoryReader,
     _issues,
     _object,
@@ -94,7 +95,24 @@ def test_issue_and_pull_request_objects_and_children_keep_distinct_parents() -> 
             return httpx.Response(
                 200,
                 headers={"X-Total-Count": "1"},
-                json=[{"id": 4, "number": 4, "title": "pull"}],
+                json=[
+                    {
+                        "id": 4,
+                        "number": 4,
+                        "title": "pull",
+                        "content_version": 3,
+                        "head": {
+                            "ref": "feature",
+                            "sha": "a" * 40,
+                            "repo": {"id": 9, "full_name": "acme/one"},
+                        },
+                        "base": {
+                            "ref": "main",
+                            "sha": "b" * 40,
+                            "repo": {"id": 9, "full_name": "acme/one"},
+                        },
+                    }
+                ],
             )
         if path.endswith("/issues/3/comments"):
             return httpx.Response(200, headers={"X-Total-Count": "1"}, json=[{"id": 31}])
@@ -106,7 +124,15 @@ def test_issue_and_pull_request_objects_and_children_keep_distinct_parents() -> 
             )
         if path.endswith("/pulls/4/reviews/41/comments"):
             return httpx.Response(
-                200, json=[{"id": 411, "pull_request_review_id": 41, "body": "review note"}]
+                200,
+                json=[
+                    {
+                        "id": 411,
+                        "pull_request_review_id": 41,
+                        "body": "review note",
+                        "resolver": {"id": 7, "login": "resolver"},
+                    }
+                ],
             )
         raise AssertionError(path)
 
@@ -131,6 +157,11 @@ def test_issue_and_pull_request_objects_and_children_keep_distinct_parents() -> 
     assert (
         pull_request.status == "observed" and pull_request.objects[0].namespace == "global-pull-id"
     )
+    assert pull_request.objects[0].facts["content_version"] == 3
+    assert pull_request.objects[0].facts["head"]["repository"] == {
+        "global_id": "9",
+        "full_name": "acme/one",
+    }
 
 
 def test_comments_reviews_and_review_comments_reference_their_native_parent_class() -> None:
@@ -146,7 +177,15 @@ def test_comments_reviews_and_review_comments_reference_their_native_parent_clas
             )
         if path.endswith("/pulls/4/reviews/41/comments"):
             return httpx.Response(
-                200, json=[{"id": 411, "pull_request_review_id": 41, "body": "review note"}]
+                200,
+                json=[
+                    {
+                        "id": 411,
+                        "pull_request_review_id": 41,
+                        "body": "review note",
+                        "resolver": {"id": 7, "login": "resolver"},
+                    }
+                ],
             )
         raise AssertionError(path)
 
@@ -180,6 +219,15 @@ def test_comments_reviews_and_review_comments_reference_their_native_parent_clas
     assert pull_comments.objects[0].parent == {"content_class": "pull_requests", "key": "4"}
     assert reviews.objects[0].parent == {"content_class": "pull_requests", "key": "4"}
     assert review_comments.objects[0].parent == {"content_class": "reviews", "key": "41"}
+    assert review_comments.objects[0].facts["resolver"] == {
+        "global_id": "7",
+        "login": "resolver",
+    }
+    identities = _identities(
+        {"reviews": reviews, "review_comments": review_comments},
+        ["reviews", "review_comments"],
+    )
+    assert any(item.facts["login"] == "resolver" for item in identities.objects)
 
 
 def test_equal_review_text_keeps_distinct_native_origins_and_body_is_not_identity() -> None:

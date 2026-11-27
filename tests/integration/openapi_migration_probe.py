@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 from permissions_probe import ORG, AccessContext
+from report_contract import ADVANCED_METADATA_CLASSIFICATION
 from support import (
     ADMIN,
     ADMIN_PASSWORD,
@@ -92,6 +93,7 @@ def runtime_openapi_probe() -> dict[str, Any]:
             "EditPullRequestOption",
             "CreatePullReviewOptions",
             "CreatePullReviewComment",
+            "CreatePullReviewCommentReplyOptions",
             "SubmitPullReviewOptions",
             "DismissPullReviewOptions",
             "EditReactionOption",
@@ -115,6 +117,9 @@ def runtime_openapi_probe() -> dict[str, Any]:
             "/repos/{owner}/{repo}/pulls/{index}/reviews",
             "/repos/{owner}/{repo}/pulls/{index}/reviews/{id}",
             "/repos/{owner}/{repo}/pulls/{index}/reviews/{id}/comments",
+            "/repos/{owner}/{repo}/pulls/{index}/comments/{id}/replies",
+            "/repos/{owner}/{repo}/pulls/comments/{id}/resolve",
+            "/repos/{owner}/{repo}/pulls/comments/{id}/unresolve",
             "/repos/{owner}/{repo}/issues/{index}/timeline",
             "/repos/{owner}/{repo}/issues/{index}/reactions",
             "/repos/{owner}/{repo}/issues/comments/{id}/reactions",
@@ -145,11 +150,10 @@ def runtime_openapi_probe() -> dict[str, Any]:
             {"id", "number", "user", "created_at", "updated_at", "head", "base"}
             <= set(advanced_responses["PullRequest"])
         ),
-        "pull_patch_has_no_atomic_version_precondition": (
-            {"title", "body", "state", "base"} <= set(advanced_requests["EditPullRequestOption"])
-            and {"etag", "if_match", "updated_at"}.isdisjoint(
-                advanced_requests["EditPullRequestOption"]
-            )
+        "pull_patch_exposes_content_version_guard": (
+            {"title", "body", "state", "base", "content_version"}
+            <= set(advanced_requests["EditPullRequestOption"])
+            and "content_version" in advanced_responses["PullRequest"]
         ),
         "review_create_accepts_nested_positions_without_author_or_time": (
             {"body", "comments", "commit_id", "event"}
@@ -180,7 +184,15 @@ def runtime_openapi_probe() -> dict[str, Any]:
         "review_comments_have_no_update_or_delete_route": advanced_paths[
             "/repos/{owner}/{repo}/pulls/{index}/reviews/{id}/comments"
         ]
-        == ("GET",),
+        == ("GET",)
+        and advanced_paths["/repos/{owner}/{repo}/pulls/{index}/comments/{id}/replies"] == ("POST",)
+        and advanced_paths["/repos/{owner}/{repo}/pulls/comments/{id}/resolve"] == ("POST",)
+        and advanced_paths["/repos/{owner}/{repo}/pulls/comments/{id}/unresolve"] == ("POST",)
+        and set(advanced_requests["CreatePullReviewCommentReplyOptions"]) == {"body"}
+        and "resolver" in advanced_responses["PullReviewComment"]
+        and {"in_reply_to", "reply_to", "parent_id"}.isdisjoint(
+            advanced_responses["PullReviewComment"]
+        ),
         "timeline_is_read_only": advanced_paths["/repos/{owner}/{repo}/issues/{index}/timeline"]
         == ("GET",),
         "reaction_contract_is_natural_key_without_native_id": (
@@ -220,38 +232,7 @@ def runtime_openapi_probe() -> dict[str, Any]:
             "request_fields": advanced_requests,
             "response_fields": advanced_responses,
             "path_methods": advanced_paths,
-            "classification": {
-                "pull_requests": {
-                    "inventory": "supported",
-                    "first_import": "blocked-required-refs-and-author-fidelity",
-                    "return_update": "blocked-no-atomic-version-precondition",
-                    "deletion": "not-supported",
-                },
-                "reviews": {
-                    "inventory": "supported",
-                    "first_import": "blocked-commit-and-author-fidelity",
-                    "return_update": "not-supported",
-                    "deletion": "draft-review-only-not-portable",
-                },
-                "inline_review_comments": {
-                    "inventory": "supported",
-                    "first_import": "blocked-review-parent-and-diff-position",
-                    "return_update": "not-supported",
-                    "deletion": "not-supported",
-                },
-                "timelines": {
-                    "inventory": "supported",
-                    "first_import": "not-supported-read-only-api",
-                    "return_update": "not-supported-read-only-api",
-                    "deletion": "not-supported-read-only-api",
-                },
-                "reactions": {
-                    "inventory": "supported-with-natural-key",
-                    "first_import": "blocked-no-native-id-or-historical-time",
-                    "return_update": "not-applicable-create-delete-set",
-                    "deletion": "available-but-not-enabled",
-                },
-            },
+            "classification": ADVANCED_METADATA_CLASSIFICATION,
         },
         "assertions": assertions,
     }
