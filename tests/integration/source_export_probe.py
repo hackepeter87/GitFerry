@@ -222,7 +222,6 @@ def run_source_export_probe() -> dict[str, Any]:
             worker_path.with_name("git_return_worker.py"),
             f"{service}:/probe/git_return_worker.py",
         )
-        docker_copy(worker_path.with_name("plan_worker.py"), f"{service}:/probe/plan_worker.py")
         docker_copy(
             worker_path.with_name("native_browser_fixture.py"),
             f"{service}:/probe/native_browser_fixture.py",
