@@ -608,13 +608,16 @@ def recover_return() -> dict[str, Any]:
             )
         except OperationBlocked:
             rejected[name] = True
-    resolve_git_ref_operation(
-        state,
-        paths,
-        operation.operation_id,
-        evidence="live exact Git ref through approved target profile",
-        references=LocalReferences(A_ROOT / "secrets", A_ROOT / "ca"),
-    )
+    plan_worker.ROOT = A_ROOT
+    plan_worker.URL = A_URL
+    with plan_worker.proxy(preserve_origin=True):
+        resolve_git_ref_operation(
+            state,
+            paths,
+            operation.operation_id,
+            evidence="live exact Git ref through approved target profile",
+            references=LocalReferences(A_ROOT / "secrets", A_ROOT / "ca"),
+        )
     with state.read_connection() as connection:
         plan_id = connection.execute(
             "SELECT plan_id FROM plan_steps WHERE operation_id=?", (operation.operation_id,)
@@ -623,8 +626,6 @@ def recover_return() -> dict[str, Any]:
     plan = service.get(plan_id)
     service.finish(plan_id, "blocked", "reconciled unknown; resuming plan")
     service.queue(plan_id, plan["digest"])
-    plan_worker.ROOT = A_ROOT
-    plan_worker.URL = A_URL
 
     def adapter(_: dict[str, Any]) -> DiagnosticReturnAdapter:
         return DiagnosticReturnAdapter(
