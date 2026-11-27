@@ -475,6 +475,7 @@ class PackageAdmissions:
         author_credential_refs: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         from gitferry.plan_application import prepare_transfer_plan
+        from gitferry.transfer_plans import PlanService
 
         review = self.plan_review(
             package_ref,
@@ -505,6 +506,15 @@ class PackageAdmissions:
         artifact = self.artifact(package_ref)
         if artifact.digest_sha256 != review["digest_sha256"]:
             raise PackageAdmissionConflict("package changed after plan review")
+        if artifact.document["schema_version"] == 5:
+            for existing in PlanService(self.state).list():
+                request = existing["document"]["inventory"]["request"]
+                if (
+                    request.get("mode") == "return"
+                    and request.get("package_digest") == artifact.digest_sha256
+                    and request.get("target_instance_key") == target_instance_key
+                ):
+                    return existing
         native_payloads = None
         if artifact.document["schema_version"] in (3, 4):
             native_payloads = [

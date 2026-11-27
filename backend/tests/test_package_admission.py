@@ -232,13 +232,41 @@ def test_return_package_admission_requires_forward_receipt_and_existing_replica(
     report = service.review("return", target_instance_key="a", profile_revision=1)
     assert report["replay"] is False
     assert report["forward_reference"]["package_id"] == "forward-package-1"
-    selection = service.plan_review(
+    service.admit(
+        "return",
+        target_instance_key="a",
+        profile_revision=1,
+        expected_digest=report["digest_sha256"],
+    )
+    reviewed = service.plan_review(
         "return", target_instance_key="a", profile_revision=1, include_metadata=False
-    )["selection"]
+    )
+    selection = reviewed["selection"]
     request = parse_plan_request(selection["request"])
     assert request.mode == "return"
     assert request.repositories[0].return_repository_id == "41"
     assert request.repositories[0].return_comparison is not None
+    prepared = service.prepare_plan(
+        "return",
+        target_instance_key="a",
+        profile_revision=1,
+        expected_review_digest=reviewed["review_digest"],
+        include_metadata=False,
+    )
+    with state.transaction() as connection:
+        connection.execute(
+            "UPDATE transfer_plans SET status='confirmed' WHERE plan_id=?",
+            (prepared["plan_id"],),
+        )
+    replayed = service.prepare_plan(
+        "return",
+        target_instance_key="a",
+        profile_revision=1,
+        expected_review_digest=reviewed["review_digest"],
+        include_metadata=False,
+    )
+    assert replayed["plan_id"] == prepared["plan_id"]
+    assert replayed["status"] == "confirmed"
 
 
 def test_receipt_replay_survives_real_process_restart(
