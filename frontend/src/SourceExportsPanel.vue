@@ -7,6 +7,7 @@ import {
   getSourceExport,
   listSourceExportRecipients,
   listSourceExports,
+  listPackageReceipts,
   queueSourceExport,
   sourceExportDownloadUrl,
   type BrowseEntry,
@@ -14,6 +15,7 @@ import {
   type SourceExportJob,
   type SourceExportRecipient,
   type SourceExportRequest,
+  type PackageReceipt,
 } from "./api";
 
 const props = defineProps<{
@@ -24,6 +26,9 @@ const emit = defineEmits<{ (event: "session-expired"): void }>();
 
 const recipients = ref<SourceExportRecipient[]>([]);
 const jobs = ref<SourceExportJob[]>([]);
+const receipts = ref<PackageReceipt[]>([]);
+const mode = ref<"first-import" | "return">("first-import");
+const selectedForwardPackage = ref("");
 const recipientKey = ref("");
 const reviewedInventory = ref<{ inventory_id: string; digest: string } | null>(null);
 const includeMetadata = ref(true);
@@ -43,8 +48,10 @@ const pendingRequestJson = ref(sessionStorage.getItem("gitferry_pending_export_r
 let disposed = false;
 
 const availableRecipients = computed(() => recipients.value.filter((item) => item.instance_key !== props.sourceProfile?.instance_key));
+const readyForwardPackages = computed(() => receipts.value.filter((item) => item.target_instance_key === props.sourceProfile?.instance_key));
+const selectedForward = computed(() => readyForwardPackages.value.find((item) => item.package_id === selectedForwardPackage.value));
 const selectedCount = computed(() => props.selectedRepositories.size);
-const canCreate = computed(() => Boolean(props.sourceProfile && recipientKey.value && selectedCount.value && reviewedInventory.value && !saving.value));
+const canCreate = computed(() => Boolean(props.sourceProfile && recipientKey.value && selectedCount.value && (mode.value === "return" ? selectedForward.value : reviewedInventory.value) && !saving.value));
 
 onMounted(load);
 onUnmounted(() => { disposed = true; });
@@ -55,14 +62,19 @@ watch(() => props.sourceProfile?.instance_key, () => {
 watch(includeMetadata, (enabled) => {
   if (!enabled) includeAttachments.value = false;
 });
+watch(mode, (value) => {
+  reviewedInventory.value = null;
+  if (value === "first-import") selectedForwardPackage.value = "";
+});
 
 async function load(): Promise<void> {
   loading.value = true; error.value = "";
   try {
-    const [recipientValues, jobValues] = await Promise.all([listSourceExportRecipients(), listSourceExports()]);
+    const [recipientValues, jobValues, packageValues] = await Promise.all([listSourceExportRecipients(), listSourceExports(), listPackageReceipts()]);
     if (disposed) return;
     recipients.value = recipientValues;
     jobs.value = jobValues;
+    receipts.value = packageValues;
     for (const job of jobValues) schedulePoll(job);
   } catch (cause) { handleError(cause, "Source exports could not be loaded."); }
   finally { if (!disposed) loading.value = false; }
@@ -70,15 +82,32 @@ async function load(): Promise<void> {
 
 function makeRequest(): SourceExportRequest | null {
   const profile = props.sourceProfile;
-  if (!profile || !recipientKey.value || !selectedCount.value || !reviewedInventory.value) return null;
+  if (!profile || !recipientKey.value || !selectedCount.value) return null;
   const repositories = [...props.selectedRepositories.values()].map((entry) => ({
     repository: entry.repository ?? entry.name ?? "",
     global_id: String(entry.id),
   })).sort((a, b) => a.repository.localeCompare(b.repository));
   if (repositories.some((entry) => !entry.repository || !entry.global_id)) return null;
+  if (mode.value === "return") {
+    if (!selectedForward.value) return null;
+    return {
+      version: 5,
+      mode: "return",
+      forward_package_id: selectedForward.value.package_id,
+      forward_package_digest: selectedForward.value.digest_sha256,
+      source_instance_key: profile.instance_key,
+      source_profile_revision: profile.revision,
+      recipient_instance_key: recipientKey.value,
+      repositories,
+      include_metadata: false,
+      include_members: false,
+    };
+  }
+  if (!reviewedInventory.value) return null;
   const includeNative = includeLfs.value || includeWiki.value;
   const includePortableMetadata = includeLabels.value || includeAttachments.value || includeReleases.value;
   return {
+    mode: "first-import",
     version: includePortableMetadata ? 4 : includeNative ? 3 : 2,
     inventory_id: reviewedInventory.value.inventory_id,
     inventory_digest: reviewedInventory.value.digest,
@@ -190,13 +219,27 @@ function formatSize(size: number | null): string {
     <p v-if="error" class="alert" role="alert">{{ error }}</p>
     <p v-if="message" class="status-line" role="status">{{ message }}</p>
     <p class="supporting">Current selection: {{ selectedCount }} repositories. Source profile revision {{ sourceProfile?.revision ?? "—" }} is captured in the immutable request.</p>
+    <fieldset class="export-mode">
+      <legend>Transfer direction</legend>
+      <label><input v-model="mode" type="radio" value="first-import" :disabled="saving"> Create a first-import package</label>
+      <label><input v-model="mode" type="radio" value="return" :disabled="saving"> Return selected Git changes from an admitted package</label>
+    </fieldset>
     <label for="export-recipient">Recipient registration</label>
     <select id="export-recipient" v-model="recipientKey" :disabled="loading || saving || !availableRecipients.length">
       <option value="">Select a recipient registration</option>
       <option v-for="recipient in availableRecipients" :key="recipient.instance_key" :value="recipient.instance_key">{{ recipient.display_name }} ({{ recipient.installation_marker }})</option>
     </select>
     <p v-if="!availableRecipients.length" class="empty">No other local recipient registrations are available. Registrations may be unapproved or offline; export only requires a local registration.</p>
-    <fieldset class="export-options">
+    <template v-if="mode === 'return'">
+      <label for="forward-package">Admitted forward package</label>
+      <select id="forward-package" v-model="selectedForwardPackage" :disabled="loading || saving || !readyForwardPackages.length">
+        <option value="">Select an admitted package</option>
+        <option v-for="receipt in readyForwardPackages" :key="receipt.package_id" :value="receipt.package_id">{{ receipt.package_id }} (local file {{ receipt.package_ref }})</option>
+      </select>
+      <p class="supporting">Only locally received and validated package receipts are offered. The package digest and repository mappings remain local facts.</p>
+      <p v-if="selectedForward" class="supporting">Forward digest: <code>{{ selectedForward.digest_sha256 }}</code>. Return exports currently include ordinary Git refs only.</p>
+    </template>
+    <fieldset v-if="mode === 'first-import'" class="export-options">
       <legend>Archive contents</legend>
       <label><input v-model="includeMetadata" type="checkbox" :disabled="saving"> Include issues and normal comments</label>
       <label><input v-model="includeMembers" type="checkbox" :disabled="saving"> Include membership records</label>
@@ -208,8 +251,8 @@ function formatSize(size: number | null): string {
       <p class="supporting">Assets are copied as verified package payloads. Existing same-name labels or assets require a compatible stable mapping; omission never deletes target content. Release authors require an explicit local identity binding. Historical native creation times are recorded but cannot be restored by the regular create APIs.</p>
       <p class="supporting">LFS includes standard pointers and same-origin objects only. Native wiki export requires a populated native wiki; empty, disabled, or uninitialized wikis block the request. There is no automatic return or merge. Membership records are proposals; target identities and permissions need local approval.</p>
     </fieldset>
-    <InventoryPanel v-if="sourceProfile" :source-profile="sourceProfile" :selected-repositories="selectedRepositories" :include-metadata="includeMetadata" :include-members="includeMembers" :include-lfs="includeLfs" :include-wiki="includeWiki" :include-labels="includeLabels" :include-attachments="includeAttachments" :include-releases="includeReleases" @reviewed="reviewedInventory = $event" @session-expired="emit('session-expired')" />
-    <p v-if="!reviewedInventory" class="supporting">Inspect and review the current inventory before queueing an export.</p>
+    <InventoryPanel v-if="sourceProfile && mode === 'first-import'" :source-profile="sourceProfile" :selected-repositories="selectedRepositories" :include-metadata="includeMetadata" :include-members="includeMembers" :include-lfs="includeLfs" :include-wiki="includeWiki" :include-labels="includeLabels" :include-attachments="includeAttachments" :include-releases="includeReleases" @reviewed="reviewedInventory = $event" @session-expired="emit('session-expired')" />
+    <p v-if="mode === 'first-import' && !reviewedInventory" class="supporting">Inspect and review the current inventory before queueing an export.</p>
     <button class="primary" type="button" :disabled="!canCreate" @click="createAndQueue">{{ saving ? "Queueing export…" : "Create and queue export" }}</button>
 
     <div class="saved-exports" aria-labelledby="saved-exports-title">
