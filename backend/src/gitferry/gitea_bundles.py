@@ -349,7 +349,21 @@ class GiteaBundlePusher(AbstractContextManager["GiteaBundlePusher"]):
             )
 
         url = self._repository_url(repository)
-        self._run_git(["push", "--atomic", url, f"{desired_oid}:{ref}"], cwd=imported.destination)
+        # Bind the write to the exact object observed during preflight.  An
+        # empty expected value intentionally means that the ref must still be
+        # absent (new-ref semantics).  The lease closes the read-before-write
+        # window: a concurrent target update is rejected by Git itself.
+        expected = expected_old_oid or ""
+        self._run_git(
+            [
+                "push",
+                "--atomic",
+                f"--force-with-lease={ref}:{expected}",
+                url,
+                f"{desired_oid}:{ref}",
+            ],
+            cwd=imported.destination,
+        )
         observed = self._git_remote("ls-remote", url, None)
         if observed.get(ref) != desired_oid:
             raise GiteaBundleError("target selected ref differs after push")

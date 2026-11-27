@@ -463,6 +463,15 @@ def test_push_return_ref_updates_one_fast_forward_and_preserves_other_refs(
     ) as pusher:
         monkeypatch.setattr(pusher, "_repository_url", lambda _: str(remote))
         monkeypatch.setattr(pusher, "_verify_repository_id", lambda *_: None)
+        pushes: list[list[str]] = []
+        original_run = pusher._run_git
+
+        def capture(args: list[str], *, cwd: Path | None):
+            if args and args[0] == "push":
+                pushes.append(args)
+            return original_run(args, cwd=cwd)
+
+        monkeypatch.setattr(pusher, "_run_git", capture)
         result = pusher.push_return_ref(
             "org/repo",
             bundle_member=bundle.member,
@@ -476,6 +485,15 @@ def test_push_return_ref_updates_one_fast_forward_and_preserves_other_refs(
         assert result.target_global_id == "42"
         refs = pusher._git_remote("ls-remote", str(remote), None)
         assert refs["refs/heads/master"] == new_oid
+        assert pushes == [
+            [
+                "push",
+                "--atomic",
+                f"--force-with-lease=refs/heads/master:{old_oid}",
+                str(remote),
+                f"{new_oid}:refs/heads/master",
+            ]
+        ]
 
 
 def test_push_return_ref_preserves_a_new_annotated_tag_object(
@@ -514,6 +532,65 @@ def test_push_return_ref_preserves_a_new_annotated_tag_object(
             desired_oid=tag_oid,
         )
         assert pusher._git_remote("ls-remote", str(remote), None)["refs/tags/offline-v1"] == tag_oid
+
+
+def test_push_return_ref_lease_rejects_target_change_after_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, remote, bundle, old_oid, new_oid = _return_source(tmp_path)
+    (source / "RACE").write_text("concurrent target change\n", encoding="utf-8")
+    _git("add", "RACE", cwd=source)
+    _git("commit", "-m", "concurrent target change", cwd=source)
+    race_oid = subprocess.run(  # noqa: S603, S607
+        ["git", "rev-parse", "HEAD"],  # noqa: S607
+        cwd=source,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    with GiteaBundlePusher(
+        tmp_path / "return-package",
+        tmp_path / "return-work",
+        "https://target.invalid",
+        "actor",
+        "token",
+    ) as pusher:
+        monkeypatch.setattr(pusher, "_repository_url", lambda _: str(remote))
+        monkeypatch.setattr(pusher, "_verify_repository_id", lambda *_: None)
+        original_run = pusher._run_git
+        raced = False
+
+        def race_before_push(args: list[str], *, cwd: Path | None):
+            nonlocal raced
+            if args and args[0] == "push" and not raced:
+                raced = True
+                # Make the concurrent target update after preflight but before
+                # GitFerry's push.  The expected-old lease must reject it.
+                _git("push", str(remote), f"{race_oid}:refs/heads/race", cwd=source)
+                _git(
+                    "update-ref",
+                    "refs/heads/master",
+                    race_oid,
+                    old_oid,
+                    cwd=remote,
+                )
+            return original_run(args, cwd=cwd)
+
+        monkeypatch.setattr(pusher, "_run_git", race_before_push)
+        with pytest.raises(GiteaBundleError, match="git push failed"):
+            pusher.push_return_ref(
+                "org/repo",
+                bundle_member=bundle.member,
+                bundle_sha256=bundle.sha256,
+                bundle_size=bundle.size,
+                expected_repository_id="42",
+                ref="refs/heads/master",
+                expected_old_oid=old_oid,
+                desired_oid=new_oid,
+            )
+
+        assert pusher._git_remote("ls-remote", str(remote), None)["refs/heads/master"] == race_oid
 
 
 def test_push_return_ref_rejects_repository_identity_mismatch_before_push(

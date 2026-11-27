@@ -382,6 +382,11 @@ def _build_return_selection(
             comparison["confirmed_import"],
             comparison["desired"],
             local_baseline,
+            # Package review cannot prove Git ancestry: it has no live target
+            # object graph.  Keep the review focused on immutable A-baseline
+            # and supported-ref rules; the bundle preflight performs the
+            # authoritative merge-base check immediately before the push.
+            is_ancestor=lambda _old, _new: True,
         )
         conflicts.extend(
             {"ref": item.ref, "code": item.code, "reason": item.reason} for item in plan.conflicts

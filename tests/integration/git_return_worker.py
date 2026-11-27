@@ -21,6 +21,7 @@ import httpx
 import plan_worker
 from gitferry.connection_probe import LocalReferences
 from gitferry.git_return_operations import reconcile_git_ref_operation
+from gitferry.git_return_reconciliation import resolve_git_ref_operation
 from gitferry.gitea_plan_adapter import GiteaPlanAdapter
 from gitferry.operations import OperationBlocked, OperationExecutor
 from gitferry.package_admission import PackageAdmissions
@@ -289,11 +290,6 @@ def _create_offline_commit() -> dict[str, str]:
                 cwd=clone,
                 check=True,
             )
-            subprocess.run(  # noqa: S603
-                [shutil.which("git") or "/usr/bin/git", "switch", "-c", "offline-return"],
-                cwd=clone,
-                check=True,
-            )
             (clone / "OFFLINE-RETURN.txt").write_text(
                 "synthetic offline return\n", encoding="utf-8"
             )
@@ -313,7 +309,9 @@ def _create_offline_commit() -> dict[str, str]:
                 [
                     shutil.which("git") or "/usr/bin/git",
                     "push",
+                    "--atomic",
                     "origin",
+                    "HEAD:refs/heads/main",
                     "HEAD:refs/heads/offline-return",
                 ],
                 env=environment,
@@ -334,6 +332,7 @@ def export_return() -> dict[str, Any]:
         ).fetchone()
     if receipt is None:
         raise RuntimeError("forward package receipt is missing on B")
+    before_offline_work = _git_refs(B_ROOT, B_URL, REPOSITORY)
     current = _create_offline_commit()
     repository = _admin_repository(B_URL)
     request = {
@@ -376,6 +375,10 @@ def export_return() -> dict[str, Any]:
         "package_digest": details["package_digest"],
         "archive_sha256": details["archive_sha256"],
         "offline_oid": current["refs/heads/offline-return"],
+        "offline_main_oid": current["refs/heads/main"],
+        "existing_main_advanced": (
+            current["refs/heads/main"] != before_offline_work["refs/heads/main"]
+        ),
         "source_unreachable": _unreachable("source", 3000),
     }
 
@@ -605,8 +608,12 @@ def recover_return() -> dict[str, Any]:
             )
         except OperationBlocked:
             rejected[name] = True
-    reconcile_git_ref_operation(
-        state, operation.operation_id, lambda: live, evidence="live exact Git ref"
+    resolve_git_ref_operation(
+        state,
+        paths,
+        operation.operation_id,
+        evidence="live exact Git ref through approved target profile",
+        references=LocalReferences(A_ROOT / "secrets", A_ROOT / "ca"),
     )
     with state.read_connection() as connection:
         plan_id = connection.execute(

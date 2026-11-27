@@ -87,6 +87,7 @@ ASSERTIONS = frozenset(
         "structure_account_counts_unchanged",
         "git_return_file_only",
         "git_return_ref_object_exact",
+        "git_return_existing_branch_fast_forward",
         "git_return_clone_reachable_object",
         "git_return_selected_drift_blocks_before_push",
         "git_return_protected_ref_blocks_before_push",
@@ -639,6 +640,11 @@ def run_source_export_probe() -> dict[str, Any]:
         return_recovery["remote_oid"] == return_recovery["intended_oid"]
         and return_recovery["final_refs"].get("refs/heads/offline-return")
         == return_export["offline_oid"]
+    )
+    assertions["git_return_existing_branch_fast_forward"] = (
+        return_export["existing_main_advanced"]
+        and return_recovery["final_refs"].get("refs/heads/main")
+        == return_export["offline_main_oid"]
     )
     assertions["git_return_clone_reachable_object"] = return_recovery["clone_reachable"]
     assertions["git_return_selected_drift_blocks_before_push"] = (
