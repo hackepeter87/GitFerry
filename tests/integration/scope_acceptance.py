@@ -62,20 +62,78 @@ def _all_true(report: dict[str, Any], paths: tuple[str, ...]) -> bool:
     return all(_value(report, path) is True for path in paths)
 
 
+def _teams_verified(report: dict[str, Any]) -> bool:
+    configuration = _value(report, "identity_and_permissions.team_configuration")
+    if not isinstance(configuration, dict):
+        return False
+    required = {
+        "permission",
+        "repo.code",
+        "repo.issues",
+        "selected_repository_assigned",
+        "control_repository_not_assigned",
+    }
+    return all(
+        isinstance(configuration.get(name), dict)
+        and all(configuration[name].get(field) is True for field in required)
+        for name in ("readers", "writers")
+    )
+
+
+def _permissions_verified(report: dict[str, Any]) -> bool:
+    access = _value(report, "identity_and_permissions.effective_git_access")
+    return isinstance(access, dict) and all(
+        access.get(name) is True
+        for name in (
+            "reader_can_read",
+            "reader_push_denied",
+            "reader_branch_absent",
+            "writer_can_read",
+            "writer_push_allowed",
+            "writer_branch_present",
+            "unmapped_same_login_account_denied",
+            "late_mapping_denied_before_assignment",
+            "late_mapping_allowed_after_assignment",
+        )
+    )
+
+
+def _identities_verified(report: dict[str, Any]) -> bool:
+    mappings = _value(report, "identity_and_permissions.explicit_mappings")
+    differences = _value(report, "identity_and_permissions.source_target_id_differences")
+    admin_flags = _value(report, "identity_and_permissions.functional_user_admin_flags")
+    if not all(isinstance(value, dict) and value for value in (mappings, differences, admin_flags)):
+        return False
+    mappings_ok = all(
+        isinstance(item, dict)
+        and item.get("resolution") == "resolved"
+        and isinstance(item.get("source"), dict)
+        and bool(item["source"].get("realm"))
+        and bool(item["source"].get("external_id"))
+        and bool(item["source"].get("ou_path"))
+        and isinstance(item.get("target"), dict)
+        and type(item["target"].get("gitea_id")) is int
+        and bool(item["target"].get("login"))
+        for item in mappings.values()
+    )
+    differences_ok = all(
+        isinstance(item, dict)
+        and type(item.get("source")) is int
+        and type(item.get("target")) is int
+        and item["source"] != item["target"]
+        for item in differences.values()
+    )
+    return mappings_ok and differences_ok and all(value is False for value in admin_flags.values())
+
+
 def _first_import_verified(report: dict[str, Any], content_class: str) -> bool:
     common = "application_plans.assertions."
     paths = {
         "git_refs": (
             "source_exports.assertions.actual_git_bundle_captured",
-            common + "structure_bundle_and_metadata_confirmed",
+            "durable_provisioning.assertions.bundle_refs_match_source",
         ),
-        "organizations": (common + "structure_bundle_and_metadata_confirmed",),
-        "teams": (common + "structure_bundle_and_metadata_confirmed",),
-        "permissions": (common + "structure_bundle_and_metadata_confirmed",),
-        "identities": (
-            "source_exports.assertions.issue_comment_distinct_author_claims",
-            common + "distinct_native_authors",
-        ),
+        "organizations": ("durable_provisioning.assertions.expected_private_structure_created",),
         "issues": (common + "portable_metadata_confirmed",),
         "labels": (common + "label_assignment_uses_mapped_label",),
         "comments": (common + "portable_metadata_confirmed",),
@@ -91,7 +149,47 @@ def _first_import_verified(report: dict[str, Any], content_class: str) -> bool:
             "native_payloads.assertions.native_lfs_digest_and_wiki_history",
         ),
     }
+    if content_class == "teams":
+        return _teams_verified(report)
+    if content_class == "permissions":
+        return _permissions_verified(report)
+    if content_class == "identities":
+        return _identities_verified(report)
     return _all_true(report, paths[content_class])
+
+
+def _return_verified(report: dict[str, Any], content_class: str) -> bool:
+    if content_class == "issues":
+        return _value(report, "metadata_roundtrip.status") == "passed"
+    if content_class == "comments":
+        return _value(report, "comment_transport_roundtrip.status") == "passed"
+    return False
+
+
+def _payload_integrity(content_class: str) -> str:
+    if content_class in {"git_refs", "attachments", "release_assets", "lfs", "wiki"}:
+        return "verified-binary-or-ref"
+    if content_class in SUPPORTED_FIRST_IMPORT:
+        return "verified-structured-data"
+    return "not-applicable-no-payload"
+
+
+def _evidence_sections(content_class: str) -> list[str]:
+    return {
+        "git_refs": ["content_inventory", "source_exports", "durable_provisioning"],
+        "organizations": ["content_inventory", "durable_provisioning"],
+        "teams": ["content_inventory", "identity_and_permissions"],
+        "permissions": ["content_inventory", "identity_and_permissions"],
+        "identities": ["content_inventory", "identity_and_permissions"],
+        "issues": ["content_inventory", "application_plans", "metadata_roundtrip"],
+        "labels": ["content_inventory", "application_plans"],
+        "comments": ["content_inventory", "application_plans", "comment_transport_roundtrip"],
+        "attachments": ["content_inventory", "application_plans"],
+        "releases": ["content_inventory", "application_plans"],
+        "release_assets": ["content_inventory", "application_plans"],
+        "lfs": ["content_inventory", "native_payloads"],
+        "wiki": ["content_inventory", "native_payloads"],
+    }.get(content_class, ["content_inventory"])
 
 
 def _limitation(content_class: str) -> str:
@@ -178,12 +276,10 @@ def build_scope_acceptance(report: dict[str, Any]) -> dict[str, Any]:
                 "first_import_status": policy["first_import"],
                 "first_import_verified": first_import_verified,
                 "return_status": policy["return"],
-                "payload_integrity": ("verified" if supported else "not-applicable-no-payload"),
+                "return_verified": _return_verified(report, content_class),
+                "payload_integrity": _payload_integrity(content_class),
                 "limitation": _limitation(content_class),
-                "evidence": [
-                    "content_inventory",
-                    "native_payloads" if content_class in {"lfs", "wiki"} else "application_plans",
-                ],
+                "evidence": _evidence_sections(content_class),
             }
         )
     assertions = {

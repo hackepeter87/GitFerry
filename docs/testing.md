@@ -998,7 +998,8 @@ return status, payload-integrity disposition, release ownership, evidence sectio
 limitation. The catalog reconciles the live Gitea inventory with the separate application-plan and
 native LFS/wiki probes; it does not turn inventory-only classes into supported transfer operations.
 
-The report fails when a class disappears, a supported first import lacks target evidence, an
+The final contract rebuilds the catalog from raw probe facts and requires an exact match. The report
+fails when a class disappears, a supported first import lacks class-specific target evidence, an
 unsupported selected class is not blocked before writes, a limitation is omitted, or the run claims
 a complete transfer. The desktop inventory test separately verifies that unsupported selections are
 visible and cannot be exported. Package omission remains non-destructive, and the selected control

@@ -505,6 +505,47 @@ def complete_probe_report() -> dict[str, object]:
         "openapi_and_migration",
     ):
         report[section] = {"status": "passed"}
+    report["identity_and_permissions"].update(
+        {
+            "team_configuration": {
+                name: {
+                    "permission": True,
+                    "repo.code": True,
+                    "repo.issues": True,
+                    "selected_repository_assigned": True,
+                    "control_repository_not_assigned": True,
+                }
+                for name in ("readers", "writers")
+            },
+            "effective_git_access": dict.fromkeys(
+                (
+                    "reader_can_read",
+                    "reader_push_denied",
+                    "reader_branch_absent",
+                    "writer_can_read",
+                    "writer_push_allowed",
+                    "writer_branch_present",
+                    "unmapped_same_login_account_denied",
+                    "late_mapping_denied_before_assignment",
+                    "late_mapping_allowed_after_assignment",
+                ),
+                True,
+            ),
+            "explicit_mappings": {
+                "reader": {
+                    "resolution": "resolved",
+                    "source": {
+                        "realm": "SOURCE-A",
+                        "external_id": "SYNTHETIC-1001",
+                        "ou_path": "OU=People,DC=example,DC=invalid",
+                    },
+                    "target": {"gitea_id": 20, "login": "reader"},
+                }
+            },
+            "source_target_id_differences": {"reader": {"source": 1, "target": 20}},
+            "functional_user_admin_flags": {"reader": False},
+        }
+    )
     report["openapi_and_migration"]["runtime_openapi"] = {
         "assertions": {name: True for name in report_contract().ADVANCED_METADATA_ASSERTIONS},
         "advanced_metadata": {
@@ -1211,7 +1252,18 @@ def test_inventory_partial_or_mismatched_evidence_cannot_pass(change: str) -> No
 
 @pytest.mark.parametrize(
     "mutation",
-    ["missing-class", "unverified", "complete-claim", "missing-limit", "missing-assertion"],
+    [
+        "missing-class",
+        "unverified",
+        "complete-claim",
+        "missing-limit",
+        "missing-assertion",
+        "stale-blocking-source",
+        "invented-evidence",
+        "promoted-return",
+        "unsupported-promoted",
+        "missing-team-proof",
+    ],
 )
 def test_scope_acceptance_cannot_hide_incomplete_or_unsupported_content(mutation: str) -> None:
     report = complete_probe_report()
@@ -1224,8 +1276,30 @@ def test_scope_acceptance_cannot_hide_incomplete_or_unsupported_content(mutation
         acceptance["complete_transfer_claimed"] = True
     elif mutation == "missing-limit":
         acceptance["catalog"][0]["limitation"] = ""
-    else:
+    elif mutation == "missing-assertion":
         del acceptance["assertions"]["unsupported_classes_blocked_before_write"]
+    elif mutation == "stale-blocking-source":
+        report["content_inventory"]["selection_summary"] = {
+            "transfer_ready": True,
+            "full_transfer": True,
+            "blockers": [],
+        }
+    elif mutation == "invented-evidence":
+        acceptance["catalog"][0]["evidence"] = ["invented"]
+    elif mutation == "promoted-return":
+        item = next(item for item in acceptance["catalog"] if item["content_class"] == "labels")
+        item["return_status"] = "supported-with-limits"
+        item["return_verified"] = True
+    elif mutation == "unsupported-promoted":
+        item = next(item for item in acceptance["catalog"] if item["content_class"] == "milestones")
+        item["first_import_status"] = "supported-with-limits"
+        item["return_status"] = "supported-with-limits"
+        item["return_verified"] = True
+        item["payload_integrity"] = "verified-structured-data"
+    else:
+        report["identity_and_permissions"]["team_configuration"]["readers"][
+            "selected_repository_assigned"
+        ] = False
     entry = next(
         item
         for item in report_contract().evidence_catalog(report, True)

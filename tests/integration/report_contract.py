@@ -18,6 +18,7 @@ from gitea_compat import (
     PRIMARY_GITEA_PLATFORM_DIGESTS,
     PRIMARY_GITEA_VERSION,
 )
+from scope_acceptance import build_scope_acceptance
 
 ROOT = Path(__file__).parents[2]
 PINNED_GITEA_IMAGE = PRIMARY_GITEA_IMAGE
@@ -263,33 +264,13 @@ def _advanced_metadata_evidence(report: dict[str, Any]) -> bool:
 
 
 def _scope_acceptance_evidence(report: dict[str, Any]) -> bool:
-    catalog = _value(report, "scope_acceptance.catalog")
-    if not isinstance(catalog, list) or len(catalog) != len(SCOPE_ACCEPTANCE_CLASSES):
-        return False
-    by_class = {item.get("content_class"): item for item in catalog if isinstance(item, dict)}
-    if set(by_class) != SCOPE_ACCEPTANCE_CLASSES:
-        return False
-    valid_first_import = {"supported-with-limits", "not-supported"}
-    valid_return = {"supported-with-limits", "not-implemented", "not-checked", "not-supported"}
+    actual = report.get("scope_acceptance")
+    expected = build_scope_acceptance(report)
     return (
-        _value(report, "scope_acceptance.status") == "passed"
-        and _value(report, "scope_acceptance.gitea_version") == PRIMARY_GITEA_VERSION
-        and _value(report, "scope_acceptance.complete_transfer_claimed") is False
-        and _value(report, "scope_acceptance.limited_scope_required") is True
-        and _all_required_true(report, "scope_acceptance.assertions", SCOPE_ACCEPTANCE_ASSERTIONS)
-        and all(
-            item.get("release_owner") == "0.4.0"
-            and item.get("inventory_verified") is True
-            and item.get("first_import_verified") is True
-            and item.get("first_import_status") in valid_first_import
-            and item.get("return_status") in valid_return
-            and item.get("payload_integrity") in {"verified", "not-applicable-no-payload"}
-            and isinstance(item.get("limitation"), str)
-            and bool(item["limitation"])
-            and isinstance(item.get("evidence"), list)
-            and bool(item["evidence"])
-            for item in by_class.values()
-        )
+        actual == expected
+        and expected["status"] == "passed"
+        and len(expected["catalog"]) == len(SCOPE_ACCEPTANCE_CLASSES)
+        and set(expected["assertions"]) == SCOPE_ACCEPTANCE_ASSERTIONS
     )
 
 

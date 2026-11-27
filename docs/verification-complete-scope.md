@@ -11,7 +11,8 @@ For every class the catalog records:
 
 - the live inventory status and reconciled count;
 - first-import and return support as separate decisions;
-- whether the corresponding target or pre-write block was verified;
+- whether first import and return have corresponding target evidence, or remain explicitly
+  unverified;
 - payload-integrity applicability;
 - the owning release, evidence sections and the remaining limitation.
 
@@ -42,6 +43,10 @@ The same integration run uses the exact pinned Gitea 28.4.0 source and target im
 the supported target observations, native payload digests, replay/restart behavior, omitted-metadata
 non-deletion and an unchanged control repository. The desktop browser test proves that an
 unsupported selection remains visible and cannot be exported.
+
+The final report contract rebuilds the expected catalog from the raw inventory, target, access and
+blocking facts and requires an exact match. Editing a derived flag, status or evidence label cannot
+promote a class or hide a contradictory source observation.
 
 The report contains synthetic facts only. Review approval, CI run identity and immutable candidate
 digest remain delivery evidence in the pull request, issue and Actions artifacts; they are not
