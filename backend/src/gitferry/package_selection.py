@@ -11,6 +11,7 @@ from typing import Any
 
 from gitferry.application_package import PackageArtifact, load_package_metadata
 from gitferry.comment_operations import resolve_author_binding
+from gitferry.git_return import compare_return_refs
 from gitferry.state_codec import canonical_json, origin_id
 from gitferry.state_store import OperationBlocked, StateStore
 
@@ -62,6 +63,8 @@ def build_package_selection(
     """Build a bounded :class:`PlanRequest`-shaped selection and prerequisite report."""
 
     document = artifact.document
+    if document.get("schema_version") == 5 and document.get("mode") == "return":
+        return _build_return_selection(state, artifact, package_ref)
     target = str(document["recipient"]["instance_key"])
     missing_bindings: list[str] = []
     missing_credentials: list[str] = []
@@ -317,4 +320,72 @@ def build_package_selection(
         "missing_credentials": missing_credentials,
         "waiting_parents": waiting_parents,
         "blocked_operations": blocked_operations,
+    }
+
+
+def _build_return_selection(
+    state: StateStore, artifact: PackageArtifact, package_ref: str
+) -> dict[str, Any]:
+    """Build a conservative return request; remote ref reads happen during preflight."""
+    document = artifact.document
+    target = str(document["recipient"]["instance_key"])
+    repositories: list[dict[str, Any]] = []
+    conflicts: list[dict[str, str]] = []
+    for selected in document["repositories"]:
+        origin = selected["origin"]
+        repository = selected["repository"]
+        origin_identifier = origin_id(
+            origin["instance_key"], repository, "repository", origin["global_id"]
+        )
+        try:
+            mapping = state.get_object_mapping(origin_identifier, target)
+        except KeyError:
+            raise ValueError("return repository has no local target mapping") from None
+        if mapping.target_repository_scope != repository:
+            raise ValueError("return repository mapping scope conflicts with local state")
+        comparison = selected["comparison"]
+        plan = compare_return_refs(
+            comparison["original_baseline"],
+            comparison["confirmed_import"],
+            comparison["desired"],
+            comparison["original_baseline"],
+        )
+        conflicts.extend(
+            {"ref": item.ref, "code": item.code, "reason": item.reason}
+            for item in plan.conflicts
+        )
+        bundle = selected.get("bundle")
+        repository_item = {
+            "repository_origin_id": origin_identifier,
+            "repository": repository,
+            "target_repository_id": mapping.target_global_id,
+            "bundle": bundle,
+            "comparison": comparison,
+            "changes": list(plan.changes),
+        }
+        repositories.append(repository_item)
+    request = {
+        "version": 1,
+        "mode": "return",
+        "target_instance_key": target,
+        "round_key": document["transfer_round_id"],
+        "package_ref": package_ref,
+        "package_digest": artifact.digest_sha256,
+        "repositories": repositories,
+        "metadata": [],
+        "content": [],
+        "author_credential_refs": {},
+        "unsupported_items": list(document["limitations"]),
+        "return_conflicts": conflicts,
+        "operation_ids": [],
+        "forward_reference": document["forward_reference"],
+    }
+    return {
+        "request": request,
+        "missing_bindings": [],
+        "missing_credentials": [],
+        "waiting_parents": [],
+        "blocked_operations": [],
+        "return_conflicts": conflicts,
+        "remote_preflight_required": True,
     }

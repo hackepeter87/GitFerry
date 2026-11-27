@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 from typing import Any
 
@@ -78,6 +79,8 @@ def _facts(
     connection: sqlite3.Connection, artifact: PackageArtifact, package_ref: str, target: str
 ) -> dict[str, Any]:
     document = artifact.document
+    if document.get("schema_version") == 5 and document.get("mode") == "return":
+        return _return_facts(connection, artifact, package_ref, target)
     if document["recipient"]["instance_key"] != target:
         raise PackageAdmissionConflict("package recipient is not the locally selected target")
     _check_endpoint(connection, document["sender"], role="sender")
@@ -239,6 +242,106 @@ def _facts(
         "limitations": document["limitations"],
         "realms": document["realms"],
         "execution_authorized": False,
+    }
+
+
+def _return_facts(
+    connection: sqlite3.Connection, artifact: PackageArtifact, package_ref: str, target: str
+) -> dict[str, Any]:
+    """Admit only return facts that already have a locally trusted forward copy."""
+    document = artifact.document
+    if document["recipient"]["instance_key"] != target:
+        raise PackageAdmissionConflict("package recipient is not the locally selected target")
+    _check_endpoint(connection, document["sender"], role="sender")
+    _check_endpoint(connection, document["recipient"], role="recipient")
+    forward = document["forward_reference"]
+    known = connection.execute(
+        "SELECT package_id,digest_sha256,target_instance_key FROM package_receipts "
+        "WHERE package_id = ?",
+        (forward["package_id"],),
+    ).fetchone()
+    if known is None:
+        exported = connection.execute(
+            "SELECT export_id,package_digest,request_json FROM source_exports "
+            "WHERE export_id = ? AND status = 'captured'",
+            (forward["package_id"],),
+        ).fetchone()
+        if exported is None or exported["package_digest"] != forward["digest_sha256"]:
+            raise PackageAdmissionConflict(
+                "return references an unknown or mismatched forward package"
+            )
+        # A locally captured forward package was addressed to the environment
+        # that is now sending the return package back.
+        known_sender = json.loads(exported["request_json"])["recipient_instance_key"]
+    else:
+        if known["digest_sha256"] != forward["digest_sha256"]:
+            raise PackageAdmissionConflict(
+                "return references an unknown or mismatched forward package"
+            )
+        known_sender = known["target_instance_key"]
+    if known_sender != document["sender"]["instance_key"]:
+        raise PackageAdmissionConflict("return references an unknown or mismatched forward package")
+    previous = connection.execute(
+        "SELECT * FROM package_receipts WHERE package_id = ?", (document["package_id"],)
+    ).fetchone()
+    if previous is not None and (
+        previous["digest_sha256"] != artifact.digest_sha256
+        or previous["target_instance_key"] != target
+    ):
+        raise PackageAdmissionConflict("package ID already identifies different received bytes")
+    package_ref_row = connection.execute(
+        "SELECT package_id FROM package_receipts WHERE package_ref = ?", (package_ref,)
+    ).fetchone()
+    if package_ref_row is not None and package_ref_row[0] != document["package_id"]:
+        raise PackageAdmissionConflict("local package reference already belongs to another package")
+
+    origins: list[str] = []
+    for repository in document["repositories"]:
+        origin = repository["origin"]
+        row = connection.execute(
+            "SELECT origin_id FROM object_origins WHERE origin_instance_key = ? "
+            "AND origin_repository_scope = ? AND object_type = 'repository' "
+            "AND origin_global_id = ?",
+            (origin["instance_key"], repository["repository"], origin["global_id"]),
+        ).fetchone()
+        if row is None:
+            raise PackageAdmissionConflict("return repository origin is not locally known")
+        mapping = connection.execute(
+            "SELECT target_repository_scope,target_global_id FROM object_mappings "
+            "WHERE origin_id = ? AND target_instance_key = ?",
+            (row["origin_id"], target),
+        ).fetchone()
+        if mapping is None or mapping["target_repository_scope"] != repository["repository"]:
+            raise PackageAdmissionConflict("return repository has no matching local replica")
+        if str(origin["instance_key"]) == target and str(mapping["target_global_id"]) != str(
+            origin["global_id"]
+        ):
+            raise PackageAdmissionConflict(
+                "return repository replica identity conflicts with local mapping"
+            )
+        origins.append(str(row["origin_id"]))
+
+    if previous is None:
+        connection.execute(
+            "INSERT INTO package_receipts VALUES (?,?,?,?,?,?)",
+            (
+                document["package_id"], artifact.digest_sha256, target, package_ref,
+                canonical_json(document), now(),
+            ),
+        )
+    return {
+        "package_id": document["package_id"],
+        "digest_sha256": artifact.digest_sha256,
+        "target_instance_key": target,
+        "origin_ids": sorted(origins),
+        "blocked_operations": [],
+        "replay": previous is not None,
+        "inventory_complete": False,
+        "content_inventory": {"status": "not-applicable", "classes": []},
+        "limitations": document["limitations"],
+        "realms": [],
+        "execution_authorized": False,
+        "forward_reference": forward,
     }
 
 
