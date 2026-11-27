@@ -19,7 +19,9 @@ from typing import Any
 import httpx
 import plan_worker
 from gitferry.connection_probe import LocalReferences
+from gitferry.git_return_operations import reconcile_git_ref_operation
 from gitferry.gitea_plan_adapter import GiteaPlanAdapter
+from gitferry.operations import OperationBlocked, OperationExecutor
 from gitferry.package_admission import PackageAdmissions
 from gitferry.package_archive import receive_package_archive
 from gitferry.plan_diagnostics import PreflightBlocked, PreflightCheck
@@ -123,6 +125,57 @@ def _admin_repository(base_url: str) -> dict[str, Any]:
     )
     response.raise_for_status()
     return dict(response.json())
+
+
+def _git_set_return_ref(root: Path, base_url: str, *, delete: bool = False) -> None:
+    """Create/remove only the synthetic selected ref used by the drift probe."""
+
+    with tempfile.TemporaryDirectory(prefix="gitferry-drift-", dir=root / "work") as raw:
+        clone = Path(raw) / "repository"
+        with _git_environment(root) as environment:
+            subprocess.run(
+                [
+                    shutil.which("git") or "/usr/bin/git",
+                    "clone",
+                    f"{base_url}/{REPOSITORY}.git",
+                    str(clone),
+                ],
+                env=environment,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            refspec = (
+                ":refs/heads/offline-return"
+                if delete
+                else "refs/heads/main:refs/heads/offline-return"
+            )
+            subprocess.run(
+                [shutil.which("git") or "/usr/bin/git", "push", "origin", refspec],
+                env=environment,
+                cwd=clone,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+
+def _set_branch_protection(base_url: str, *, enabled: bool) -> None:
+    path = f"{base_url}/api/v1/repos/{REPOSITORY}/branch_protections"
+    auth = ("gitferry-admin", os.environ["GITFERRY_IT_ADMIN_PASSWORD"])
+    if enabled:
+        response = httpx.post(
+            path,
+            auth=auth,
+            json={"rule_name": "offline-return", "enable_push": False},
+            timeout=20,
+            trust_env=False,
+        )
+        response.raise_for_status()
+    else:
+        response = httpx.delete(f"{path}/offline-return", auth=auth, timeout=20, trust_env=False)
+        if response.status_code not in (200, 204, 404):
+            response.raise_for_status()
 
 
 def _create_offline_commit() -> dict[str, str]:
@@ -321,6 +374,186 @@ def apply_return() -> dict[str, Any]:
     }
 
 
+def _prepare_return_plan() -> tuple[StateStore, RuntimePaths, PlanService, dict[str, Any], Any]:
+    paths = _paths(A_ROOT)
+    state = StateStore(paths.state_database)
+    package_ref = "received-git-return"
+    destination = paths.package_directory / package_ref
+    if not destination.exists():
+        receive_package_archive(A_RETURN_ARCHIVE, destination)
+    admissions = PackageAdmissions(state, paths)
+    artifact = admissions.artifact(package_ref)
+    admissions.admit(
+        package_ref,
+        target_instance_key="source",
+        profile_revision=1,
+        expected_digest=artifact.digest_sha256,
+    )
+    review = admissions.plan_review(
+        package_ref, target_instance_key="source", profile_revision=1, include_metadata=False
+    )
+    plan = admissions.prepare_plan(
+        package_ref,
+        target_instance_key="source",
+        profile_revision=1,
+        expected_review_digest=review["review_digest"],
+        include_metadata=False,
+    )
+    service = PlanService(state)
+    return state, paths, service, plan, artifact
+
+
+def _run_return_plan(
+    state: StateStore,
+    paths: RuntimePaths,
+    service: PlanService,
+    plan: dict[str, Any],
+    *,
+    crash_after_remote: bool = False,
+) -> dict[str, Any]:
+    service.queue(plan["plan_id"], plan["digest"])
+    plan_worker.ROOT = A_ROOT
+    plan_worker.URL = A_URL
+
+    def adapter(_: dict[str, Any]) -> DiagnosticReturnAdapter:
+        return DiagnosticReturnAdapter(
+            state, paths, LocalReferences(A_ROOT / "secrets", A_ROOT / "ca")
+        )
+
+    def crash() -> None:
+        if crash_after_remote:
+            os._exit(42)
+
+    with plan_worker.proxy(preserve_origin=True):
+        return PlanRunner(
+            service, adapter, after_remote_hook=crash if crash_after_remote else None
+        ).run(plan["plan_id"])
+
+
+def drift_return() -> dict[str, Any]:
+    state, paths, service, plan, _ = _prepare_return_plan()
+    control = _git_refs(A_ROOT, A_URL, CONTROL_REPOSITORY)
+    _git_set_return_ref(A_ROOT, A_URL)
+    drifted = _git_refs(A_ROOT, A_URL, REPOSITORY)
+    try:
+        result = _run_return_plan(state, paths, service, plan)
+        after = _git_refs(A_ROOT, A_URL, REPOSITORY)
+    finally:
+        _git_set_return_ref(A_ROOT, A_URL, delete=True)
+    restored = _git_refs(A_ROOT, A_URL, REPOSITORY)
+    return {
+        "status": result["status"],
+        "reason": result.get("reason"),
+        "no_push": after == drifted,
+        "cleanup_restored": "refs/heads/offline-return" not in restored,
+        "control_unchanged": control == _git_refs(A_ROOT, A_URL, CONTROL_REPOSITORY),
+        "target_unreachable": _unreachable("target", 3000),
+    }
+
+
+def protected_return() -> dict[str, Any]:
+    state, paths, service, plan, _ = _prepare_return_plan()
+    before = _git_refs(A_ROOT, A_URL, REPOSITORY)
+    control = _git_refs(A_ROOT, A_URL, CONTROL_REPOSITORY)
+    _set_branch_protection(A_URL, enabled=True)
+    try:
+        result = _run_return_plan(state, paths, service, plan)
+        after = _git_refs(A_ROOT, A_URL, REPOSITORY)
+    finally:
+        _set_branch_protection(A_URL, enabled=False)
+    return {
+        "status": result["status"],
+        "reason": result.get("reason"),
+        "no_push": after == before,
+        "control_unchanged": control == _git_refs(A_ROOT, A_URL, CONTROL_REPOSITORY),
+        "target_unchanged": before == after,
+    }
+
+
+def crash_return() -> dict[str, Any]:
+    state, paths, service, plan, _ = _prepare_return_plan()
+    _run_return_plan(state, paths, service, plan, crash_after_remote=True)
+    raise RuntimeError("crash hook unexpectedly returned")
+
+
+def recover_return() -> dict[str, Any]:
+    paths = _paths(A_ROOT)
+    state = StateStore(paths.state_database)
+    with OperationExecutor(state, "git-return-recovery"):
+        pass
+    with state.read_connection() as connection:
+        operation_id = connection.execute(
+            "SELECT operation_id FROM operations WHERE operation_type='push_git_ref' "
+            "ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()[0]
+    operation = state.get_operation(operation_id)
+    if operation.status != "outcome_unknown":
+        raise RuntimeError(f"expected unknown operation after crash, got {operation.status}")
+    repository = _admin_repository(A_URL)
+    refs = _git_refs(A_ROOT, A_URL, REPOSITORY)
+    live = {
+        "target_instance_key": "source",
+        "repository_id": str(repository["id"]),
+        "repository_scope": REPOSITORY,
+        "refs": refs,
+    }
+    rejected: dict[str, bool] = {}
+    for name, candidate in {
+        "instance": {**live, "target_instance_key": "wrong"},
+        "repository": {**live, "repository_id": "wrong"},
+        "scope": {**live, "repository_scope": "wrong/repository"},
+        "ref": {**live, "refs": {"refs/heads/other": operation.intent["new_oid"]}},
+        "oid": {**live, "refs": {operation.intent["ref"]: "0" * 40}},
+    }.items():
+        try:
+            reconcile_git_ref_operation(
+                state,
+                operation.operation_id,
+                lambda candidate=candidate: candidate,
+                evidence=f"wrong {name} rejected",
+            )
+        except OperationBlocked:
+            rejected[name] = True
+    reconcile_git_ref_operation(
+        state, operation.operation_id, lambda: live, evidence="live exact Git ref"
+    )
+    with state.read_connection() as connection:
+        plan_id = connection.execute(
+            "SELECT plan_id FROM plan_steps WHERE operation_id=?", (operation.operation_id,)
+        ).fetchone()[0]
+    service = PlanService(state)
+    plan = service.get(plan_id)
+    service.finish(plan_id, "blocked", "reconciled unknown; resuming plan")
+    service.queue(plan_id, plan["digest"])
+    plan_worker.ROOT = A_ROOT
+    plan_worker.URL = A_URL
+
+    def adapter(_: dict[str, Any]) -> DiagnosticReturnAdapter:
+        return DiagnosticReturnAdapter(
+            state, paths, LocalReferences(A_ROOT / "secrets", A_ROOT / "ca")
+        )
+
+    with plan_worker.proxy(preserve_origin=True):
+        resumed = PlanRunner(service, adapter).run(plan_id)
+    with state.read_connection() as connection:
+        push_attempts = connection.execute(
+            "SELECT count(*) FROM operation_events e JOIN operations o "
+            "ON o.operation_id=e.operation_id WHERE o.operation_type='push_git_ref' "
+            "AND e.to_status='executing'"
+        ).fetchone()[0]
+    return {
+        "status": resumed["status"],
+        "restart_status": operation.status,
+        "wrong_target_rejected": all(rejected.values()),
+        "rejected": rejected,
+        "remote_oid": refs.get(operation.intent["ref"]),
+        "return_digest": PackageAdmissions(state, paths)
+        .artifact("received-git-return")
+        .digest_sha256,
+        "push_attempts": push_attempts,
+    }
+
+
 def replay_return() -> dict[str, Any]:
     paths = _paths(A_ROOT)
     state = StateStore(paths.state_database)
@@ -378,7 +611,15 @@ def replay_return() -> dict[str, Any]:
 
 
 def main() -> None:
-    actions = {"export-b": export_return, "apply-a": apply_return, "replay-a": replay_return}
+    actions = {
+        "export-b": export_return,
+        "apply-a": apply_return,
+        "replay-a": replay_return,
+        "drift-a": drift_return,
+        "protected-a": protected_return,
+        "crash-a": crash_return,
+        "recover-a": recover_return,
+    }
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=actions)
     args = parser.parse_args()
