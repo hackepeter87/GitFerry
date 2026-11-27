@@ -62,6 +62,35 @@ def _remote_source(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     return source, remote, refs
 
 
+def _return_source(tmp_path: Path) -> tuple[Path, Path, BundleIntent, str, str]:
+    source, _ = _source(tmp_path)
+    old_oid = subprocess.run(  # noqa: S603, S607
+        ["git", "rev-parse", "HEAD"],  # noqa: S607
+        cwd=source,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    remote = tmp_path / "return-remote.git"
+    _git("init", "--bare", str(remote), cwd=tmp_path)
+    _git("remote", "add", "origin", str(remote), cwd=source)
+    _git("push", "origin", "HEAD:refs/heads/master", cwd=source)
+    (source / "RETURN").write_text("offline\n", encoding="utf-8")
+    _git("add", "RETURN", cwd=source)
+    _git("commit", "-m", "offline", cwd=source)
+    new_oid = subprocess.run(  # noqa: S603, S607
+        ["git", "rev-parse", "HEAD"],  # noqa: S607
+        cwd=source,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    package = tmp_path / "return-package"
+    package.mkdir()
+    bundle = create_git_bundle(source, package, "return.bundle")
+    return source, remote, BundleIntent(bundle.member, bundle.sha256, bundle.size), old_oid, new_oid
+
+
 def _export_pusher(tmp_path: Path) -> GiteaBundlePusher:
     package = tmp_path / "package-export"
     package.mkdir()
@@ -416,3 +445,97 @@ def test_push_wiki_bundle_rejects_disappearing_ref_and_rechecks_identity(
             "org/repo", bundle.member, bundle.sha256, bundle.size, "42", expected
         )
     assert identities == ["org/repo"]
+
+
+def test_push_return_ref_updates_one_fast_forward_and_preserves_other_refs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, remote, bundle, old_oid, new_oid = _return_source(tmp_path)
+    with GiteaBundlePusher(
+        tmp_path / "return-package",
+        tmp_path / "return-work",
+        "https://target.invalid",
+        "actor",
+        "token",
+    ) as pusher:
+        monkeypatch.setattr(pusher, "_repository_url", lambda _: str(remote))
+        monkeypatch.setattr(pusher, "_verify_repository_id", lambda *_: None)
+        result = pusher.push_return_ref(
+            "org/repo",
+            bundle_member=bundle.member,
+            bundle_sha256=bundle.sha256,
+            bundle_size=bundle.size,
+            expected_repository_id="42",
+            ref="refs/heads/master",
+            expected_old_oid=old_oid,
+            desired_oid=new_oid,
+        )
+        assert result.target_global_id == "42"
+        refs = pusher._git_remote("ls-remote", str(remote), None)
+        assert refs["refs/heads/master"] == new_oid
+
+
+def test_push_return_ref_rejects_drift_and_protected_refs_before_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, remote, bundle, old_oid, new_oid = _return_source(tmp_path)
+    with GiteaBundlePusher(
+        tmp_path / "return-package",
+        tmp_path / "return-work",
+        "https://target.invalid",
+        "actor",
+        "token",
+    ) as pusher:
+        monkeypatch.setattr(pusher, "_repository_url", lambda _: str(remote))
+        monkeypatch.setattr(pusher, "_verify_repository_id", lambda *_: None)
+        with pytest.raises(GiteaBundleError, match="protected"):
+            pusher.push_return_ref(
+                "org/repo", bundle_member=bundle.member, bundle_sha256=bundle.sha256,
+                bundle_size=bundle.size, expected_repository_id="42", ref="refs/heads/master",
+                expected_old_oid=old_oid, desired_oid=new_oid, protected_refs={"refs/heads/master"},
+            )
+        with pytest.raises(GiteaBundleError, match="baseline"):
+            pusher.push_return_ref(
+                "org/repo", bundle_member=bundle.member, bundle_sha256=bundle.sha256,
+                bundle_size=bundle.size, expected_repository_id="42", ref="refs/heads/master",
+                expected_old_oid="0" * 40, desired_oid=new_oid,
+            )
+        assert pusher._git_remote("ls-remote", str(remote), None)["refs/heads/master"] == old_oid
+
+
+def test_push_return_ref_accepts_exact_replay_without_second_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, remote, bundle, old_oid, new_oid = _return_source(tmp_path)
+    with GiteaBundlePusher(
+        tmp_path / "return-package",
+        tmp_path / "return-work",
+        "https://target.invalid",
+        "actor",
+        "token",
+    ) as pusher:
+        monkeypatch.setattr(pusher, "_repository_url", lambda _: str(remote))
+        monkeypatch.setattr(pusher, "_verify_repository_id", lambda *_: None)
+        pusher.push_return_ref(
+            "org/repo", bundle_member=bundle.member, bundle_sha256=bundle.sha256,
+            bundle_size=bundle.size, expected_repository_id="42", ref="refs/heads/master",
+            expected_old_oid=old_oid, desired_oid=new_oid,
+        )
+        original_run = pusher._run_git
+        pushes = 0
+
+        def capture(args: list[str], *, cwd: Path | None):
+            nonlocal pushes
+            if args and args[0] == "push":
+                pushes += 1
+            return original_run(args, cwd=cwd)
+
+        monkeypatch.setattr(pusher, "_run_git", capture)
+        # The method reads the remote first and recognizes the already-confirmed ref.
+        result = pusher.push_return_ref(
+            "org/repo", bundle_member=bundle.member, bundle_sha256=bundle.sha256,
+            bundle_size=bundle.size, expected_repository_id="42", ref="refs/heads/master",
+            expected_old_oid=new_oid, desired_oid=new_oid,
+        )
+        assert result.target_global_id == "42"
+        assert pushes == 0

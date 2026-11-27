@@ -22,7 +22,7 @@ from .git_bundle import (
     create_git_bundle,
     import_git_bundle,
 )
-from .git_refs import ref_confirmation
+from .git_refs import is_ref_map, ref_confirmation
 from .provisioning import BundleIntent
 from .source_snapshot import SourceSnapshotError, read_repository_identity
 from .state_store import TargetConfirmation
@@ -297,6 +297,82 @@ class GiteaBundlePusher(AbstractContextManager["GiteaBundlePusher"]):
         self._verify_repository_id(repository, expected_repository_id)
         return TargetConfirmation(
             expected_repository_id, None, observed_state=ref_confirmation(observed)
+        )
+
+    def push_return_ref(
+        self,
+        repository: str,
+        *,
+        bundle_member: str,
+        bundle_sha256: str,
+        bundle_size: int,
+        expected_repository_id: str,
+        ref: str,
+        expected_old_oid: str | None,
+        desired_oid: str,
+        protected_refs: set[str] | frozenset[str] = frozenset(),
+    ) -> TargetConfirmation:
+        """Publish one selected branch/tag ref from a verified return bundle.
+
+        The remote is read before and after a normal (non-force) push.  Only the
+        selected ref may change; all other refs must remain byte-for-byte equal.
+        """
+
+        if not is_ref_map({ref: desired_oid}):
+            raise GiteaBundleError("invalid return ref or object id")
+        if expected_old_oid is not None and not is_ref_map({ref: expected_old_oid}):
+            raise GiteaBundleError("invalid expected return ref object id")
+        if ref not in protected_refs and not (
+            ref.startswith("refs/heads/") or ref.startswith("refs/tags/")
+        ):
+            raise GiteaBundleError("only branch and tag refs can be returned")
+        if ref in protected_refs:
+            raise GiteaBundleError("selected ref is protected")
+        if ref.startswith("refs/tags/") and expected_old_oid is not None:
+            raise GiteaBundleError("existing tag changes are not supported")
+
+        bundle = BundleIntent(bundle_member, bundle_sha256, bundle_size)
+        imported = self.preflight(bundle)
+        try:
+            self._run_git(["cat-file", "-e", desired_oid], cwd=imported.destination)
+        except GiteaBundleError:
+            raise GiteaBundleError(
+                "desired Git object is not present in the return bundle"
+            ) from None
+
+        self._verify_repository_id(repository, expected_repository_id)
+        url = self._repository_url(repository)
+        current = self._git_remote("ls-remote", url, None)
+        if current.get(ref) != expected_old_oid:
+            raise GiteaBundleError("target selected ref differs from the expected baseline")
+        if current.get(ref) == desired_oid:
+            return TargetConfirmation(
+                expected_repository_id,
+                None,
+                observed_state=ref_confirmation(current),
+            )
+
+        if ref.startswith("refs/heads/") and expected_old_oid is not None:
+            try:
+                self._run_git(
+                    ["merge-base", "--is-ancestor", expected_old_oid, desired_oid],
+                    cwd=imported.destination,
+                )
+            except GiteaBundleError:
+                raise GiteaBundleError("return branch update is not a fast-forward") from None
+
+        self._run_git(["push", "--atomic", url, f"{desired_oid}:{ref}"], cwd=imported.destination)
+        observed = self._git_remote("ls-remote", url, None)
+        if observed.get(ref) != desired_oid:
+            raise GiteaBundleError("target selected ref differs after push")
+        for name, oid in current.items():
+            if name != ref and observed.get(name) != oid:
+                raise GiteaBundleError("unselected target ref changed during return")
+        self._verify_repository_id(repository, expected_repository_id)
+        return TargetConfirmation(
+            expected_repository_id,
+            None,
+            observed_state=ref_confirmation(observed),
         )
 
     def _verify_repository_id(self, repository: str, expected: str) -> None:
