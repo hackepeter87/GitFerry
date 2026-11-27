@@ -485,6 +485,11 @@ class GiteaPlanAdapter:
                             or operation.target_repository_scope != repository.repository
                         ):
                             continue
+                        # A confirmed operation is immutable journal evidence. Replaying the
+                        # plan must not compare its pre-write baseline to the post-write ref
+                        # and misclassify the intended result as fresh target drift.
+                        if operation.status == "confirmed":
+                            continue
                         if refs.get(operation.intent["ref"]) != operation.intent["new_oid"]:
                             raise OperationBlocked(
                                 "return bundle does not contain the intended ref"
