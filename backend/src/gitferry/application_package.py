@@ -12,6 +12,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from gitferry.git_refs import is_ref_map
 from gitferry.state_codec import canonical_json
 from gitferry.transport import (
     MAX_MANIFEST_BYTES,
@@ -130,9 +131,51 @@ def _issue_key(value: dict[str, Any]) -> tuple[str, str, str]:
     return value["instance_key"], value["repository"], value["global_id"]
 
 
+def _validate_return_package(document: dict[str, Any]) -> None:
+    """Validate the bounded v5 return carrier without granting local authority."""
+    if document["sender"]["instance_key"] == document["recipient"]["instance_key"]:
+        raise PackageError("package sender and recipient must be different instances")
+    reference = document["forward_reference"]
+    if reference["package_id"] == document["package_id"]:
+        raise PackageError("return package cannot reference itself")
+    scopes: set[str] = set()
+    origins: set[tuple[str, str]] = set()
+    for repository in document["repositories"]:
+        scope = repository["repository"]
+        segments = scope.split("/")
+        if len(segments) != 2 or any(
+            not segment or segment in (".", "..") or "\\" in segment or ":" in segment
+            for segment in segments
+        ):
+            raise PackageError("invalid repository scope")
+        if scope in scopes:
+            raise PackageError("duplicate selected repository")
+        scopes.add(scope)
+        origin = repository["origin"]
+        origin_key = (origin["instance_key"], origin["global_id"])
+        if origin_key in origins:
+            raise PackageError("one repository origin cannot select different copies")
+        origins.add(origin_key)
+        bundle = repository["bundle"]
+        if bundle is not None:
+            member = bundle["path"]
+            package_path(member)
+            if not member.startswith("bundles/"):
+                raise PackageError("return bundles need paths below bundles/")
+        comparison = repository["comparison"]
+        for field in ("original_baseline", "confirmed_import", "desired"):
+            refs = comparison[field]
+            if not is_ref_map(refs):
+                raise PackageError("return comparison contains an invalid ref")
+
+
+def _validate_v5(document: dict[str, Any]) -> None:
+    _validate_return_package(document)
+
+
 def _validate(document: dict[str, Any]) -> None:
     version = document.get("schema_version")
-    if type(version) is not int or version not in (1, 2, 3, 4):
+    if type(version) is not int or version not in (1, 2, 3, 4, 5):
         raise PackageError("unsupported application package version")
     errors = Draft202012Validator(_schema(version), format_checker=FormatChecker()).iter_errors(
         document
@@ -140,6 +183,9 @@ def _validate(document: dict[str, Any]) -> None:
     if next(errors, None) is not None:
         # Do not reflect untrusted values (possibly credentials) into a public report.
         raise PackageError("invalid or unsupported application package descriptor")
+    if version == 5:
+        _validate_v5(document)
+        return
     if document["sender"]["instance_key"] == document["recipient"]["instance_key"]:
         raise PackageError("package sender and recipient must be different instances")
     realms = {item["realm_key"] for item in document["realms"]}
@@ -221,6 +267,19 @@ def _contents(directory: Path, document: dict[str, Any]) -> dict[str, tuple[int,
     from gitferry.package_inventory import validate_inventory_contents
 
     files: dict[str, tuple[int, str]] = {}
+    if document["schema_version"] == 5:
+        for repository in document["repositories"]:
+            bundle = repository["bundle"]
+            if bundle is None:
+                continue
+            member = bundle["path"]
+            facts = _digest(_file(directory, member), limit=bundle["size"])
+            if facts != (bundle["size"], bundle["sha256"]):
+                raise PackageError("bundle size or digest mismatch")
+            if member in files:
+                raise PackageError("return bundle paths must be distinct")
+            files[member] = facts
+        return files
     if document["schema_version"] >= 2:
         reference = document["inventory"]
         files[reference["path"]] = (reference["size"], reference["sha256"])
