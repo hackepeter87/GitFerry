@@ -111,6 +111,30 @@ def test_exports_require_authentication_and_csrf(tmp_path: Path) -> None:
     assert len(jobs.calls) == 1
 
 
+def test_api_preserves_the_bounded_git_return_request(tmp_path: Path) -> None:
+    client, csrf, jobs = _client(tmp_path)
+    request = {
+        "version": 5,
+        "mode": "return",
+        "forward_package_id": "forward-1",
+        "forward_package_digest": "a" * 64,
+        "source_instance_key": "b",
+        "source_profile_revision": 4,
+        "recipient_instance_key": "a",
+        "repositories": [{"repository": "synthetic/selected", "global_id": "91"}],
+        "include_metadata": False,
+        "include_members": False,
+    }
+    response = client.post(
+        "/api/v1/exports",
+        json={"export_id": "return-1", "request": request},
+        headers={"x-gitferry-csrf": csrf},
+    )
+
+    assert response.status_code == 202
+    assert jobs.calls == [("create", ("return-1", request))]
+
+
 def test_create_and_queue_reject_extra_fields_without_service_call(tmp_path: Path) -> None:
     client, csrf, jobs = _client(tmp_path)
     headers = {"x-gitferry-csrf": csrf}

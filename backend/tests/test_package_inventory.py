@@ -12,7 +12,7 @@ from gitferry.application_package import PackageError, inspect_package, write_pa
 from gitferry.content_inventory import CONTENT_CLASSES, export_classes, parse_inventory
 from gitferry.inventory_jobs import InventoryJobs
 from gitferry.package_archive import receive_package_archive, write_package_archive
-from gitferry.package_inventory import inventory_report
+from gitferry.package_inventory import inventory_report, read_inventory
 from gitferry.source_exports import SourceExportConflict, parse_export_request
 from gitferry.source_snapshot import capture_source
 from gitferry.state_codec import canonical_json
@@ -256,3 +256,7 @@ def test_v2_inventory_tampering_cannot_pass_package_inspection(tmp_path, monkeyp
 def test_v1_request_shape_and_package_schema_are_unchanged():
     original = requested()
     assert parse_export_request(copy.deepcopy(original)) == original
+
+
+def test_v5_git_return_has_no_forward_inventory(tmp_path: Path) -> None:
+    assert read_inventory(tmp_path, {"schema_version": 5}) is None

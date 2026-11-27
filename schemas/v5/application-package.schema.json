@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitferry.io/schemas/v5/application-package.schema.json",
+  "title": "GitFerry application package v5 return carrier",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format", "schema_version", "package_id", "transfer_round_id", "producer_version",
+    "created_at", "mode", "sender", "recipient", "forward_reference", "repositories",
+    "limitations", "deletion_semantics"
+  ],
+  "properties": {
+    "format": {"const": "gitferry.application-package"},
+    "schema_version": {"const": 5},
+    "package_id": {"$ref": "#/$defs/key"},
+    "transfer_round_id": {"$ref": "#/$defs/key"},
+    "producer_version": {"type": "string", "minLength": 1, "maxLength": 256},
+    "created_at": {"type": "string", "format": "date-time"},
+    "mode": {"const": "return"},
+    "sender": {"$ref": "#/$defs/endpoint"},
+    "recipient": {"$ref": "#/$defs/endpoint"},
+    "forward_reference": {"$ref": "#/$defs/forwardReference"},
+    "repositories": {
+      "type": "array", "minItems": 1, "maxItems": 128,
+      "items": {"$ref": "#/$defs/repository"}
+    },
+    "limitations": {
+      "type": "array", "minItems": 1, "maxItems": 100,
+      "items": {"type": "string", "minLength": 1, "maxLength": 256}
+    },
+    "deletion_semantics": {"const": "absence-does-not-delete"}
+  },
+  "$defs": {
+    "key": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+    "endpoint": {
+      "type": "object", "additionalProperties": false,
+      "required": ["instance_key", "installation_marker"],
+      "properties": {
+        "instance_key": {"$ref": "#/$defs/key"},
+        "installation_marker": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    },
+    "forwardReference": {
+      "type": "object", "additionalProperties": false,
+      "required": ["package_id", "digest_sha256"],
+      "properties": {
+        "package_id": {"$ref": "#/$defs/key"},
+        "digest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "origin": {
+      "type": "object", "additionalProperties": false,
+      "required": ["instance_key", "global_id"],
+      "properties": {
+        "instance_key": {"$ref": "#/$defs/key"},
+        "global_id": {"type": "string", "pattern": "^[1-9][0-9]*$", "maxLength": 128}
+      }
+    },
+    "bundle": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "size", "sha256"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^bundles/[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$"},
+        "size": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "refs": {
+      "type": "object", "maxProperties": 10000,
+      "propertyNames": {"pattern": "^refs/[A-Za-z0-9._/-]+$"},
+      "additionalProperties": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"}
+    },
+    "comparison": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ruleset", "ruleset_version", "original_baseline", "confirmed_import", "desired"],
+      "properties": {
+        "ruleset": {"const": "git-refs"},
+        "ruleset_version": {"const": 1},
+        "original_baseline": {"$ref": "#/$defs/refs"},
+        "confirmed_import": {"$ref": "#/$defs/refs"},
+        "desired": {"$ref": "#/$defs/refs"}
+      }
+    },
+    "repository": {
+      "type": "object", "additionalProperties": false,
+      "required": ["origin", "repository", "bundle", "comparison"],
+      "properties": {
+        "origin": {"$ref": "#/$defs/origin"},
+        "repository": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+        "bundle": {"oneOf": [{"$ref": "#/$defs/bundle"}, {"type": "null"}]},
+        "comparison": {"$ref": "#/$defs/comparison"}
+      }
+    }
+  }
+}

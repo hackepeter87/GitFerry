@@ -1,0 +1,49 @@
+{
+  "created_at": "2026-11-27T08:00:00Z",
+  "deletion_semantics": "absence-does-not-delete",
+  "format": "gitferry.application-package",
+  "forward_reference": {
+    "digest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "package_id": "synthetic-forward-1"
+  },
+  "limitations": [
+    "Ref deletion and force updates are not supported."
+  ],
+  "mode": "return",
+  "package_id": "synthetic-return-1",
+  "producer_version": "0.5.0.dev0",
+  "recipient": {
+    "installation_marker": "synthetic-a-installation",
+    "instance_key": "gitea-a"
+  },
+  "repositories": [
+    {
+      "bundle": null,
+      "comparison": {
+        "confirmed_import": {
+          "refs/heads/main": "1111111111111111111111111111111111111111"
+        },
+        "desired": {
+          "refs/heads/main": "2222222222222222222222222222222222222222",
+          "refs/heads/offline": "3333333333333333333333333333333333333333"
+        },
+        "original_baseline": {
+          "refs/heads/main": "1111111111111111111111111111111111111111"
+        },
+        "ruleset": "git-refs",
+        "ruleset_version": 1
+      },
+      "origin": {
+        "global_id": "9007199254740993",
+        "instance_key": "gitea-a"
+      },
+      "repository": "synthetic/selected"
+    }
+  ],
+  "schema_version": 5,
+  "sender": {
+    "installation_marker": "synthetic-b-installation",
+    "instance_key": "gitea-b"
+  },
+  "transfer_round_id": "synthetic-round-1"
+}

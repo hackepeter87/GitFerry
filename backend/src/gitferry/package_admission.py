@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 from typing import Any
 
@@ -31,6 +32,55 @@ from gitferry.transport_state import (
 
 class PackageAdmissionConflict(PackageError):
     """Received facts disagree with immutable bytes or local authority."""
+
+
+def _forward_baselines(
+    paths: RuntimePaths,
+    state: StateStore,
+    artifact: PackageArtifact,
+) -> dict[str, dict[str, str]] | None:
+    """Load Git baselines only from the locally admitted forward package."""
+    if artifact.document.get("schema_version") != 5 or artifact.document.get("mode") != "return":
+        return None
+    from gitferry.package_inventory import expected_git_refs, read_inventory
+
+    reference = artifact.document["forward_reference"]
+    with state.read_connection() as connection:
+        receipt = connection.execute(
+            "SELECT package_ref,target_instance_key,digest_sha256 FROM package_receipts "
+            "WHERE package_id=? AND digest_sha256=?",
+            (reference["package_id"], reference["digest_sha256"]),
+        ).fetchone()
+        exported = connection.execute(
+            "SELECT export_id,request_json,package_digest FROM source_exports "
+            "WHERE export_id=? AND package_digest=? AND status='captured'",
+            (reference["package_id"], reference["digest_sha256"]),
+        ).fetchone()
+    package_ref: str
+    if receipt is not None:
+        if receipt["target_instance_key"] != artifact.document["sender"]["instance_key"]:
+            return None
+        package_ref = str(receipt["package_ref"])
+    elif exported is not None:
+        request = json.loads(exported["request_json"])
+        if request.get("recipient_instance_key") != artifact.document["sender"]["instance_key"]:
+            return None
+        package_ref = str(exported["export_id"])
+    else:
+        return None
+    try:
+        forward = inspect_package(paths.package_directory / package_ref)
+        if forward.digest_sha256 != reference["digest_sha256"]:
+            return None
+        inventory = read_inventory(forward.directory, forward.document)
+    except (OSError, PackageError):
+        return None
+    if inventory is None:
+        return None
+    return {
+        selected["repository"]: expected_git_refs(inventory, selected["repository"])
+        for selected in forward.document["repositories"]
+    }
 
 
 def _authority(connection: sqlite3.Connection, target: str, revision: int) -> str:
@@ -75,9 +125,24 @@ def _local_replicas(
 
 
 def _facts(
-    connection: sqlite3.Connection, artifact: PackageArtifact, package_ref: str, target: str
+    connection: sqlite3.Connection,
+    artifact: PackageArtifact,
+    package_ref: str,
+    target: str,
+    *,
+    return_baselines: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     document = artifact.document
+    if document.get("schema_version") == 5 and document.get("mode") == "return":
+        if return_baselines is None:
+            raise PackageAdmissionConflict("return package has no immutable local forward baseline")
+        for selected in document["repositories"]:
+            expected = return_baselines.get(str(selected["repository"]))
+            if expected is None or expected != selected["comparison"]["original_baseline"]:
+                raise PackageAdmissionConflict(
+                    "return package baseline differs from immutable local forward baseline"
+                )
+        return _return_facts(connection, artifact, package_ref, target)
     if document["recipient"]["instance_key"] != target:
         raise PackageAdmissionConflict("package recipient is not the locally selected target")
     _check_endpoint(connection, document["sender"], role="sender")
@@ -242,6 +307,110 @@ def _facts(
     }
 
 
+def _return_facts(
+    connection: sqlite3.Connection, artifact: PackageArtifact, package_ref: str, target: str
+) -> dict[str, Any]:
+    """Admit only return facts that already have a locally trusted forward copy."""
+    document = artifact.document
+    if document["recipient"]["instance_key"] != target:
+        raise PackageAdmissionConflict("package recipient is not the locally selected target")
+    _check_endpoint(connection, document["sender"], role="sender")
+    _check_endpoint(connection, document["recipient"], role="recipient")
+    forward = document["forward_reference"]
+    known = connection.execute(
+        "SELECT package_id,digest_sha256,target_instance_key FROM package_receipts "
+        "WHERE package_id = ?",
+        (forward["package_id"],),
+    ).fetchone()
+    if known is None:
+        exported = connection.execute(
+            "SELECT export_id,package_digest,request_json FROM source_exports "
+            "WHERE export_id = ? AND status = 'captured'",
+            (forward["package_id"],),
+        ).fetchone()
+        if exported is None or exported["package_digest"] != forward["digest_sha256"]:
+            raise PackageAdmissionConflict(
+                "return references an unknown or mismatched forward package"
+            )
+        # A locally captured forward package was addressed to the environment
+        # that is now sending the return package back.
+        known_sender = json.loads(exported["request_json"])["recipient_instance_key"]
+    else:
+        if known["digest_sha256"] != forward["digest_sha256"]:
+            raise PackageAdmissionConflict(
+                "return references an unknown or mismatched forward package"
+            )
+        known_sender = known["target_instance_key"]
+    if known_sender != document["sender"]["instance_key"]:
+        raise PackageAdmissionConflict("return references an unknown or mismatched forward package")
+    previous = connection.execute(
+        "SELECT * FROM package_receipts WHERE package_id = ?", (document["package_id"],)
+    ).fetchone()
+    if previous is not None and (
+        previous["digest_sha256"] != artifact.digest_sha256
+        or previous["target_instance_key"] != target
+    ):
+        raise PackageAdmissionConflict("package ID already identifies different received bytes")
+    package_ref_row = connection.execute(
+        "SELECT package_id FROM package_receipts WHERE package_ref = ?", (package_ref,)
+    ).fetchone()
+    if package_ref_row is not None and package_ref_row[0] != document["package_id"]:
+        raise PackageAdmissionConflict("local package reference already belongs to another package")
+
+    origins: list[str] = []
+    for repository in document["repositories"]:
+        origin = repository["origin"]
+        row = connection.execute(
+            "SELECT origin_id FROM object_origins WHERE origin_instance_key = ? "
+            "AND origin_repository_scope = ? AND object_type = 'repository' "
+            "AND origin_global_id = ?",
+            (origin["instance_key"], repository["repository"], origin["global_id"]),
+        ).fetchone()
+        if row is None:
+            raise PackageAdmissionConflict("return repository origin is not locally known")
+        mapping = connection.execute(
+            "SELECT target_repository_scope,target_global_id FROM object_mappings "
+            "WHERE origin_id = ? AND target_instance_key = ?",
+            (row["origin_id"], target),
+        ).fetchone()
+        if mapping is None or mapping["target_repository_scope"] != repository["repository"]:
+            raise PackageAdmissionConflict("return repository has no matching local replica")
+        if str(origin["instance_key"]) == target and str(mapping["target_global_id"]) != str(
+            origin["global_id"]
+        ):
+            raise PackageAdmissionConflict(
+                "return repository replica identity conflicts with local mapping"
+            )
+        origins.append(str(row["origin_id"]))
+
+    if previous is None:
+        connection.execute(
+            "INSERT INTO package_receipts VALUES (?,?,?,?,?,?)",
+            (
+                document["package_id"],
+                artifact.digest_sha256,
+                target,
+                package_ref,
+                canonical_json(document),
+                now(),
+            ),
+        )
+    return {
+        "package_id": document["package_id"],
+        "digest_sha256": artifact.digest_sha256,
+        "target_instance_key": target,
+        "origin_ids": sorted(origins),
+        "blocked_operations": [],
+        "replay": previous is not None,
+        "inventory_complete": False,
+        "content_inventory": {"status": "not-applicable", "classes": []},
+        "limitations": document["limitations"],
+        "realms": [],
+        "execution_authorized": False,
+        "forward_reference": forward,
+    }
+
+
 class PackageAdmissions:
     def __init__(self, state: StateStore, paths: RuntimePaths):
         self.state, self.paths = state, paths
@@ -257,11 +426,18 @@ class PackageAdmissions:
         self, package_ref: str, *, target_instance_key: str, profile_revision: int
     ) -> dict[str, Any]:
         artifact = self.artifact(package_ref)
+        return_baselines = _forward_baselines(self.paths, self.state, artifact)
         with self.state.transaction() as connection:
             authority = _authority(connection, target_instance_key, profile_revision)
             connection.execute("SAVEPOINT package_review")
             try:
-                report = _facts(connection, artifact, package_ref, target_instance_key)
+                report = _facts(
+                    connection,
+                    artifact,
+                    package_ref,
+                    target_instance_key,
+                    return_baselines=return_baselines,
+                )
             finally:
                 connection.execute("ROLLBACK TO package_review")
                 connection.execute("RELEASE package_review")
@@ -281,9 +457,16 @@ class PackageAdmissions:
         artifact = self.artifact(package_ref)
         if artifact.digest_sha256 != expected_digest:
             raise PackageAdmissionConflict("package bytes changed since local review")
+        return_baselines = _forward_baselines(self.paths, self.state, artifact)
         with self.state.transaction() as connection:
             _authority(connection, target_instance_key, profile_revision)
-            report = _facts(connection, artifact, package_ref, target_instance_key)
+            report = _facts(
+                connection,
+                artifact,
+                package_ref,
+                target_instance_key,
+                return_baselines=return_baselines,
+            )
         report["status"] = "admitted-facts-only"
         return report
 
@@ -341,6 +524,7 @@ class PackageAdmissions:
             include_metadata=include_metadata,
             apply_members=apply_members,
             author_credential_refs=author_credential_refs or {},
+            return_baselines=_forward_baselines(self.paths, self.state, artifact),
         )
         report["selection"] = selection
         review_facts = {
@@ -368,6 +552,7 @@ class PackageAdmissions:
         author_credential_refs: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         from gitferry.plan_application import prepare_transfer_plan
+        from gitferry.transfer_plans import PlanService
 
         review = self.plan_review(
             package_ref,
@@ -387,6 +572,7 @@ class PackageAdmissions:
                 "missing_credentials",
                 "waiting_parents",
                 "blocked_operations",
+                "return_conflicts",
             )
         ):
             raise PackageAdmissionConflict("local package prerequisites remain unresolved")
@@ -398,6 +584,15 @@ class PackageAdmissions:
         artifact = self.artifact(package_ref)
         if artifact.digest_sha256 != review["digest_sha256"]:
             raise PackageAdmissionConflict("package changed after plan review")
+        if artifact.document["schema_version"] == 5:
+            for existing in PlanService(self.state).list():
+                request = existing["document"]["inventory"]["request"]
+                if (
+                    request.get("mode") == "return"
+                    and request.get("package_digest") == artifact.digest_sha256
+                    and request.get("target_instance_key") == target_instance_key
+                ):
+                    return existing
         native_payloads = None
         if artifact.document["schema_version"] in (3, 4):
             native_payloads = [

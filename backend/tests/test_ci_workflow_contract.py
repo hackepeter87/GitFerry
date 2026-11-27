@@ -42,7 +42,7 @@ def test_ci_keeps_stable_required_check_contexts() -> None:
     by_name = {step["name"]: step for step in steps}
     browser = by_name["Run browser authentication tests"]
     diagnostics = by_name["Upload browser diagnostics"]
-    assert browser["timeout-minutes"] == 5
+    assert browser["timeout-minutes"] == 10
     assert diagnostics["if"] == "failure()"
     assert diagnostics["with"]["path"] == "frontend/test-results/"
     assert diagnostics["with"]["retention-days"] == 14

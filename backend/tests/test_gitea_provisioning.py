@@ -207,6 +207,49 @@ def test_target_lookup_rejects_duplicate_team_names() -> None:
         client.close()
 
 
+def test_branch_protection_reads_exact_and_pattern_rules() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json=[{"rule_name": "main"}, {"rule_name": "release/*"}],
+        )
+
+    client = GiteaProvisioningClient(
+        "https://target.invalid",
+        username="technical-admin",
+        password="synthetic",  # noqa: S106 - isolated MockTransport credential
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        assert client.is_branch_protected("access-lab/selected-private", "main")
+        assert client.is_branch_protected("access-lab/selected-private", "release/1.0")
+        assert not client.is_branch_protected("access-lab/selected-private", "feature")
+    finally:
+        client.close()
+    assert all(
+        request.url.path == "/api/v1/repos/access-lab/selected-private/branch_protections"
+        for request in requests
+    )
+
+
+@pytest.mark.parametrize("payload", [{"rule_name": "main"}, [{}], ["main"]])
+def test_branch_protection_malformed_response_fails_closed(payload: object) -> None:
+    client = GiteaProvisioningClient(
+        "https://target.invalid",
+        username="technical-admin",
+        password="synthetic",  # noqa: S106 - isolated MockTransport credential
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=payload)),
+    )
+    try:
+        with pytest.raises(ProvisioningTargetConflict, match="branch protection"):
+            client.is_branch_protected("access-lab/selected-private", "main")
+    finally:
+        client.close()
+
+
 def test_account_lookup_uses_the_documented_public_user_read_endpoint() -> None:
     requests: list[httpx.Request] = []
 

@@ -43,6 +43,10 @@ class MappingConflict(StateStoreError):
     """Raised when an immutable object mapping would be redirected."""
 
 
+class ObservationConflict(StateStoreError):
+    """Raised when a confirmed import observation would be redirected."""
+
+
 class OperationConflict(StateStoreError):
     """Raised when an operation id is reused for a different intent."""
 
@@ -150,3 +154,18 @@ class TargetConfirmation:
     target_issue_index: int | None
     target_native_created_at: str | None = None
     observed_state: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class GitImportObservationRecord:
+    """Immutable refs observed after a confirmed application-package import."""
+
+    forward_package_id: str
+    forward_package_digest: str
+    origin_id: str
+    target_instance_key: str
+    target_repository_scope: str
+    ruleset_name: str
+    ruleset_version: int
+    observed: dict[str, Any]
+    recorded_at: str

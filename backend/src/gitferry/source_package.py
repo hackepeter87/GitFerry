@@ -11,6 +11,73 @@ from gitferry.state_models import ObjectType
 from gitferry.state_store import MappingConflict, StateStore
 
 
+def build_return_package(
+    state: StateStore,
+    *,
+    package_id: str,
+    transfer_round_id: str,
+    created_at: str,
+    sender: str,
+    recipient: str,
+    forward_package_id: str,
+    forward_package_digest: str,
+    repositories: list[dict[str, Any]],
+    limitations: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build a v5 return carrier from independently observed Git ref facts.
+
+    The caller supplies the immutable A baseline and confirmed B import facts;
+    this function only serializes them and never grants local authority.
+    """
+    source = state.get_instance(sender)
+    target = state.get_instance(recipient)
+    result: dict[str, Any] = {
+        "format": "gitferry.application-package",
+        "schema_version": 5,
+        "package_id": package_id,
+        "transfer_round_id": transfer_round_id,
+        "producer_version": __version__,
+        "created_at": created_at,
+        "mode": "return",
+        "sender": {"instance_key": sender, "installation_marker": source.installation_marker},
+        "recipient": {"instance_key": recipient, "installation_marker": target.installation_marker},
+        "forward_reference": {
+            "package_id": forward_package_id,
+            "digest_sha256": forward_package_digest,
+        },
+        "repositories": [],
+        "limitations": sorted(
+            set(limitations or []) | {"Ref deletion and force updates are not supported."}
+        ),
+        "deletion_semantics": "absence-does-not-delete",
+    }
+    for item in repositories:
+        required = {"origin", "repository", "comparison"}
+        if not required.issubset(item):
+            raise MappingConflict("return repository facts are incomplete")
+        comparison = item["comparison"]
+        for field in ("original_baseline", "confirmed_import", "desired"):
+            if field not in comparison or not isinstance(comparison[field], dict):
+                raise MappingConflict("return comparison facts are incomplete")
+        selected: dict[str, Any] = {
+            "origin": dict(item["origin"]),
+            "repository": item["repository"],
+            "bundle": item.get("bundle"),
+            "comparison": {
+                "ruleset": "git-refs",
+                "ruleset_version": 1,
+                "original_baseline": dict(comparison["original_baseline"]),
+                "confirmed_import": dict(comparison["confirmed_import"]),
+                "desired": dict(comparison["desired"]),
+            },
+        }
+        result["repositories"].append(selected)
+    if not result["repositories"]:
+        raise MappingConflict("return package requires a selected repository")
+    result["repositories"].sort(key=lambda value: value["repository"])
+    return result
+
+
 def _origin(
     state: StateStore,
     source: str,

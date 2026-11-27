@@ -25,7 +25,7 @@ SUPPORTED_FIRST_IMPORT = frozenset(
 )
 
 CLASS_POLICIES: dict[str, dict[str, str]] = {
-    "git_refs": {"first_import": "supported-with-limits", "return": "not-implemented"},
+    "git_refs": {"first_import": "supported-with-limits", "return": "supported-with-limits"},
     "organizations": {"first_import": "supported-with-limits", "return": "not-implemented"},
     "teams": {"first_import": "supported-with-limits", "return": "not-implemented"},
     "permissions": {"first_import": "supported-with-limits", "return": "not-implemented"},
@@ -159,6 +159,12 @@ def _first_import_verified(report: dict[str, Any], content_class: str) -> bool:
 
 
 def _return_verified(report: dict[str, Any], content_class: str) -> bool:
+    if content_class == "git_refs":
+        return (
+            _value(report, "source_exports.assertions.git_return_ref_object_exact") is True
+            and _value(report, "source_exports.assertions.git_return_clone_reachable_object")
+            is True
+        )
     if content_class == "issues":
         return _value(report, "metadata_roundtrip.status") == "passed"
     if content_class == "comments":
@@ -194,7 +200,10 @@ def _evidence_sections(content_class: str) -> list[str]:
 
 def _limitation(content_class: str) -> str:
     return {
-        "git_refs": "Selected refs only; deletion and a guided return plan are not implemented.",
+        "git_refs": (
+            "Bounded ordinary branch/tag refs only; deletion, force updates, LFS/wiki and "
+            "metadata return remain outside this contract."
+        ),
         "organizations": (
             "Technical ownership remains local; organization deletion is not transferred."
         ),

@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 type Profile = { instance_key: string; display_name: string; revision: number; enabled: boolean; locally_approved: boolean };
 const source: Profile = { instance_key: "source-a", display_name: "Synthetic source A", revision: 7, enabled: true, locally_approved: true };
 const recipient = { instance_key: "recipient-b", display_name: "Synthetic recipient B", installation_marker: "install-recipient-b" };
+const forwardReceipt = { package_id: "forward-package-1", digest_sha256: "f".repeat(64), target_instance_key: source.instance_key, package_ref: "received-forward-1", received_at: "2026-01-01T00:00:00Z" };
 const inventoryClasses = ["git_refs", "lfs", "wiki", "organizations", "teams", "permissions", "identities", "issues", "labels", "comments", "attachments", "releases", "release_assets", "pull_requests", "pull_comments", "reviews", "review_comments", "timelines", "reactions", "milestones", "other_content"];
 
 function inventoryDocument(inventoryId: string, requestedClasses = ["git_refs", "organizations", "teams", "permissions", "identities", "issues", "comments"]) {
@@ -29,13 +30,14 @@ function job(export_id: string, status: "prepared" | "queued" | "running" | "rea
   };
 }
 
-async function openWorkspace(page: Page, exports: unknown[] = [], exportHandler?: (route: import("@playwright/test").Route) => Promise<unknown> | unknown, recipientHandler?: (route: import("@playwright/test").Route) => Promise<unknown> | unknown): Promise<void> {
+async function openWorkspace(page: Page, exports: unknown[] = [], exportHandler?: (route: import("@playwright/test").Route) => Promise<unknown> | unknown, recipientHandler?: (route: import("@playwright/test").Route) => Promise<unknown> | unknown, receipts: unknown[] = []): Promise<void> {
   const inventoryJobs = new Map<string, ReturnType<typeof inventoryJob>>();
   await page.route("**/api/v1/auth/status", (route) => route.fulfill({ json: { bootstrapRequired: false } }));
   await page.route("**/api/v1/auth/session", (route) => route.fulfill({ json: { authenticated: true, principal: { username: "synthetic.admin", role: "admin" } } }));
   await page.route("**/api/v1/connections", (route) => route.fulfill({ json: [source] }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/package-uploads**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/packages", (route) => route.fulfill({ json: receipts }));
   await page.route("**/api/v1/connections/source-a/browse", async (route) => {
     const body = route.request().postDataJSON() as { kind: string };
     await route.fulfill({ json: { instance_key: source.instance_key, profile_revision: source.revision, evidence_digest: "synthetic-evidence", kind: body.kind,
@@ -92,6 +94,34 @@ test("submits the exact immutable source selection and recipient", async ({ page
   expect(submitted?.request).toMatchObject({ version: 2, inventory_digest: "d".repeat(64), source_instance_key: "source-a", source_profile_revision: 7,
     recipient_instance_key: "recipient-b", repositories: [{ repository: "synthetic-org/first", global_id: "101" }], include_metadata: true, include_members: true });
   expect(submitted?.request).toHaveProperty("inventory_id", expect.stringMatching(/^inventory-[0-9a-f-]{36}$/));
+});
+
+test("creates a bounded Git return request from an admitted forward package", async ({ page }) => {
+  let submitted: { export_id: string; request: Record<string, unknown> } | undefined;
+  const exportHandler = async (route: import("@playwright/test").Route) => {
+    if (route.request().method() === "GET") return route.fulfill({ json: [] });
+    submitted = route.request().postDataJSON();
+    return route.fulfill({ status: 202, json: job(submitted.export_id, "queued") });
+  };
+  await openWorkspace(page, [], exportHandler, undefined, [forwardReceipt]);
+  await page.getByLabel("Recipient registration").selectOption(recipient.instance_key);
+  await page.getByLabel("Return selected Git changes from an admitted package").check();
+  await page.getByLabel("Admitted forward package").selectOption(forwardReceipt.package_id);
+  await expect(page.getByText(`Forward digest: ${forwardReceipt.digest_sha256}`)).toBeVisible();
+  await page.getByRole("button", { name: "Create and queue export" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "was queued" })).toBeVisible();
+  expect(submitted?.request).toEqual({
+    version: 5,
+    mode: "return",
+    forward_package_id: forwardReceipt.package_id,
+    forward_package_digest: forwardReceipt.digest_sha256,
+    source_instance_key: source.instance_key,
+    source_profile_revision: source.revision,
+    recipient_instance_key: recipient.instance_key,
+    repositories: [{ repository: "synthetic-org/first", global_id: "101" }],
+    include_metadata: false,
+    include_members: false,
+  });
 });
 
 test("reloads saved jobs without POST and polls to a streamed download link", async ({ page }) => {
@@ -168,6 +198,7 @@ test("returns to sign-in when recipient loading expires the session", async ({ p
   await page.route("**/api/v1/connections", (route) => route.fulfill({ json: [source] }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/package-uploads**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/packages", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/exports/recipients", (route) => route.fulfill({ status: 401, json: { error: { code: "authentication_required", message: "Session expired" } } }));
   await page.route("**/api/v1/exports", (route) => route.fulfill({ json: [] }));
   await page.goto("/");

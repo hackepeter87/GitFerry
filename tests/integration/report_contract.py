@@ -1002,6 +1002,14 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
                         "structure_account_counts_unchanged",
                         "structure_phase_confirmed_without_bindings_or_memberships",
                         "late_full_plan_reused_structure_operations",
+                        "git_return_file_only",
+                        "git_return_ref_object_exact",
+                        "git_return_existing_branch_fast_forward",
+                        "git_return_selected_drift_blocks_before_push",
+                        "git_return_protected_ref_blocks_before_push",
+                        "git_return_lost_response_requires_exact_recovery",
+                        "git_return_replay_restart_no_duplicate",
+                        "git_return_control_and_network_isolation",
                     }
                 ),
             )

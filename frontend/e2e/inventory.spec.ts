@@ -20,6 +20,7 @@ async function open(page: Page, nativeReady = false): Promise<{
   await page.route("**/api/v1/connections", (route) => route.fulfill({ json: [source] }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/package-uploads**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/packages", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/connections/source-a/browse", async (route) => {
     const body = route.request().postDataJSON() as { kind: string };
     await route.fulfill({ json: { instance_key: source.instance_key, profile_revision: source.revision, evidence_digest: "synthetic-evidence", kind: body.kind, organization: body.kind === "repositories" ? "synthetic-org" : null, page: 1, entries: body.kind === "organizations" ? [{ id: "42", name: "synthetic-org" }] : [{ id: "101", repository: "synthetic-org/first", private: false }], next_page: null, inventory_complete: false } });

@@ -107,6 +107,20 @@ repository, parent, native author ID/login and body. Requeueing does not resolve
 Cancellation does not roll back confirmed writes. No API or CLI plan command can mark unexecuted
 operations successful.
 
+For an ambiguous Git ref push, use the dedicated live-read reconciliation path rather than the
+generic state command:
+
+```sh
+gitferry plans resolve-git-ref --operation-id OPERATION_ID \
+  --evidence "Reason for accepting the exact live target ref"
+```
+
+The command uses the locally approved target profile, credential reference and CA trust. It
+re-reads the mapped repository identity and all remote refs, and confirms the operation only when
+the intended ref points to the exact intended object. It performs no write. A caller cannot supply
+an object ID or repository identity as evidence. After successful reconciliation, recheck and queue
+the existing plan; a conflicting live target remains blocked.
+
 The preview, execution preflight, and subsequent Gitea writes do not form a distributed
 transaction. Other writers can still change remote data between checks, including the documented
 comment-read/PATCH gap. There is no general exactly-once guarantee, timestamp restoration, or

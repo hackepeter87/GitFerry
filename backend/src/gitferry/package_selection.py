@@ -11,6 +11,7 @@ from typing import Any
 
 from gitferry.application_package import PackageArtifact, load_package_metadata
 from gitferry.comment_operations import resolve_author_binding
+from gitferry.git_return import compare_return_refs
 from gitferry.state_codec import canonical_json, origin_id
 from gitferry.state_store import OperationBlocked, StateStore
 
@@ -58,10 +59,13 @@ def build_package_selection(
     include_metadata: bool,
     apply_members: bool,
     author_credential_refs: dict[str, str],
+    return_baselines: Mapping[str, Mapping[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Build a bounded :class:`PlanRequest`-shaped selection and prerequisite report."""
 
     document = artifact.document
+    if document.get("schema_version") == 5 and document.get("mode") == "return":
+        return _build_return_selection(state, artifact, package_ref, return_baselines)
     target = str(document["recipient"]["instance_key"])
     missing_bindings: list[str] = []
     missing_credentials: list[str] = []
@@ -317,4 +321,115 @@ def build_package_selection(
         "missing_credentials": missing_credentials,
         "waiting_parents": waiting_parents,
         "blocked_operations": blocked_operations,
+        "return_conflicts": [],
+    }
+
+
+def _build_return_selection(
+    state: StateStore,
+    artifact: PackageArtifact,
+    package_ref: str,
+    return_baselines: Mapping[str, Mapping[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Build a conservative return request; remote ref reads happen during preflight."""
+    document = artifact.document
+    target = str(document["recipient"]["instance_key"])
+    repositories: list[dict[str, Any]] = []
+    conflicts: list[dict[str, str]] = []
+    for selected in document["repositories"]:
+        origin = selected["origin"]
+        repository = selected["repository"]
+        origin_identifier = origin_id(
+            origin["instance_key"], repository, "repository", origin["global_id"]
+        )
+        try:
+            mapping = state.get_object_mapping(origin_identifier, target)
+        except KeyError:
+            raise ValueError("return repository has no local target mapping") from None
+        if mapping.target_repository_scope != repository:
+            raise ValueError("return repository mapping scope conflicts with local state")
+        comparison = selected["comparison"]
+        local_baseline = (
+            dict(return_baselines[repository])
+            if return_baselines is not None and repository in return_baselines
+            else None
+        )
+        if local_baseline is None:
+            conflicts.append(
+                {
+                    "ref": "*",
+                    "code": "baseline-unavailable",
+                    "reason": "immutable forward baseline is not available in local state",
+                }
+            )
+            # Do not use package-provided facts as a fallback for the comparison.
+            local_baseline = {}
+        elif local_baseline != comparison["original_baseline"]:
+            for ref in sorted(set(local_baseline) | set(comparison["original_baseline"])):
+                if local_baseline.get(ref) != comparison["original_baseline"].get(ref):
+                    conflicts.append(
+                        {
+                            "ref": ref,
+                            "code": "baseline-mismatch",
+                            "reason": (
+                                "return package baseline differs from immutable local "
+                                "forward baseline"
+                            ),
+                        }
+                    )
+        plan = compare_return_refs(
+            local_baseline,
+            comparison["confirmed_import"],
+            comparison["desired"],
+            local_baseline,
+            # Package review cannot prove Git ancestry: it has no live target
+            # object graph.  Keep the review focused on immutable A-baseline
+            # and supported-ref rules; the bundle preflight performs the
+            # authoritative merge-base check immediately before the push.
+            is_ancestor=lambda _old, _new: True,
+        )
+        conflicts.extend(
+            {"ref": item.ref, "code": item.code, "reason": item.reason} for item in plan.conflicts
+        )
+        bundle = selected.get("bundle")
+        repository_item = {
+            "repository_origin_id": origin_identifier,
+            "repository": repository,
+            "return_repository_id": mapping.target_global_id,
+            "bundle": (
+                {
+                    "member": bundle["path"],
+                    "size": bundle["size"],
+                    "sha256": bundle["sha256"],
+                }
+                if bundle is not None
+                else None
+            ),
+            "return_comparison": comparison,
+        }
+        repositories.append(repository_item)
+    request = {
+        "version": 2,
+        "mode": "return",
+        "target_instance_key": target,
+        "round_key": document["transfer_round_id"],
+        "package_ref": package_ref,
+        "package_digest": artifact.digest_sha256,
+        "repositories": repositories,
+        "metadata": [],
+        "content": [],
+        "author_credential_refs": {},
+        # Package limitations remain visible in the admission review, but they
+        # are not selected content. Only an actual unsupported selection may
+        # block plan execution.
+        "unsupported_items": [],
+    }
+    return {
+        "request": request,
+        "missing_bindings": [],
+        "missing_credentials": [],
+        "waiting_parents": [],
+        "blocked_operations": [],
+        "return_conflicts": conflicts,
+        "remote_preflight_required": True,
     }

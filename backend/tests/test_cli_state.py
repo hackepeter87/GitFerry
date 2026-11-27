@@ -127,6 +127,51 @@ def test_cli_generic_resolution_rejects_metadata_without_live_verification(
     assert state.get_operation("label-18").status == "outcome_unknown"
 
 
+def test_cli_generic_resolution_rejects_git_ref_without_live_verification(
+    tmp_path: Path, capsys: object
+) -> None:
+    database, state = unknown_operation(tmp_path)
+    state.end_executor_session("restart")
+    origin = state.register_origin(OriginKey("instance-a", "org/repo", "repository", "41"))
+    state.prepare_operation(
+        operation_id="ref-41",
+        origin_id=origin.id,
+        target_instance_key="instance-b",
+        target_repository_scope="org/repo",
+        operation_type="push_git_ref",
+        mapping_version=1,
+        baseline_id=None,
+        intent={"ref": "refs/heads/main", "old_oid": "a" * 40, "new_oid": "b" * 40},
+    )
+    state.start_executor_session("ref-crash")
+    state.claim_operation("ref-41", "ref-crash")
+    state.start_executor_session("ref-restart", recover_abandoned=True)
+    evidence_file = tmp_path / "ref-observed.json"
+    evidence_file.write_text(json.dumps({"ref": "refs/heads/main"}), encoding="utf-8")
+
+    exit_code = main(
+        [
+            "state",
+            "resolve-unknown",
+            "--database",
+            str(database),
+            "--operation-id",
+            "ref-41",
+            "--target-global-id",
+            "41",
+            "--observed-intent",
+            str(evidence_file),
+            "--evidence",
+            "untrusted operator assertion",
+        ]
+    )
+
+    assert exit_code == 2
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert "generic resolve-unknown cannot confirm push_git_ref" in output["error"]
+    assert state.get_operation("ref-41").status == "outcome_unknown"
+
+
 def test_cli_creates_verifies_and_admits_transport(tmp_path: Path, capsys: object) -> None:
     a_database = tmp_path / "a.sqlite3"
     b_database = tmp_path / "b.sqlite3"
@@ -249,3 +294,51 @@ def test_native_resolution_cli_sanitizes_remote_verification_failure(
     assert json.loads(output)["status"] == "failed"
     assert "operation remains unresolved" in output
     assert "synthetic-private-remote-detail" not in output
+
+
+def test_git_ref_resolution_cli_uses_live_target_reconciliation(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from gitferry import git_return_reconciliation
+
+    (tmp_path / "packages").mkdir()
+    (tmp_path / "work").mkdir()
+    monkeypatch.setenv("GITFERRY_PACKAGE_DIR", str(tmp_path / "packages"))
+    monkeypatch.setenv("GITFERRY_WORK_DIR", str(tmp_path / "work"))
+
+    called = {}
+
+    def resolve(state, paths, operation_id, *, evidence, references=None):
+        called.update(
+            operation_id=operation_id,
+            evidence=evidence,
+            database=paths.state_database,
+        )
+        return SimpleNamespace(operation_id=operation_id, status="confirmed")
+
+    monkeypatch.setattr(git_return_reconciliation, "resolve_git_ref_operation", resolve)
+    database = tmp_path / "state.sqlite3"
+    assert (
+        main(
+            [
+                "plans",
+                "resolve-git-ref",
+                "--database",
+                str(database),
+                "--operation-id",
+                "git-return-unknown",
+                "--evidence",
+                "Verified the exact mapped target ref",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out) == {
+        "operation_id": "git-return-unknown",
+        "status": "confirmed",
+    }
+    assert called == {
+        "operation_id": "git-return-unknown",
+        "evidence": "Verified the exact mapped target ref",
+        "database": database,
+    }

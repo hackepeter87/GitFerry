@@ -85,6 +85,15 @@ ASSERTIONS = frozenset(
         "directory_reader_unit_permissions",
         "directory_writer_unit_permissions",
         "structure_account_counts_unchanged",
+        "git_return_file_only",
+        "git_return_ref_object_exact",
+        "git_return_existing_branch_fast_forward",
+        "git_return_clone_reachable_object",
+        "git_return_selected_drift_blocks_before_push",
+        "git_return_protected_ref_blocks_before_push",
+        "git_return_lost_response_requires_exact_recovery",
+        "git_return_replay_restart_no_duplicate",
+        "git_return_control_and_network_isolation",
     }
 )
 
@@ -159,6 +168,36 @@ def _target_worker(mode: str, context: str = "normal") -> dict[str, Any]:
     return json.loads(result.stdout)
 
 
+def _git_return_worker(
+    service: str,
+    mode: str,
+    *,
+    expected_exit_code: int | None = None,
+) -> dict[str, Any]:
+    result = docker_service_exec(
+        service, ["python", "/probe/git_return_worker.py", mode], timeout=240, check=False
+    )
+    if expected_exit_code is not None and result.returncode == expected_exit_code:
+        return {
+            "status": "expected_crash",
+            "returncode": result.returncode,
+            "stderr": result.stderr[-2000:],
+        }
+    if result.returncode:
+        evidence = {"service": service, "mode": mode, "exit_code": result.returncode}
+        for line in result.stderr.splitlines():
+            if line.startswith("GITFERRY_PROBE_ERROR "):
+                evidence.update(json.loads(line.removeprefix("GITFERRY_PROBE_ERROR ")))
+        (WORK / "git-return-worker-failure.json").write_text(json.dumps(evidence, indent=2))
+        raise ProbeFailure(f"Git return worker {service}/{mode} failed")
+    if expected_exit_code is not None:
+        raise ProbeFailure(
+            f"Git return worker {service}/{mode} returned normally; "
+            f"expected exit {expected_exit_code}"
+        )
+    return json.loads(result.stdout)
+
+
 def _run_browser(
     archive: Path, phase: str, base_url: str, *, evidence_name: str | None = None
 ) -> dict[str, Any]:
@@ -200,6 +239,10 @@ def run_source_export_probe() -> dict[str, Any]:
     worker_path = Path(__file__).with_name("source_export_worker.py")
     docker_copy(worker_path, "gitferry-a:/probe/source_export_worker.py")
     for service in ("gitferry-a", "gitferry-b"):
+        docker_copy(
+            worker_path.with_name("git_return_worker.py"),
+            f"{service}:/probe/git_return_worker.py",
+        )
         docker_copy(
             worker_path.with_name("native_browser_fixture.py"),
             f"{service}:/probe/native_browser_fixture.py",
@@ -315,6 +358,31 @@ def run_source_export_probe() -> dict[str, Any]:
         finally:
             _target_worker("stop-browser")
     target_replay = _target_worker("replay")
+    return_export = _git_return_worker("gitferry-b", "export-b")
+    return_archive = PACKAGE / "git-return-real.zip"
+    docker_copy("gitferry-b:/state/package-admission/git-return-real.zip", return_archive)
+    docker_copy(return_archive, "gitferry-a:/state/source-export/git-return-real.zip")
+    return_drift = _git_return_worker("gitferry-a", "drift-a")
+    return_protected = _git_return_worker("gitferry-a", "protected-a")
+    return_crash = _git_return_worker("gitferry-a", "crash-a", expected_exit_code=42)
+    return_recovery = _git_return_worker("gitferry-a", "recover-a")
+    return_replay = _git_return_worker("gitferry-a", "replay-a")
+    (WORK / "git-return-evidence.json").write_text(
+        json.dumps(
+            {
+                "export": return_export,
+                "drift": return_drift,
+                "protected": return_protected,
+                "crash": return_crash,
+                "recovery": return_recovery,
+                "replay": return_replay,
+            },
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     runtimes = {}
     image_ids = {}
     for service, context in (("gitferry-a", "source-export"), ("gitferry-b", "package-admission")):
@@ -561,6 +629,50 @@ def run_source_export_probe() -> dict[str, Any]:
     assertions["directory_writer_unit_permissions"] = authority["writer_unit_permissions"]
     assertions["structure_account_counts_unchanged"] = (
         structure["account_count_before"] == structure["account_count_after"]
+    )
+    assertions["git_return_file_only"] = (
+        return_export["status"] == "ready"
+        and return_archive.is_file()
+        and return_recovery["status"] == "confirmed"
+        and return_recovery["return_digest"] == return_export["package_digest"]
+    )
+    assertions["git_return_ref_object_exact"] = (
+        return_recovery["remote_oid"] == return_recovery["intended_oid"]
+        and return_recovery["final_refs"].get("refs/heads/offline-return")
+        == return_export["offline_oid"]
+    )
+    assertions["git_return_existing_branch_fast_forward"] = (
+        return_export["existing_main_advanced"]
+        and return_recovery["final_refs"].get("refs/heads/main")
+        == return_export["offline_main_oid"]
+    )
+    assertions["git_return_clone_reachable_object"] = return_recovery["clone_reachable"]
+    assertions["git_return_selected_drift_blocks_before_push"] = (
+        return_drift["status"] == "blocked"
+        and return_drift["no_push"]
+        and return_drift["cleanup_restored"]
+    )
+    assertions["git_return_protected_ref_blocks_before_push"] = (
+        return_protected["status"] == "blocked" and return_protected["no_push"]
+    )
+    assertions["git_return_lost_response_requires_exact_recovery"] = (
+        return_crash["status"] == "expected_crash"
+        and return_crash["returncode"] == 42
+        and return_recovery["restart_status"] == "outcome_unknown"
+        and return_recovery["status"] == "confirmed"
+        and return_recovery["wrong_target_rejected"]
+    )
+    assertions["git_return_replay_restart_no_duplicate"] = (
+        return_replay["status"] == "confirmed"
+        and return_replay["same_refs"]
+        and return_replay["push_attempts"] > 0
+        and return_recovery["push_attempts"] == return_replay["push_attempts"]
+    )
+    assertions["git_return_control_and_network_isolation"] = (
+        return_export["source_unreachable"]
+        and return_drift["target_unreachable"]
+        and return_drift["control_unchanged"]
+        and return_protected["control_unchanged"]
     )
     from directory_identity_recovery_probe import run as run_identity_recovery
 

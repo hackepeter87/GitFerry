@@ -291,6 +291,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "comments require state resolve-unknown-comment "
                         "with live target verification"
                     )
+                if operation_type == "push_git_ref":
+                    raise ValueError(
+                        "Git ref pushes require live target verification; "
+                        "generic resolve-unknown cannot confirm push_git_ref"
+                    )
                 operation = state.resolve_unknown_operation(
                     args.operation_id,
                     target_global_id=args.target_global_id,

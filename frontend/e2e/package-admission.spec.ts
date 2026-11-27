@@ -13,6 +13,7 @@ async function open(page: import("@playwright/test").Page, overrides: { connecti
   await page.route("**/api/v1/exports", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/exports/recipients", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/package-uploads", (route) => route.fulfill({ json: overrides.uploads ?? [ready] }));
+  await page.route("**/api/v1/packages", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/package-uploads/upload-01234567-89ab-cdef-0123-456789abcdef", (route) => route.fulfill({ json: ready }));
   await page.goto("/");
   await page.getByRole("button", { name: /upload-01234567/ }).click();
@@ -42,6 +43,28 @@ test("admits a ready package and prepares a draft through plan review", async ({
   await page.getByRole("button", { name: "Prepare draft for Transfer plans" }).click();
   await expect(page.getByRole("heading", { name: "Transfer plans" })).toBeFocused();
   expect(planReviewCalls).toBe(1);
+});
+
+test("shows return baseline conflicts and blocks draft preparation", async ({ page }) => {
+  await page.route("**/api/v1/packages/pkg.synthetic/prerequisites", (route) => route.fulfill({ json: prerequisites }));
+  await page.route("**/api/v1/packages/pkg.synthetic/review", (route) => route.fulfill({ json: { digest_sha256: prerequisites.digest_sha256 } }));
+  await page.route("**/api/v1/packages/pkg.synthetic/admit", (route) => route.fulfill({ json: { status: "admitted-facts-only" } }));
+  await page.route("**/api/v1/packages/pkg.synthetic/plan-review", (route) => route.fulfill({ json: {
+    review_digest: "return-conflict-review",
+    selection: {
+      request: { repositories: [{ repository: "synthetic-org/repo" }] },
+      missing_bindings: [], missing_credentials: [], waiting_parents: [], blocked_operations: [],
+      return_conflicts: [{ ref: "refs/heads/main", code: "baseline-mismatch", reason: "return package baseline differs from immutable local forward baseline" }],
+    },
+  } }));
+  await open(page);
+  await page.getByLabel("Locally approved target").selectOption("target.synthetic");
+  await page.getByRole("button", { name: "Load prerequisites" }).click();
+  await page.getByRole("button", { name: "Admit package locally" }).click();
+  await page.getByRole("button", { name: "Review plan selection" }).click();
+  await expect(page.getByRole("alert")).toContainText("Return conflicts block plan preparation");
+  await expect(page.getByText(/baseline-mismatch/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Prepare draft for Transfer plans" })).toBeDisabled();
 });
 
 test("changed plan options invalidate the reviewed selection until explicitly reviewed again", async ({ page }) => {

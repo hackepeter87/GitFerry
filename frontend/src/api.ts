@@ -225,7 +225,10 @@ export interface SourceExportRepository {
 }
 
 export interface SourceExportRequest {
-  version: 1 | 2 | 3 | 4;
+  version: 1 | 2 | 3 | 4 | 5;
+  mode?: "first-import" | "return";
+  forward_package_id?: string;
+  forward_package_digest?: string;
   inventory_id?: string;
   inventory_digest?: string;
   source_instance_key: string;
@@ -281,6 +284,14 @@ export interface PackageUpload {
   created_at: string;
   updated_at: string;
   summary: PackageUploadSummary | null;
+}
+
+export interface PackageReceipt {
+  package_id: string;
+  digest_sha256: string;
+  target_instance_key: string;
+  package_ref: string;
+  received_at: string;
 }
 
 export interface PackageAdmissionBase {
@@ -412,6 +423,10 @@ export function listConnections(): Promise<ConnectionProfile[]> {
 
 export function listPackageUploads(): Promise<PackageUpload[]> {
   return request("/api/v1/package-uploads");
+}
+
+export function listPackageReceipts(): Promise<PackageReceipt[]> {
+  return request("/api/v1/packages");
 }
 
 export function getPackageUpload(uploadId: string): Promise<PackageUpload> {

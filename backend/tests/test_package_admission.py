@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from gitferry.application_package import PackageError, write_package
+from gitferry.application_package import PackageError, inspect_package, write_package
 from gitferry.connection_probe import approve_connection
 from gitferry.connection_profiles import ConnectionProfile, ProfileService
 from gitferry.operations import OperationExecutor
@@ -18,6 +18,7 @@ from gitferry.package_admission import PackageAdmissionConflict, PackageAdmissio
 from gitferry.package_archive import receive_package_archive, write_package_archive
 from gitferry.package_selection import build_package_selection
 from gitferry.runtime import RuntimePaths
+from gitferry.source_package import build_return_package
 from gitferry.state_migrations import MIGRATIONS, SCHEMA_VERSION
 from gitferry.state_store import OriginKey, StateStore
 from gitferry.transfer_plans import PlanConflict
@@ -148,6 +149,139 @@ def test_review_rolls_back_and_receipt_preserves_facts_without_local_authority(
         ).fetchone()
     assert admit(service, ref)["replay"]
     assert counts(service) == after
+
+
+def test_return_package_admission_requires_forward_receipt_and_existing_replica(
+    tmp_path: Path,
+) -> None:
+    state = StateStore(tmp_path / "state.sqlite")
+    state.register_instance("a", "A", "https://a.invalid", "a-install")
+    state.register_instance("b", "B", "https://b.invalid", "b-install")
+    profiles = ProfileService(state)
+    profiles.create(ConnectionProfile("a", "A", "https://a.invalid", "a-install", "admin"))
+    identity = json.dumps(
+        {
+            "account_id": "1",
+            "login": "admin",
+            "ca_digest": "system-trust",
+            "certificate_sha256": "cert",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    with state.transaction() as connection:
+        connection.execute(
+            "INSERT INTO connection_checks VALUES (?,?,?,?,?)",
+            ("a", 1, identity, identity, "now"),
+        )
+    approve_connection(
+        profiles,
+        "a",
+        expected_revision=1,
+        evidence_digest=hashlib.sha256(identity.encode()).hexdigest(),
+    )
+    origin = state.register_origin(OriginKey("a", "org/repo", "repository", "41"))
+    state.add_object_mapping(origin.id, "a", "org/repo", "41")
+    with state.transaction() as connection:
+        connection.execute(
+            "INSERT INTO package_receipts VALUES (?,?,?,?,?,?)",
+            ("forward-package-1", "a" * 64, "b", "forward", "{}", "now"),
+        )
+    package = {
+        "format": "gitferry.application-package",
+        "schema_version": 5,
+        "package_id": "return-package-1",
+        "transfer_round_id": "round-1",
+        "producer_version": "test",
+        "created_at": "2026-11-27T08:00:00Z",
+        "mode": "return",
+        "sender": {"instance_key": "b", "installation_marker": "b-install"},
+        "recipient": {"instance_key": "a", "installation_marker": "a-install"},
+        "forward_reference": {"package_id": "forward-package-1", "digest_sha256": "a" * 64},
+        "repositories": [
+            {
+                "origin": {"instance_key": "a", "global_id": "41"},
+                "repository": "org/repo",
+                "bundle": {
+                    "path": "bundles/return.bundle",
+                    "size": len(b"return bundle"),
+                    "sha256": hashlib.sha256(b"return bundle").hexdigest(),
+                },
+                "comparison": {
+                    "ruleset": "git-refs",
+                    "ruleset_version": 1,
+                    "original_baseline": {"refs/heads/main": "1" * 40},
+                    "confirmed_import": {"refs/heads/main": "1" * 40},
+                    "desired": {"refs/heads/main": "2" * 40},
+                },
+            }
+        ],
+        "limitations": ["No deletion"],
+        "deletion_semantics": "absence-does-not-delete",
+    }
+    package_dir = tmp_path / "packages" / "return"
+    package_dir.mkdir(parents=True)
+    (package_dir / "bundles").mkdir()
+    (package_dir / "bundles/return.bundle").write_bytes(b"return bundle")
+    write_package(package_dir, package)
+    paths = RuntimePaths(tmp_path / "runtime.sqlite", tmp_path / "packages", tmp_path / "work")
+    paths.package_directory.mkdir(exist_ok=True)
+    paths.work_directory.mkdir(exist_ok=True)
+    service = PackageAdmissions(state, paths)
+    # A forward receipt alone is not enough: the immutable A baseline must be
+    # available from the locally retained forward package before admission.
+    before = counts(service)
+    with pytest.raises(PackageAdmissionConflict, match="immutable local forward baseline"):
+        service.review("return", target_instance_key="a", profile_revision=1)
+    assert counts(service) == before
+
+
+def test_return_package_cannot_redefine_locally_captured_forward_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exporter = configure(tmp_path)
+    mock_reads(monkeypatch)
+    job = exporter.prepare(requested())
+    exporter.run(job["export_id"])
+    forward = inspect_package(exporter.paths.package_directory / job["export_id"])
+
+    package = build_return_package(
+        exporter.state,
+        package_id="tampered-return",
+        transfer_round_id="round-tampered",
+        created_at="2026-11-27T10:00:00Z",
+        sender="b",
+        recipient="a",
+        forward_package_id=forward.document["package_id"],
+        forward_package_digest=forward.digest_sha256,
+        repositories=[
+            {
+                "origin": {"instance_key": "a", "global_id": "7"},
+                "repository": "synthetic/selected",
+                "comparison": {
+                    "original_baseline": {"refs/heads/main": "9" * 40},
+                    "confirmed_import": {},
+                    "desired": {"refs/heads/offline": "8" * 40},
+                },
+            }
+        ],
+    )
+    payload = b"synthetic tampered return bundle"
+    package["repositories"][0]["bundle"] = {
+        "path": "bundles/return.bundle",
+        "size": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    directory = exporter.paths.package_directory / "tampered-return"
+    (directory / "bundles").mkdir(parents=True)
+    (directory / "bundles/return.bundle").write_bytes(payload)
+    write_package(directory, package)
+
+    admissions = PackageAdmissions(exporter.state, exporter.paths)
+    before = counts(admissions)
+    with pytest.raises(PackageAdmissionConflict, match="immutable local forward baseline"):
+        admissions.review("tampered-return", target_instance_key="a", profile_revision=1)
+    assert counts(admissions) == before
 
 
 def test_receipt_replay_survives_real_process_restart(
