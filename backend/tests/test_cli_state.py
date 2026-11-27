@@ -294,3 +294,51 @@ def test_native_resolution_cli_sanitizes_remote_verification_failure(
     assert json.loads(output)["status"] == "failed"
     assert "operation remains unresolved" in output
     assert "synthetic-private-remote-detail" not in output
+
+
+def test_git_ref_resolution_cli_uses_live_target_reconciliation(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from gitferry import git_return_reconciliation
+
+    (tmp_path / "packages").mkdir()
+    (tmp_path / "work").mkdir()
+    monkeypatch.setenv("GITFERRY_PACKAGE_DIR", str(tmp_path / "packages"))
+    monkeypatch.setenv("GITFERRY_WORK_DIR", str(tmp_path / "work"))
+
+    called = {}
+
+    def resolve(state, paths, operation_id, *, evidence, references=None):
+        called.update(
+            operation_id=operation_id,
+            evidence=evidence,
+            database=paths.state_database,
+        )
+        return SimpleNamespace(operation_id=operation_id, status="confirmed")
+
+    monkeypatch.setattr(git_return_reconciliation, "resolve_git_ref_operation", resolve)
+    database = tmp_path / "state.sqlite3"
+    assert (
+        main(
+            [
+                "plans",
+                "resolve-git-ref",
+                "--database",
+                str(database),
+                "--operation-id",
+                "git-return-unknown",
+                "--evidence",
+                "Verified the exact mapped target ref",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out) == {
+        "operation_id": "git-return-unknown",
+        "status": "confirmed",
+    }
+    assert called == {
+        "operation_id": "git-return-unknown",
+        "evidence": "Verified the exact mapped target ref",
+        "database": database,
+    }

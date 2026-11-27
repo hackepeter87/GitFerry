@@ -87,6 +87,7 @@ ASSERTIONS = frozenset(
         "structure_account_counts_unchanged",
         "git_return_file_only",
         "git_return_ref_object_exact",
+        "git_return_clone_reachable_object",
         "git_return_selected_drift_blocks_before_push",
         "git_return_protected_ref_blocks_before_push",
         "git_return_lost_response_requires_exact_recovery",
@@ -639,6 +640,7 @@ def run_source_export_probe() -> dict[str, Any]:
         and return_recovery["final_refs"].get("refs/heads/offline-return")
         == return_export["offline_oid"]
     )
+    assertions["git_return_clone_reachable_object"] = return_recovery["clone_reachable"]
     assertions["git_return_selected_drift_blocks_before_push"] = (
         return_drift["status"] == "blocked"
         and return_drift["no_push"]

@@ -109,6 +109,57 @@ def _git_refs(root: Path, base_url: str, repository: str) -> dict[str, str]:
     }
 
 
+def _clone_and_verify_return(
+    root: Path, base_url: str, repository: str, ref: str, oid: str
+) -> bool:
+    """Verify the returned ref through a real clone and reachable object read."""
+
+    with tempfile.TemporaryDirectory(prefix="gitferry-return-clone-", dir=root / "work") as raw:
+        clone = Path(raw) / "repository"
+        with _git_environment(root) as environment:
+            subprocess.run(  # noqa: S603
+                [
+                    shutil.which("git") or "/usr/bin/git",
+                    "clone",
+                    "--no-checkout",
+                    f"{base_url}/{repository}.git",
+                    str(clone),
+                ],
+                env=environment,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(  # noqa: S603
+                [shutil.which("git") or "/usr/bin/git", "cat-file", "-e", f"{oid}^{{commit}}"],
+                cwd=clone,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(  # noqa: S603
+                [
+                    shutil.which("git") or "/usr/bin/git",
+                    "show",
+                    "--format=",
+                    f"{oid}:OFFLINE-RETURN.txt",
+                ],
+                cwd=clone,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            result = subprocess.run(  # noqa: S603
+                [shutil.which("git") or "/usr/bin/git", "ls-remote", "--refs", "origin", ref],
+                cwd=clone,
+                env=environment,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        return any(line.split("\t", 1) == [oid, ref] for line in result.stdout.splitlines())
+
+
 def _unreachable(host: str, port: int) -> bool:
     try:
         with socket.create_connection((host, port), timeout=2):
@@ -568,6 +619,9 @@ def recover_return() -> dict[str, Any]:
     with plan_worker.proxy(preserve_origin=True):
         resumed = PlanRunner(service, adapter).run(plan_id)
     final_refs = _git_refs(A_ROOT, A_URL, REPOSITORY)
+    clone_reachable = _clone_and_verify_return(
+        A_ROOT, A_URL, REPOSITORY, operation.intent["ref"], str(operation.intent["new_oid"])
+    )
     with state.read_connection() as connection:
         push_attempts = connection.execute(
             "SELECT count(*) FROM operation_events e JOIN operations o "
@@ -583,6 +637,7 @@ def recover_return() -> dict[str, Any]:
         "remote_oid": refs.get(operation.intent["ref"]),
         "intended_oid": operation.intent["new_oid"],
         "final_refs": final_refs,
+        "clone_reachable": clone_reachable,
         "return_digest": PackageAdmissions(state, paths)
         .artifact("received-git-return")
         .digest_sha256,

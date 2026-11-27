@@ -34,6 +34,55 @@ class PackageAdmissionConflict(PackageError):
     """Received facts disagree with immutable bytes or local authority."""
 
 
+def _forward_baselines(
+    paths: RuntimePaths,
+    state: StateStore,
+    artifact: PackageArtifact,
+) -> dict[str, dict[str, str]] | None:
+    """Load Git baselines only from the locally admitted forward package."""
+    if artifact.document.get("schema_version") != 5 or artifact.document.get("mode") != "return":
+        return None
+    from gitferry.package_inventory import expected_git_refs, read_inventory
+
+    reference = artifact.document["forward_reference"]
+    with state.read_connection() as connection:
+        receipt = connection.execute(
+            "SELECT package_ref,target_instance_key,digest_sha256 FROM package_receipts "
+            "WHERE package_id=? AND digest_sha256=?",
+            (reference["package_id"], reference["digest_sha256"]),
+        ).fetchone()
+        exported = connection.execute(
+            "SELECT export_id,request_json,package_digest FROM source_exports "
+            "WHERE export_id=? AND package_digest=? AND status='captured'",
+            (reference["package_id"], reference["digest_sha256"]),
+        ).fetchone()
+    package_ref: str
+    if receipt is not None:
+        if receipt["target_instance_key"] != artifact.document["sender"]["instance_key"]:
+            return None
+        package_ref = str(receipt["package_ref"])
+    elif exported is not None:
+        request = json.loads(exported["request_json"])
+        if request.get("recipient_instance_key") != artifact.document["sender"]["instance_key"]:
+            return None
+        package_ref = str(exported["export_id"])
+    else:
+        return None
+    try:
+        forward = inspect_package(paths.package_directory / package_ref)
+        if forward.digest_sha256 != reference["digest_sha256"]:
+            return None
+        inventory = read_inventory(forward.directory, forward.document)
+    except (OSError, PackageError):
+        return None
+    if inventory is None:
+        return None
+    return {
+        selected["repository"]: expected_git_refs(inventory, selected["repository"])
+        for selected in forward.document["repositories"]
+    }
+
+
 def _authority(connection: sqlite3.Connection, target: str, revision: int) -> str:
     row = connection.execute(
         "SELECT approved_identity FROM connection_checks WHERE instance_key=?", (target,)
@@ -76,10 +125,23 @@ def _local_replicas(
 
 
 def _facts(
-    connection: sqlite3.Connection, artifact: PackageArtifact, package_ref: str, target: str
+    connection: sqlite3.Connection,
+    artifact: PackageArtifact,
+    package_ref: str,
+    target: str,
+    *,
+    return_baselines: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     document = artifact.document
     if document.get("schema_version") == 5 and document.get("mode") == "return":
+        if return_baselines is None:
+            raise PackageAdmissionConflict("return package has no immutable local forward baseline")
+        for selected in document["repositories"]:
+            expected = return_baselines.get(str(selected["repository"]))
+            if expected is None or expected != selected["comparison"]["original_baseline"]:
+                raise PackageAdmissionConflict(
+                    "return package baseline differs from immutable local forward baseline"
+                )
         return _return_facts(connection, artifact, package_ref, target)
     if document["recipient"]["instance_key"] != target:
         raise PackageAdmissionConflict("package recipient is not the locally selected target")
@@ -364,11 +426,18 @@ class PackageAdmissions:
         self, package_ref: str, *, target_instance_key: str, profile_revision: int
     ) -> dict[str, Any]:
         artifact = self.artifact(package_ref)
+        return_baselines = _forward_baselines(self.paths, self.state, artifact)
         with self.state.transaction() as connection:
             authority = _authority(connection, target_instance_key, profile_revision)
             connection.execute("SAVEPOINT package_review")
             try:
-                report = _facts(connection, artifact, package_ref, target_instance_key)
+                report = _facts(
+                    connection,
+                    artifact,
+                    package_ref,
+                    target_instance_key,
+                    return_baselines=return_baselines,
+                )
             finally:
                 connection.execute("ROLLBACK TO package_review")
                 connection.execute("RELEASE package_review")
@@ -388,9 +457,16 @@ class PackageAdmissions:
         artifact = self.artifact(package_ref)
         if artifact.digest_sha256 != expected_digest:
             raise PackageAdmissionConflict("package bytes changed since local review")
+        return_baselines = _forward_baselines(self.paths, self.state, artifact)
         with self.state.transaction() as connection:
             _authority(connection, target_instance_key, profile_revision)
-            report = _facts(connection, artifact, package_ref, target_instance_key)
+            report = _facts(
+                connection,
+                artifact,
+                package_ref,
+                target_instance_key,
+                return_baselines=return_baselines,
+            )
         report["status"] = "admitted-facts-only"
         return report
 
@@ -448,6 +524,7 @@ class PackageAdmissions:
             include_metadata=include_metadata,
             apply_members=apply_members,
             author_credential_refs=author_credential_refs or {},
+            return_baselines=_forward_baselines(self.paths, self.state, artifact),
         )
         report["selection"] = selection
         review_facts = {
@@ -495,6 +572,7 @@ class PackageAdmissions:
                 "missing_credentials",
                 "waiting_parents",
                 "blocked_operations",
+                "return_conflicts",
             )
         ):
             raise PackageAdmissionConflict("local package prerequisites remain unresolved")

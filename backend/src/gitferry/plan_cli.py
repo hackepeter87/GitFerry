@@ -58,6 +58,10 @@ def configure(parser: argparse.ArgumentParser, database_default: str | None) -> 
     resolve.add_argument("--operation-id", required=True)
     resolve.add_argument("--evidence", required=True)
     resolve.add_argument("--wiki-commit")
+    resolve_git = actions.add_parser("resolve-git-ref")
+    database(resolve_git)
+    resolve_git.add_argument("--operation-id", required=True)
+    resolve_git.add_argument("--evidence", required=True)
 
 
 def _input(path: Path) -> dict[str, Any]:
@@ -88,6 +92,16 @@ def execute(args: argparse.Namespace) -> int:
                 args.operation_id,
                 evidence=args.evidence,
                 wiki_commit=args.wiki_commit,
+            )
+            result = {"operation_id": operation.operation_id, "status": operation.status}
+        elif action == "resolve-git-ref":
+            from gitferry.git_return_reconciliation import resolve_git_ref_operation
+
+            operation = resolve_git_ref_operation(
+                state,
+                _paths(args.database),
+                args.operation_id,
+                evidence=args.evidence,
             )
             result = {"operation_id": operation.operation_id, "status": operation.status}
         elif action == "prepare":

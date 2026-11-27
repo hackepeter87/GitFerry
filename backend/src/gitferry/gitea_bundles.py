@@ -389,6 +389,16 @@ class GiteaBundlePusher(AbstractContextManager["GiteaBundlePusher"]):
             protected_refs=protected_refs,
         )
 
+    def read_repository_refs(
+        self, repository: str, *, expected_repository_id: str
+    ) -> dict[str, str]:
+        """Read refs only after proving the locally mapped repository identity."""
+
+        self._verify_repository_id(repository, expected_repository_id)
+        observed = self._git_remote("ls-remote", self._repository_url(repository), None)
+        self._verify_repository_id(repository, expected_repository_id)
+        return observed
+
     def _check_return_ref(
         self,
         repository: str,

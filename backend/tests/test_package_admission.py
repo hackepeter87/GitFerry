@@ -10,15 +10,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from gitferry.application_package import PackageError, write_package
+from gitferry.application_package import PackageError, inspect_package, write_package
 from gitferry.connection_probe import approve_connection
 from gitferry.connection_profiles import ConnectionProfile, ProfileService
 from gitferry.operations import OperationExecutor
 from gitferry.package_admission import PackageAdmissionConflict, PackageAdmissions
 from gitferry.package_archive import receive_package_archive, write_package_archive
 from gitferry.package_selection import build_package_selection
-from gitferry.plan_application import parse_plan_request
 from gitferry.runtime import RuntimePaths
+from gitferry.source_package import build_return_package
 from gitferry.state_migrations import MIGRATIONS, SCHEMA_VERSION
 from gitferry.state_store import OriginKey, StateStore
 from gitferry.transfer_plans import PlanConflict
@@ -228,47 +228,60 @@ def test_return_package_admission_requires_forward_receipt_and_existing_replica(
     paths.package_directory.mkdir(exist_ok=True)
     paths.work_directory.mkdir(exist_ok=True)
     service = PackageAdmissions(state, paths)
-    # The package is stored directly under the owned package root for this focused test.
-    report = service.review("return", target_instance_key="a", profile_revision=1)
-    assert report["replay"] is False
-    assert report["forward_reference"]["package_id"] == "forward-package-1"
-    service.admit(
-        "return",
-        target_instance_key="a",
-        profile_revision=1,
-        expected_digest=report["digest_sha256"],
+    # A forward receipt alone is not enough: the immutable A baseline must be
+    # available from the locally retained forward package before admission.
+    before = counts(service)
+    with pytest.raises(PackageAdmissionConflict, match="immutable local forward baseline"):
+        service.review("return", target_instance_key="a", profile_revision=1)
+    assert counts(service) == before
+
+
+def test_return_package_cannot_redefine_locally_captured_forward_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exporter = configure(tmp_path)
+    mock_reads(monkeypatch)
+    job = exporter.prepare(requested())
+    exporter.run(job["export_id"])
+    forward = inspect_package(exporter.paths.package_directory / job["export_id"])
+
+    package = build_return_package(
+        exporter.state,
+        package_id="tampered-return",
+        transfer_round_id="round-tampered",
+        created_at="2026-11-27T10:00:00Z",
+        sender="b",
+        recipient="a",
+        forward_package_id=forward.document["package_id"],
+        forward_package_digest=forward.digest_sha256,
+        repositories=[
+            {
+                "origin": {"instance_key": "a", "global_id": "7"},
+                "repository": "synthetic/selected",
+                "comparison": {
+                    "original_baseline": {"refs/heads/main": "9" * 40},
+                    "confirmed_import": {},
+                    "desired": {"refs/heads/offline": "8" * 40},
+                },
+            }
+        ],
     )
-    reviewed = service.plan_review(
-        "return", target_instance_key="a", profile_revision=1, include_metadata=False
-    )
-    selection = reviewed["selection"]
-    request = parse_plan_request(selection["request"])
-    assert request.mode == "return"
-    assert request.unsupported_items == []
-    assert request.repositories[0].return_repository_id == "41"
-    assert request.repositories[0].return_comparison is not None
-    prepared = service.prepare_plan(
-        "return",
-        target_instance_key="a",
-        profile_revision=1,
-        expected_review_digest=reviewed["review_digest"],
-        include_metadata=False,
-    )
-    assert parse_plan_request(prepared["document"]["inventory"]["request"]).mode == "return"
-    with state.transaction() as connection:
-        connection.execute(
-            "UPDATE transfer_plans SET status='confirmed' WHERE plan_id=?",
-            (prepared["plan_id"],),
-        )
-    replayed = service.prepare_plan(
-        "return",
-        target_instance_key="a",
-        profile_revision=1,
-        expected_review_digest=reviewed["review_digest"],
-        include_metadata=False,
-    )
-    assert replayed["plan_id"] == prepared["plan_id"]
-    assert replayed["status"] == "confirmed"
+    payload = b"synthetic tampered return bundle"
+    package["repositories"][0]["bundle"] = {
+        "path": "bundles/return.bundle",
+        "size": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    directory = exporter.paths.package_directory / "tampered-return"
+    (directory / "bundles").mkdir(parents=True)
+    (directory / "bundles/return.bundle").write_bytes(payload)
+    write_package(directory, package)
+
+    admissions = PackageAdmissions(exporter.state, exporter.paths)
+    before = counts(admissions)
+    with pytest.raises(PackageAdmissionConflict, match="immutable local forward baseline"):
+        admissions.review("tampered-return", target_instance_key="a", profile_revision=1)
+    assert counts(admissions) == before
 
 
 def test_receipt_replay_survives_real_process_restart(

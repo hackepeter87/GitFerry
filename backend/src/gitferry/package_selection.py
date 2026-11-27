@@ -59,12 +59,13 @@ def build_package_selection(
     include_metadata: bool,
     apply_members: bool,
     author_credential_refs: dict[str, str],
+    return_baselines: Mapping[str, Mapping[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Build a bounded :class:`PlanRequest`-shaped selection and prerequisite report."""
 
     document = artifact.document
     if document.get("schema_version") == 5 and document.get("mode") == "return":
-        return _build_return_selection(state, artifact, package_ref)
+        return _build_return_selection(state, artifact, package_ref, return_baselines)
     target = str(document["recipient"]["instance_key"])
     missing_bindings: list[str] = []
     missing_credentials: list[str] = []
@@ -320,11 +321,15 @@ def build_package_selection(
         "missing_credentials": missing_credentials,
         "waiting_parents": waiting_parents,
         "blocked_operations": blocked_operations,
+        "return_conflicts": [],
     }
 
 
 def _build_return_selection(
-    state: StateStore, artifact: PackageArtifact, package_ref: str
+    state: StateStore,
+    artifact: PackageArtifact,
+    package_ref: str,
+    return_baselines: Mapping[str, Mapping[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Build a conservative return request; remote ref reads happen during preflight."""
     document = artifact.document
@@ -344,11 +349,39 @@ def _build_return_selection(
         if mapping.target_repository_scope != repository:
             raise ValueError("return repository mapping scope conflicts with local state")
         comparison = selected["comparison"]
+        local_baseline = (
+            dict(return_baselines[repository])
+            if return_baselines is not None and repository in return_baselines
+            else None
+        )
+        if local_baseline is None:
+            conflicts.append(
+                {
+                    "ref": "*",
+                    "code": "baseline-unavailable",
+                    "reason": "immutable forward baseline is not available in local state",
+                }
+            )
+            # Do not use package-provided facts as a fallback for the comparison.
+            local_baseline = {}
+        elif local_baseline != comparison["original_baseline"]:
+            for ref in sorted(set(local_baseline) | set(comparison["original_baseline"])):
+                if local_baseline.get(ref) != comparison["original_baseline"].get(ref):
+                    conflicts.append(
+                        {
+                            "ref": ref,
+                            "code": "baseline-mismatch",
+                            "reason": (
+                                "return package baseline differs from immutable local "
+                                "forward baseline"
+                            ),
+                        }
+                    )
         plan = compare_return_refs(
-            comparison["original_baseline"],
+            local_baseline,
             comparison["confirmed_import"],
             comparison["desired"],
-            comparison["original_baseline"],
+            local_baseline,
         )
         conflicts.extend(
             {"ref": item.ref, "code": item.code, "reason": item.reason} for item in plan.conflicts
