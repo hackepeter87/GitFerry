@@ -56,7 +56,9 @@ class ReturnComparisonInput(_Input):
     original_baseline: dict[str, str]
     confirmed_import: dict[str, str]
     desired: dict[str, str]
-    protected_refs: set[str] = Field(default_factory=set)
+    # Persisted plan requests are strict JSON. A list survives model_dump(mode="json")
+    # and can therefore be validated again during preflight after a restart.
+    protected_refs: list[str] = Field(default_factory=list, max_length=10000)
 
 
 class RepositoryInput(_Input):

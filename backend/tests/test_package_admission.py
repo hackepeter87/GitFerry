@@ -254,6 +254,7 @@ def test_return_package_admission_requires_forward_receipt_and_existing_replica(
         expected_review_digest=reviewed["review_digest"],
         include_metadata=False,
     )
+    assert parse_plan_request(prepared["document"]["inventory"]["request"]).mode == "return"
     with state.transaction() as connection:
         connection.execute(
             "UPDATE transfer_plans SET status='confirmed' WHERE plan_id=?",
