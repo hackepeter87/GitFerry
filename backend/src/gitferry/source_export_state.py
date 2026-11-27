@@ -20,7 +20,7 @@ from gitferry.transport_state import (
 def record_source_capture(state: StateStore, artifact: PackageArtifact, export_id: str) -> None:
     """Freeze origins, source replicas, baselines, manifest and capture status together."""
     document = artifact.document
-    metadata = load_transport(artifact.directory / "metadata") if document["metadata"] else None
+    metadata = load_transport(artifact.directory / "metadata") if document.get("metadata") else None
     sender = document["sender"]["instance_key"]
     recipient = document["recipient"]["instance_key"]
     with state.transaction() as connection:
@@ -48,6 +48,24 @@ def record_source_capture(state: StateStore, artifact: PackageArtifact, export_i
             or (metadata is not None) != request["include_metadata"]
         ):
             raise PackageError("captured package disagrees with local export intent")
+        if request["version"] == 5:
+            if (
+                request.get("mode") != "return"
+                or document["schema_version"] != 5
+                or document.get("mode") != "return"
+                or document.get("forward_reference")
+                != {
+                    "package_id": request["forward_package_id"],
+                    "digest_sha256": request["forward_package_digest"],
+                }
+            ):
+                raise PackageError("captured return package disagrees with local export intent")
+            connection.execute(
+                "UPDATE source_exports SET status='captured', package_digest=?, "
+                "error_code=NULL, updated_at=? WHERE export_id=?",
+                (artifact.digest_sha256, now(), export_id),
+            )
+            return
         if request["version"] >= 2 and (
             document["schema_version"] != request["version"]
             or document["inventory"]["snapshot_id"] != request["inventory_id"]

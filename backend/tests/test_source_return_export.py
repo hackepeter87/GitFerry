@@ -12,6 +12,7 @@ from gitferry.application_package import inspect_package, write_package
 from gitferry.content_inventory import CONTENT_CLASSES, export_classes, parse_inventory
 from gitferry.package_inventory import attach_inventory
 from gitferry.runtime import RuntimePaths
+from gitferry.source_export_state import record_source_capture
 from gitferry.source_exports import SourceExports
 from gitferry.state_codec import canonical_json
 from gitferry.state_store import OriginKey, StateStore
@@ -203,3 +204,39 @@ def test_return_capture_uses_only_forward_and_confirmed_local_facts(
         "package_id": package_id,
         "digest_sha256": digest,
     }
+
+    request = {
+        "version": 5,
+        "mode": "return",
+        "forward_package_id": package_id,
+        "forward_package_digest": digest,
+        "source_instance_key": "b",
+        "recipient_instance_key": "a",
+        "repositories": [{"repository": "synthetic/selected", "global_id": "84"}],
+        "include_metadata": False,
+        "include_members": False,
+    }
+    with state.transaction() as connection:
+        connection.execute(
+            "INSERT INTO source_exports VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                "return-1",
+                "f" * 64,
+                canonical_json(request),
+                "{}",
+                "capturing",
+                received.digest_sha256,
+                None,
+                None,
+                "2026-11-27T09:02:00Z",
+                "2026-11-27T09:02:00Z",
+            ),
+        )
+
+    record_source_capture(state, received, "return-1")
+
+    with state.read_connection() as connection:
+        row = connection.execute(
+            "SELECT status,package_digest FROM source_exports WHERE export_id='return-1'"
+        ).fetchone()
+    assert (row["status"], row["package_digest"]) == ("captured", received.digest_sha256)
