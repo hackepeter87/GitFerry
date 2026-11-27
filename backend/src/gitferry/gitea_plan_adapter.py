@@ -614,7 +614,12 @@ class GiteaPlanAdapter:
 
         if repository.bundle is None:
             return
-        if self.request is None or self.bundles is None or self.forward_package is None:
+        # Direct/manual plans have no portable forward package to reference on
+        # a later return. Their operation evidence remains valid, but there is
+        # deliberately no package-scoped import baseline to freeze.
+        if self.forward_package is None:
+            return
+        if self.request is None or self.bundles is None:
             raise OperationBlocked("confirmed Git import lacks its local package evidence")
         package_id, package_digest = self.forward_package
         mapping = self.state.get_object_mapping(

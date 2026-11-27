@@ -177,3 +177,37 @@ def test_plan_adapter_freezes_confirmed_forward_import_refs(tmp_path: Path) -> N
         ).observed
         == refs
     )
+
+
+def test_direct_plan_does_not_require_portable_package_evidence(tmp_path: Path) -> None:
+    state, _ = _state(tmp_path)
+    request = parse_plan_request(
+        {
+            "version": 1,
+            "target_instance_key": "b",
+            "round_key": "round-1",
+            "package_ref": "manual-bundle",
+            "repositories": [
+                {
+                    "organization_origin_id": "organization-origin",
+                    "organization": "acme",
+                    "repository_origin_id": "repository-origin",
+                    "repository": "acme/repo",
+                    "bundle": {
+                        "member": "repositories/acme/repo.bundle",
+                        "sha256": "b" * 64,
+                        "size": 1,
+                    },
+                }
+            ],
+        }
+    )
+    adapter = GiteaPlanAdapter(
+        state,
+        RuntimePaths(state.path, tmp_path / "packages", tmp_path / "work"),
+    )
+    adapter.request = request
+
+    adapter._record_git_import_observation(request.repositories[0])
+
+    assert adapter.forward_package is None
