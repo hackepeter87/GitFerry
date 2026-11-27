@@ -67,6 +67,12 @@ INVENTORY_ASSERTIONS = frozenset(
         "read_only_collection",
         "control_unread_unchanged",
         "qualified_empty_reactions",
+        "distinct_review_authors_and_equal_text_origins",
+        "pull_refs_state_review_positions_and_timeline_order",
+        "review_reply_and_resolution_routes",
+        "pull_merged_state_and_approval_decision",
+        "inline_reply_authors_and_resolution_transitions",
+        "pull_content_version_rejects_stale_without_mutation",
         "unsupported_counts_unknown",
     }
 )
@@ -122,9 +128,58 @@ NATIVE_NEGATIVE_ASSERTIONS = frozenset(
     }
 )
 
+ADVANCED_METADATA_ASSERTIONS = frozenset(
+    {
+        "pull_create_requires_refs_without_author_or_time",
+        "pull_response_exposes_refs_identity_author_and_times",
+        "pull_patch_exposes_content_version_guard",
+        "review_create_accepts_nested_positions_without_author_or_time",
+        "review_response_exposes_identity_author_state_and_times",
+        "inline_response_exposes_review_parent_positions_author_and_times",
+        "review_comments_have_no_update_or_delete_route",
+        "timeline_is_read_only",
+        "reaction_contract_is_natural_key_without_native_id",
+    }
+)
+
+ADVANCED_METADATA_CLASSIFICATION = {
+    "pull_requests": {
+        "inventory": "supported",
+        "first_import": "blocked-required-refs-and-author-fidelity",
+        "return_update": "not-supported-no-adapter-despite-content-version",
+        "deletion": "not-supported",
+    },
+    "reviews": {
+        "inventory": "supported",
+        "first_import": "blocked-commit-and-author-fidelity",
+        "return_update": "not-supported",
+        "deletion": "draft-review-only-not-portable",
+    },
+    "inline_review_comments": {
+        "inventory": "supported-without-reply-parent",
+        "first_import": "blocked-review-parent-and-diff-position",
+        "return_update": "not-supported-resolve-transitions-only",
+        "deletion": "not-supported",
+    },
+    "timelines": {
+        "inventory": "supported",
+        "first_import": "not-supported-read-only-api",
+        "return_update": "not-supported-read-only-api",
+        "deletion": "not-supported-read-only-api",
+    },
+    "reactions": {
+        "inventory": "supported-with-natural-key",
+        "first_import": "blocked-no-native-id-or-historical-time",
+        "return_update": "not-applicable-create-delete-set",
+        "deletion": "available-but-not-enabled",
+    },
+}
+
 
 def _inventory_evidence(report: dict[str, Any]) -> bool:
     counts = _value(report, "content_inventory.counts")
+    pull_guard = _value(report, "content_inventory.pull_content_version")
+    pull_merge = _value(report, "content_inventory.pull_merge_evidence")
     return (
         _value(report, "content_inventory.status") == "passed"
         and _value(report, "content_inventory.gitea_version") == PRIMARY_GITEA_VERSION
@@ -136,6 +191,36 @@ def _inventory_evidence(report: dict[str, Any]) -> bool:
         and counts.get("lfs") is None
         and counts.get("other_content") is None
         and _value(report, "content_inventory.source_writes_during_collection") == 0
+        and isinstance(pull_guard, dict)
+        and pull_guard.get("accepted_status") in (200, 201)
+        and pull_guard.get("stale_status") == 409
+        and type(pull_guard.get("before")) is int
+        and type(pull_guard.get("after")) is int
+        and pull_guard["after"] > pull_guard["before"]
+        and pull_guard.get("stale_title_and_body_unchanged") is True
+        and isinstance(pull_merge, dict)
+        and pull_merge.get("state") == "closed"
+        and pull_merge.get("merged") is True
+        and isinstance(pull_merge.get("closed_at"), str)
+        and isinstance(pull_merge.get("merged_at"), str)
+        and isinstance(pull_merge.get("merge_commit_sha"), str)
+        and bool(pull_merge["merge_commit_sha"])
+        and "merged_by_response" in pull_merge
+        and pull_merge["merged_by_response"] is None
+        and pull_merge.get("timeline_merge_actor") == "gitferry-admin"
+    )
+
+
+def _advanced_metadata_evidence(report: dict[str, Any]) -> bool:
+    contract = _value(report, "openapi_and_migration.runtime_openapi.advanced_metadata")
+    classifications = contract.get("classification") if isinstance(contract, dict) else None
+    return (
+        _all_required_true(
+            report,
+            "openapi_and_migration.runtime_openapi.assertions",
+            ADVANCED_METADATA_ASSERTIONS,
+        )
+        and classifications == ADVANCED_METADATA_CLASSIFICATION
     )
 
 
@@ -611,6 +696,12 @@ def evidence_catalog(report: dict[str, Any], contract_gate: bool) -> list[dict[s
             is True,
             "tests/integration/content_inventory_probe.py",
             "content_inventory",
+        ),
+        (
+            "advanced_pull_review_timeline_reaction_contract",
+            _advanced_metadata_evidence(report),
+            "tests/integration/openapi_migration_probe.py",
+            "openapi_and_migration.runtime_openapi.advanced_metadata",
         ),
         (
             "native_payload_capture_and_restart_safety",

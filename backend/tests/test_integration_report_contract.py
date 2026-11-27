@@ -56,6 +56,22 @@ def complete_probe_report() -> dict[str, object]:
                 "other_content": None,
             },
             "source_writes_during_collection": 0,
+            "pull_content_version": {
+                "accepted_status": 201,
+                "stale_status": 409,
+                "before": 1,
+                "after": 2,
+                "stale_title_and_body_unchanged": True,
+            },
+            "pull_merge_evidence": {
+                "state": "closed",
+                "merged": True,
+                "closed_at": "2026-11-27T04:26:34Z",
+                "merged_at": "2026-11-27T04:26:34Z",
+                "merge_commit_sha": "7804ae35a5297bff75a4815dff272ba2046286cc",
+                "merged_by_response": None,
+                "timeline_merge_actor": "gitferry-admin",
+            },
         },
         "native_payloads": {
             "status": "passed",
@@ -472,6 +488,14 @@ def complete_probe_report() -> dict[str, object]:
         "openapi_and_migration",
     ):
         report[section] = {"status": "passed"}
+    report["openapi_and_migration"]["runtime_openapi"] = {
+        "assertions": {name: True for name in report_contract().ADVANCED_METADATA_ASSERTIONS},
+        "advanced_metadata": {
+            "classification": json.loads(
+                json.dumps(report_contract().ADVANCED_METADATA_CLASSIFICATION)
+            )
+        },
+    }
     report["comment_transport_roundtrip"]["status"] = "passed"
     report["portable_transport_roundtrip"]["status"] = "passed"
     return report
@@ -1019,6 +1043,64 @@ def test_ad_gitea_failed_or_missing_status_cannot_pass(status: str | None) -> No
         report["directory_ad"]["gitea"]["status"] = status
     entries = report_contract().evidence_catalog(report, True)
     entry = next(item for item in entries if item["id"] == "separate_samba_ad_claim_qualification")
+    assert entry["status"] == "failed"
+
+
+@pytest.mark.parametrize("assertion", sorted(report_contract().ADVANCED_METADATA_ASSERTIONS))
+def test_advanced_metadata_contract_assertions_are_mandatory(assertion: str) -> None:
+    report = complete_probe_report()
+    del report["openapi_and_migration"]["runtime_openapi"]["assertions"][assertion]
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "advanced_pull_review_timeline_reaction_contract"
+    )
+    assert entry["status"] == "failed"
+
+
+def test_advanced_metadata_classification_cannot_silently_change() -> None:
+    report = complete_probe_report()
+    report["openapi_and_migration"]["runtime_openapi"]["advanced_metadata"]["classification"][
+        "pull_requests"
+    ]["first_import"] = "supported"
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "advanced_pull_review_timeline_reaction_contract"
+    )
+    assert entry["status"] == "failed"
+
+
+def test_pull_content_version_live_evidence_is_mandatory() -> None:
+    report = complete_probe_report()
+    report["content_inventory"]["pull_content_version"]["stale_status"] = 200
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "selected_content_inventory_and_portable_plan"
+    )
+    assert entry["status"] == "failed"
+
+
+def test_pull_merge_live_evidence_is_mandatory() -> None:
+    report = complete_probe_report()
+    report["content_inventory"]["pull_merge_evidence"]["timeline_merge_actor"] = "developer"
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "selected_content_inventory_and_portable_plan"
+    )
+    assert entry["status"] == "failed"
+
+
+def test_pull_merge_null_field_must_be_explicit() -> None:
+    report = complete_probe_report()
+    del report["content_inventory"]["pull_merge_evidence"]["merged_by_response"]
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "selected_content_inventory_and_portable_plan"
+    )
     assert entry["status"] == "failed"
 
 

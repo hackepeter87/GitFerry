@@ -899,7 +899,7 @@ the changed-SID operation unresolved; it does not report that identity as migrat
 ## Selected-content inventory and offline plan coverage
 
 Issue #17 uses the existing entry points; there is no second integration runner.
-`content_inventory_probe.py` seeds real Gitea 1.27.2 content and compares all 21 class counts
+`content_inventory_probe.py` seeds real Gitea 28.4.0 content and compares all 21 class counts
 against independent fixture enumeration: 19 observable classes, with LFS and additional
 unenumerated features explicitly unknown. It also qualifies native empty repositories, API
 reaction null semantics, parent relationships, binary size facts and an unchanged unselected
@@ -918,6 +918,30 @@ limited to the current transfer adapters; observing wiki, LFS limitations, asset
 does not establish their transfer. See [inventory operation](content-inventory.md) and
 [ADR 0024](decisions/0024-selected-content-inventory.md). Exact run results remain in the issue,
 PR and Actions artifacts.
+
+## Pull requests, reviews, timelines and reactions
+
+Issue #20 extends the same real-instance run; it does not introduce a second runner. The inventory
+probe creates a PR, a normal PR conversation comment, a review with an inline comment, timeline
+events and reactions. The OpenAPI probe records exact request fields, response fields and route
+methods from both live Gitea 28.4.0 instances. The report contract requires the field-level
+assertions and support classification, so a missing endpoint or silently skipped check fails the
+integration gate.
+
+The same fixture verifies captured head/base refs and SHAs, open and merged PR state, native merge
+timestamps and commit, COMMENT and APPROVE review decisions, inline positions, native inline/reply
+authors, timeline API ordering, and live resolve/unresolve/re-resolve transitions. Gitea 28.4.0
+returns `merged_by: null` for the API-created merged fixture; the ordered timeline separately
+retains the administrative merge actor. A live `content_version` PATCH succeeds with the current
+value; reusing the stale value returns 409 without applying stale title/body fields. This is an
+optimistic PR-content guard, not a complete GitFerry PR return adapter or a claim that Gitea wraps
+every multi-field mutation in one transaction.
+
+These classes are inventory-only. Export and plan review disclose the ref/author/position/timestamp
+limits before execution; they do not enqueue target writes. Details and the separate
+first-import/update/deletion classification are in
+[the qualification report](verification-pr-review-metadata.md) and
+[ADR 0028](decisions/0028-pull-review-metadata-boundary.md).
 
 Before the guided target-collision and identity-recovery no-write snapshots, the synthetic harness
 waits for Gitea's preceding fixture work with `gitea manager flush-queues --timeout 30s` (45-second

@@ -24,7 +24,7 @@ test("admits a ready package and prepares a draft through plan review", async ({
   await page.route("**/api/v1/packages/pkg.synthetic/prerequisites", (route) => route.fulfill({ json: prerequisites }));
   await page.route("**/api/v1/packages/pkg.synthetic/review", (route) => route.fulfill({ json: { digest_sha256: prerequisites.digest_sha256 } }));
   await page.route("**/api/v1/packages/pkg.synthetic/admit", (route) => route.fulfill({ json: { status: "admitted-facts-only" } }));
-  await page.route("**/api/v1/packages/pkg.synthetic/plan-review", (route) => { planReviewCalls++; return route.fulfill({ json: { ...prerequisites, review_digest: "review-1", selection: { request: { repositories: ["synthetic-org/repo"] }, missing_bindings: [], missing_credentials: [], waiting_parents: [], blocked_operations: [] } } }); });
+  await page.route("**/api/v1/packages/pkg.synthetic/plan-review", (route) => { planReviewCalls++; return route.fulfill({ json: { ...prerequisites, review_digest: "review-1", selection: { request: { repositories: ["synthetic-org/repo"], source_limitations: ["reviews and inline review comments are inventory-only; commit/diff positions, native authors and historical times are not transferred"] }, missing_bindings: [], missing_credentials: [], waiting_parents: [], blocked_operations: [] } } }); });
   await page.route("**/api/v1/packages/pkg.synthetic/prepare-plan", (route) => route.fulfill({ json: { plan_id: "plan-1", digest: "plan-digest", target_instance_key: "target.synthetic", profile_revision: 3, evidence_digest: "e", round_key: "package-pkg.synthetic", document: { inventory: { request: { repositories: ["synthetic-org/repo"] } } }, status: "draft", cancel_requested: false, reason: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", operations: [] } }));
   await open(page);
   await page.getByLabel("Locally approved target").selectOption("target.synthetic");
@@ -33,6 +33,7 @@ test("admits a ready package and prepares a draft through plan review", async ({
   await page.getByRole("button", { name: "Admit package locally" }).click();
   await page.getByRole("button", { name: "Review plan selection" }).click();
   await expect(page.getByText("Review digest: review-1")).toBeVisible();
+  await expect(page.getByText(/reviews and inline review comments are inventory-only/)).toBeVisible();
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

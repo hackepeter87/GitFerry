@@ -8,6 +8,7 @@ from gitferry.content_inventory import CONTENT_CLASSES, ClassObservation, Invent
 from gitferry.source_inventory import (
     InventoryCollectionError,
     _comments,
+    _identities,
     _InventoryReader,
     _issues,
     _object,
@@ -94,7 +95,25 @@ def test_issue_and_pull_request_objects_and_children_keep_distinct_parents() -> 
             return httpx.Response(
                 200,
                 headers={"X-Total-Count": "1"},
-                json=[{"id": 4, "number": 4, "title": "pull"}],
+                json=[
+                    {
+                        "id": 4,
+                        "number": 4,
+                        "title": "pull",
+                        "content_version": 3,
+                        "merged_by": None,
+                        "head": {
+                            "ref": "feature",
+                            "sha": "a" * 40,
+                            "repo": {"id": 9, "full_name": "acme/one"},
+                        },
+                        "base": {
+                            "ref": "main",
+                            "sha": "b" * 40,
+                            "repo": {"id": 9, "full_name": "acme/one"},
+                        },
+                    }
+                ],
             )
         if path.endswith("/issues/3/comments"):
             return httpx.Response(200, headers={"X-Total-Count": "1"}, json=[{"id": 31}])
@@ -106,7 +125,15 @@ def test_issue_and_pull_request_objects_and_children_keep_distinct_parents() -> 
             )
         if path.endswith("/pulls/4/reviews/41/comments"):
             return httpx.Response(
-                200, json=[{"id": 411, "pull_request_review_id": 41, "body": "review note"}]
+                200,
+                json=[
+                    {
+                        "id": 411,
+                        "pull_request_review_id": 41,
+                        "body": "review note",
+                        "resolver": {"id": 7, "login": "resolver"},
+                    }
+                ],
             )
         raise AssertionError(path)
 
@@ -131,6 +158,13 @@ def test_issue_and_pull_request_objects_and_children_keep_distinct_parents() -> 
     assert (
         pull_request.status == "observed" and pull_request.objects[0].namespace == "global-pull-id"
     )
+    assert pull_request.objects[0].facts["content_version"] == 3
+    assert "merged_by" in pull_request.objects[0].facts
+    assert pull_request.objects[0].facts["merged_by"] is None
+    assert pull_request.objects[0].facts["head"]["repository"] == {
+        "global_id": "9",
+        "full_name": "acme/one",
+    }
 
 
 def test_comments_reviews_and_review_comments_reference_their_native_parent_class() -> None:
@@ -146,7 +180,15 @@ def test_comments_reviews_and_review_comments_reference_their_native_parent_clas
             )
         if path.endswith("/pulls/4/reviews/41/comments"):
             return httpx.Response(
-                200, json=[{"id": 411, "pull_request_review_id": 41, "body": "review note"}]
+                200,
+                json=[
+                    {
+                        "id": 411,
+                        "pull_request_review_id": 41,
+                        "body": "review note",
+                        "resolver": {"id": 7, "login": "resolver"},
+                    }
+                ],
             )
         raise AssertionError(path)
 
@@ -180,6 +222,76 @@ def test_comments_reviews_and_review_comments_reference_their_native_parent_clas
     assert pull_comments.objects[0].parent == {"content_class": "pull_requests", "key": "4"}
     assert reviews.objects[0].parent == {"content_class": "pull_requests", "key": "4"}
     assert review_comments.objects[0].parent == {"content_class": "reviews", "key": "41"}
+    assert review_comments.objects[0].facts["resolver"] == {
+        "global_id": "7",
+        "login": "resolver",
+    }
+    identities = _identities(
+        {"reviews": reviews, "review_comments": review_comments},
+        ["reviews", "review_comments"],
+    )
+    assert any(item.facts["login"] == "resolver" for item in identities.objects)
+
+
+def test_equal_review_text_keeps_distinct_native_origins_and_body_is_not_identity() -> None:
+    changed = False
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        body = "changed" if changed else "same"
+        if path.endswith("/pulls/4/reviews"):
+            return httpx.Response(
+                200,
+                headers={"X-Total-Count": "2"},
+                json=[
+                    {"id": 41, "state": "COMMENT", "body": body},
+                    {"id": 42, "state": "COMMENT", "body": "same"},
+                ],
+            )
+        if path.endswith("/pulls/4/reviews/41/comments"):
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": 411, "pull_request_review_id": 41, "body": body},
+                    {"id": 412, "pull_request_review_id": 41, "body": "same"},
+                ],
+            )
+        if path.endswith("/pulls/4/reviews/42/comments"):
+            return httpx.Response(200, json=[])
+        raise AssertionError(path)
+
+    pull_request = ClassObservation(
+        content_class="pull_requests",
+        status="observed",
+        count=1,
+        objects=[InventoryObject(key="4", namespace="global-pull-id", issue_index="4")],
+    )
+    reader = _reader(handle)
+    try:
+        before_reviews = _reviews(reader, "/repos/acme/one", {"pull_requests": pull_request})
+        before_comments = _review_comments(
+            reader,
+            "/repos/acme/one",
+            {"reviews": before_reviews},
+        )
+        changed = True
+        after_reviews = _reviews(reader, "/repos/acme/one", {"pull_requests": pull_request})
+        after_comments = _review_comments(
+            reader,
+            "/repos/acme/one",
+            {"reviews": after_reviews},
+        )
+    finally:
+        reader.close()
+
+    assert [item.key for item in before_reviews.objects] == ["41", "42"]
+    assert [item.key for item in before_comments.objects] == ["411", "412"]
+    assert [item.key for item in after_reviews.objects] == ["41", "42"]
+    assert [item.key for item in after_comments.objects] == ["411", "412"]
+    assert before_reviews.objects[0].facts["body"] == "same"
+    assert after_reviews.objects[0].facts["body"] == "changed"
+    assert before_comments.objects[0].facts["body"] == "same"
+    assert after_comments.objects[0].facts["body"] == "changed"
 
 
 def test_empty_reaction_null_is_only_accepted_on_qualified_endpoints() -> None:
