@@ -259,9 +259,11 @@ class MetadataApplication:
         operation_id: str,
         *,
         planned_repository: bool = False,
-        planned_parent_origins: frozenset[str] = frozenset(),
-        planned_label_origins: frozenset[str] = frozenset(),
+        planned_parent_scopes: Mapping[str, str] | None = None,
+        planned_label_scopes: Mapping[str, str] | None = None,
     ) -> None:
+        planned_parent_scopes = planned_parent_scopes or {}
+        planned_label_scopes = planned_label_scopes or {}
         operation = self.state.get_operation(operation_id)
         if operation.status in ("outcome_unknown", "executing", "conflict", "failed"):
             raise OperationBlocked("metadata operation requires reconciliation")
@@ -332,11 +334,14 @@ class MetadataApplication:
             try:
                 issue = self._mapping(operation.origin_id, operation.target_instance_key)
             except OperationBlocked:
-                if operation.origin_id not in planned_parent_origins:
+                if (
+                    planned_parent_scopes.get(operation.origin_id)
+                    != operation.target_repository_scope
+                ):
                     raise
                 missing = []
                 for origin_id in operation.intent["label_origin_ids"]:
-                    if origin_id in planned_label_origins:
+                    if planned_label_scopes.get(origin_id) == operation.target_repository_scope:
                         continue
                     try:
                         self._mapping(origin_id, operation.target_instance_key)
@@ -382,9 +387,14 @@ class MetadataApplication:
         try:
             parent = self._mapping(intent["parent_origin_id"], operation.target_instance_key)
         except OperationBlocked:
-            if intent["parent_origin_id"] in planned_parent_origins:
+            if (
+                planned_parent_scopes.get(intent["parent_origin_id"])
+                == operation.target_repository_scope
+            ):
                 return
             raise
+        if parent.target_repository_scope != operation.target_repository_scope:
+            raise OperationBlocked("asset parent mapping belongs to another repository")
         parent_type = self.state.get_origin(intent["parent_origin_id"]).key.object_type
         if parent_type not in ("issue", "comment", "release"):
             raise OperationBlocked("asset parent mapping has an unsupported type")
@@ -496,6 +506,8 @@ class MetadataApplication:
                 )
             intent = operation.intent
             parent = self._mapping(intent["parent_origin_id"], operation.target_instance_key)
+            if parent.target_repository_scope != scope:
+                raise OperationBlocked("asset parent mapping belongs to another repository")
             parent_type = self.state.get_origin(intent["parent_origin_id"]).key.object_type
             if parent_type not in ("issue", "comment", "release"):
                 raise OperationBlocked("asset parent mapping has an unsupported type")

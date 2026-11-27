@@ -447,17 +447,35 @@ def prepare_transfer_plan(
         if operation.operation_type == "assign_issue_labels":
             issue_creator = creators.get(operation.origin_id)
             if issue_creator:
+                if (
+                    operations[issue_creator].target_repository_scope
+                    != operation.target_repository_scope
+                ):
+                    raise PlanConflict(
+                        "label assignment and selected issue point at different repositories"
+                    )
                 parents.append(issue_creator)
             else:
                 try:
-                    state.get_object_mapping(operation.origin_id, request.target_instance_key)
+                    issue_mapping = state.get_object_mapping(
+                        operation.origin_id, request.target_instance_key
+                    )
                 except KeyError:
                     raise PlanConflict(
                         "label assignment issue is neither selected nor mapped"
                     ) from None
+                if issue_mapping.target_repository_scope != operation.target_repository_scope:
+                    raise PlanConflict("label assignment issue belongs to another repository")
             for label_origin in operation.intent["label_origin_ids"]:
                 label_creator = creators.get(str(label_origin))
                 if label_creator:
+                    if (
+                        operations[label_creator].target_repository_scope
+                        != operation.target_repository_scope
+                    ):
+                        raise PlanConflict(
+                            "label assignment definition belongs to another repository"
+                        )
                     parents.append(label_creator)
                 else:
                     try:
@@ -476,14 +494,23 @@ def prepare_transfer_plan(
             parent_origin = str(operation.intent["parent_origin_id"])
             parent_operation = creators.get(parent_origin)
             if parent_operation:
+                if (
+                    operations[parent_operation].target_repository_scope
+                    != operation.target_repository_scope
+                ):
+                    raise PlanConflict("asset and selected parent point at different repositories")
                 parents.append(parent_operation)
             else:
                 try:
-                    state.get_object_mapping(parent_origin, request.target_instance_key)
+                    parent_mapping = state.get_object_mapping(
+                        parent_origin, request.target_instance_key
+                    )
                 except KeyError:
                     raise PlanConflict(
                         "asset parent is neither selected nor locally mapped"
                     ) from None
+                if parent_mapping.target_repository_scope != operation.target_repository_scope:
+                    raise PlanConflict("asset parent mapping points at another repository")
         if operation.operation_type in ("create_comment", "update_comment"):
             parent_origin = str(operation.intent["parent_origin_id"])
             parent_operation = creators.get(parent_origin)

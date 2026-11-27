@@ -105,7 +105,17 @@ class GiteaMetadataClient(GiteaProvisioningClient):
         return self._object(
             "PATCH",
             f"/repos/{owner}/{name}/releases/{native}",
-            json={key: values[key] for key in ("name", "body", "draft", "prerelease")},
+            json={
+                key: values[key]
+                for key in (
+                    "tag_name",
+                    "target_commitish",
+                    "name",
+                    "body",
+                    "draft",
+                    "prerelease",
+                )
+            },
         )
 
     def list_assets(
@@ -182,26 +192,26 @@ class GiteaMetadataClient(GiteaProvisioningClient):
             or parsed.path != f"{installation_prefix}/attachments/{uuid}"
         ):
             raise MetadataTargetConflict("asset download URL is not the expected same-origin route")
-        response = self._client.get(url)
-        response.raise_for_status()
-        if response.headers.get("content-encoding", "identity") != "identity":
-            raise MetadataTargetConflict("compressed asset responses are not accepted")
-        digest = hashlib.sha256()
-        written = 0
-        with destination.open("xb") as stream:
-            for chunk in response.iter_bytes():
-                written += len(chunk)
-                if written > max_bytes or written > size:
-                    raise MetadataTargetConflict("asset body exceeds its reviewed size")
-                digest.update(chunk)
-                stream.write(chunk)
-        if written != size:
-            raise MetadataTargetConflict("asset body differs from its reviewed size")
-        return (
-            written,
-            digest.hexdigest(),
-            response.headers.get("content-type", "application/octet-stream"),
-        )
+        with self._client.stream("GET", url) as response:
+            response.raise_for_status()
+            if response.headers.get("content-encoding", "identity") != "identity":
+                raise MetadataTargetConflict("compressed asset responses are not accepted")
+            digest = hashlib.sha256()
+            written = 0
+            with destination.open("xb") as stream:
+                for chunk in response.iter_bytes():
+                    written += len(chunk)
+                    if written > max_bytes or written > size:
+                        raise MetadataTargetConflict("asset body exceeds its reviewed size")
+                    digest.update(chunk)
+                    stream.write(chunk)
+            if written != size:
+                raise MetadataTargetConflict("asset body differs from its reviewed size")
+            return (
+                written,
+                digest.hexdigest(),
+                response.headers.get("content-type", "application/octet-stream"),
+            )
 
 
 def verify_label(value: Mapping[str, Any], expected: Mapping[str, Any]) -> str:
@@ -219,7 +229,7 @@ def verify_release(
 ) -> str:
     if any(
         value.get(key) != expected.get(key)
-        for key in ("tag_name", "name", "body", "draft", "prerelease")
+        for key in ("tag_name", "target_commitish", "name", "body", "draft", "prerelease")
     ):
         raise MetadataTargetConflict("release fields differ from the reviewed intent")
     if author_login is not None:

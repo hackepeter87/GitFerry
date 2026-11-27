@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
@@ -39,6 +40,7 @@ def test_label_release_and_assignment_routes() -> None:
                 {
                     "id": 8,
                     "tag_name": "v1",
+                    "target_commitish": body["target_commitish"],
                     "name": body["name"],
                     "body": body["body"],
                     "draft": body["draft"],
@@ -68,6 +70,11 @@ def test_label_release_and_assignment_routes() -> None:
     assert verify_release(client.create_release("acme/repo", release), release) == "8"
     updated = {**release, "name": "Updated"}
     assert verify_release(client.update_release("acme/repo", "8", updated), updated) == "8"
+    with pytest.raises(MetadataTargetConflict, match="release fields"):
+        verify_release(
+            {**updated, "target_commitish": "wrong-ref", "id": 8},
+            updated,
+        )
     assert requests[0][:2] == ("POST", "/api/v1/repos/acme/repo/labels")
     client.close()
 
@@ -186,4 +193,42 @@ def test_asset_download_accepts_gitea_installation_subpath_but_not_sibling_path(
             tmp_path / "sibling.bin",
             max_bytes=5,
         )
+    client.close()
+
+
+def test_asset_download_stream_rejects_body_larger_than_reviewed_size(tmp_path: Path) -> None:
+    chunks_read: list[int] = []
+
+    class OversizedStream(httpx.SyncByteStream):
+        def __iter__(self) -> Iterator[bytes]:
+            chunks_read.append(1)
+            yield b"012345"
+            chunks_read.append(2)
+            raise AssertionError("download continued after the reviewed bound")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            stream=OversizedStream(),
+            headers={"content-encoding": "identity"},
+            request=request,
+        )
+
+    client = GiteaMetadataClient(
+        "https://gitea.invalid",
+        username="admin",
+        token="token",  # noqa: S106 - synthetic MockTransport credential
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(MetadataTargetConflict, match="exceeds"):
+        client.download_asset(
+            {
+                "uuid": "uuid-large",
+                "size": 5,
+                "browser_download_url": "https://gitea.invalid/attachments/uuid-large",
+            },
+            tmp_path / "large.bin",
+            max_bytes=5,
+        )
+    assert chunks_read == [1]
     client.close()

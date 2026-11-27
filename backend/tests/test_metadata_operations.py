@@ -193,14 +193,26 @@ def test_new_issue_label_assignment_preflight_accepts_planned_issue_and_label(
 
     app.preflight(
         operation.operation_id,
-        planned_parent_origins=frozenset({issue.id}),
-        planned_label_origins=frozenset({label}),
+        planned_parent_scopes={issue.id: "acme/repo"},
+        planned_label_scopes={label: "acme/repo"},
     )
 
     with pytest.raises(OperationBlocked, match="no target mapping or create"):
         app.preflight(
             operation.operation_id,
-            planned_parent_origins=frozenset({issue.id}),
+            planned_parent_scopes={issue.id: "acme/repo"},
+        )
+    with pytest.raises(OperationBlocked, match="required parent or target mapping"):
+        app.preflight(
+            operation.operation_id,
+            planned_parent_scopes={issue.id: "other/repo"},
+            planned_label_scopes={label: "acme/repo"},
+        )
+    with pytest.raises(OperationBlocked, match="no target mapping or create"):
+        app.preflight(
+            operation.operation_id,
+            planned_parent_scopes={issue.id: "acme/repo"},
+            planned_label_scopes={label: "other/repo"},
         )
 
 
@@ -329,6 +341,42 @@ def test_attachment_upload_verifies_parent_and_remote_bytes(tmp_path: Path) -> N
     assert client.asset_posts == 1
     assert client.payload == b"synthetic asset"
     app.preflight(operation.operation_id)
+
+
+def test_attachment_rejects_cross_repository_parent_before_upload(tmp_path: Path) -> None:
+    state, _, _ = configured(tmp_path)
+    parent = state.register_origin(OriginKey("a", "other/repo", "issue", "19", 5))
+    state.add_object_mapping(parent.id, "b", "other/repo", "61", target_issue_index=9)
+    payload = tmp_path / "payloads" / "cross-repo.bin"
+    payload.parent.mkdir()
+    payload.write_bytes(b"synthetic asset")
+    attachment = state.register_origin(
+        OriginKey("a", "acme/repo", "attachment", "20", parent_origin_id=parent.id)
+    )
+    operation = prepare_metadata_operation(
+        state,
+        origin_id=attachment.id,
+        target_instance_key="b",
+        target_repository_scope="acme/repo",
+        operation_type="upload_attachment",
+        values={
+            "name": "cross-repo.txt",
+            "size": len(payload.read_bytes()),
+            "sha256": hashlib.sha256(payload.read_bytes()).hexdigest(),
+            "media_type": "text/plain",
+            "member": "payloads/cross-repo.bin",
+            "parent_origin_id": parent.id,
+        },
+    )
+    client = MetadataClient()
+    app = MetadataApplication(state, client, tmp_path, max_bytes=1024)  # type: ignore[arg-type]
+
+    with pytest.raises(OperationBlocked, match="another repository"):
+        app.preflight(operation.operation_id)
+    with OperationExecutor(state, "cross-repo") as executor:
+        with pytest.raises(OperationBlocked, match="another repository"):
+            app.apply(operation.operation_id, executor)
+    assert client.asset_posts == 0
 
 
 def test_confirmed_asset_rejects_equal_size_remote_digest_drift(tmp_path: Path) -> None:

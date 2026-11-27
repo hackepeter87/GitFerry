@@ -247,24 +247,24 @@ class GiteaPlanAdapter:
             )
             if operation.operation_type == "create_repository"
         }
-        planned_parents = frozenset(
-            operation.origin_id
+        planned_parent_scopes = {
+            operation.origin_id: operation.target_repository_scope
             for operation in metadata + portable_content
             if operation.operation_type in ("create_issue", "create_comment", "create_release")
-        )
-        planned_label_origins = frozenset(
-            operation.origin_id
+        }
+        planned_label_scopes = {
+            operation.origin_id: operation.target_repository_scope
             for operation in portable_content
             if operation.operation_type == "create_label"
-        )
+        }
         for operation in portable_content:
             self.scope = operation.target_repository_scope
             self.check = PreflightCheck.METADATA
             self.metadata_apps[operation.operation_id].preflight(
                 operation.operation_id,
                 planned_repository=operation.target_repository_scope in planned_repositories,
-                planned_parent_origins=planned_parents,
-                planned_label_origins=planned_label_origins,
+                planned_parent_scopes=planned_parent_scopes,
+                planned_label_scopes=planned_label_scopes,
             )
         planned_labels = {
             (operation.target_repository_scope, operation.intent["values"]["name"])
@@ -272,7 +272,9 @@ class GiteaPlanAdapter:
             if operation.operation_type == "create_label"
         }
         for operation in metadata:
-            self._preflight_metadata(operation, planned_parents, frozenset(planned_labels))
+            self._preflight_metadata(
+                operation, frozenset(planned_parent_scopes), frozenset(planned_labels)
+            )
         if self.native_payloads is not None or any(
             repository.bundle for repository in request.repositories
         ):
