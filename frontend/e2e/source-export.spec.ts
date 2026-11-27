@@ -36,6 +36,7 @@ async function openWorkspace(page: Page, exports: unknown[] = [], exportHandler?
   await page.route("**/api/v1/connections", (route) => route.fulfill({ json: [source] }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/package-uploads**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/packages", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/connections/source-a/browse", async (route) => {
     const body = route.request().postDataJSON() as { kind: string };
     await route.fulfill({ json: { instance_key: source.instance_key, profile_revision: source.revision, evidence_digest: "synthetic-evidence", kind: body.kind,
@@ -168,6 +169,7 @@ test("returns to sign-in when recipient loading expires the session", async ({ p
   await page.route("**/api/v1/connections", (route) => route.fulfill({ json: [source] }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/package-uploads**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/packages", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/exports/recipients", (route) => route.fulfill({ status: 401, json: { error: { code: "authentication_required", message: "Session expired" } } }));
   await page.route("**/api/v1/exports", (route) => route.fulfill({ json: [] }));
   await page.goto("/");

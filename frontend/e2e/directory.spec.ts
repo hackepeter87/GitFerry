@@ -15,6 +15,7 @@ async function open(page: import("@playwright/test").Page, directories: unknown[
   await page.route("**/api/v1/directories", (route) => route.fulfill({ json: directories }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/package-uploads", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/packages", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/exports", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/exports/recipients", (route) => route.fulfill({ json: [] }));
   await page.goto("/");
