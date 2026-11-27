@@ -202,13 +202,25 @@ def export_return() -> dict[str, Any]:
         "include_members": False,
     }
     jobs = SourceExportJobs(state, paths, LocalReferences(B_ROOT / "secrets", B_ROOT))
+    capture_failure: list[str] = []
+    run_owned = jobs.exports._run_owned
+
+    def observed_run_owned(export_id: str, **kwargs: Any) -> dict[str, Any]:
+        try:
+            return run_owned(export_id, **kwargs)
+        except Exception as error:
+            capture_failure.append(f"{type(error).__name__}: {error}")
+            raise
+
+    jobs.exports._run_owned = observed_run_owned  # type: ignore[method-assign]
     plan_worker.ROOT = B_ROOT
     plan_worker.URL = B_URL
     with plan_worker.proxy(preserve_origin=True):
         jobs.create("git-return-real", request)
         result = jobs.run_next()
     if result is None or result["status"] != "ready":
-        raise RuntimeError("return export did not reach ready")
+        detail = capture_failure[-1] if capture_failure else "no capture exception recorded"
+        raise RuntimeError(f"return export did not reach ready: {detail}")
     stream, details = jobs.open_download("git-return-real")
     with stream, RETURN_ARCHIVE.open("wb") as output:
         shutil.copyfileobj(stream, output)
