@@ -271,9 +271,17 @@ class GiteaPlanAdapter:
             for operation in portable_content
             if operation.operation_type == "create_label"
         }
+        managed_issue_labels = frozenset(
+            operation.origin_id
+            for operation in portable_content
+            if operation.operation_type == "assign_issue_labels"
+        )
         for operation in metadata:
             self._preflight_metadata(
-                operation, frozenset(planned_parent_scopes), frozenset(planned_labels)
+                operation,
+                frozenset(planned_parent_scopes),
+                frozenset(planned_labels),
+                managed_issue_labels,
             )
         if self.native_payloads is not None or any(
             repository.bundle for repository in request.repositories
@@ -322,6 +330,7 @@ class GiteaPlanAdapter:
         operation: OperationRecord,
         planned_parents: frozenset[str],
         planned_labels: frozenset[tuple[str, str]],
+        managed_issue_labels: frozenset[str],
     ) -> None:
         if self.request is None:
             raise OperationBlocked("plan request has not been validated")
@@ -342,7 +351,12 @@ class GiteaPlanAdapter:
         elif remote.get("archived") or remote.get("has_issues") is not True:
             raise OperationBlocked("selected repository does not permit issue operations")
         if operation.operation_type in ("create_issue", "update_issue"):
-            preflight_issue_operation(self.state, client, operation.operation_id)
+            preflight_issue_operation(
+                self.state,
+                client,
+                operation.operation_id,
+                check_labels=operation.origin_id not in managed_issue_labels,
+            )
             labels = operation.intent["values"]["labels"]
             if labels:
                 if remote is None:
@@ -440,8 +454,21 @@ class GiteaPlanAdapter:
                         and step["status"] == "confirmed"
                         for step in plan["operations"]
                     )
+                    allowed_release_tags = frozenset(
+                        f"refs/tags/{operation.intent['values']['tag_name']}"
+                        for operation in (
+                            self.state.get_operation(step["operation_id"])
+                            for step in plan["operations"]
+                        )
+                        if operation.operation_type == "create_release"
+                        and operation.status == "confirmed"
+                        and operation.target_repository_scope == repository.repository
+                    )
                     self.bundles.check_remote(
-                        repository.repository, bundle=bundle, expected_empty=not confirmed
+                        repository.repository,
+                        bundle=bundle,
+                        expected_empty=not confirmed,
+                        allowed_extra_refs=allowed_release_tags,
                     )
 
     def apply(self, plan: dict[str, Any], executor: OperationExecutor) -> None:

@@ -81,6 +81,41 @@ class GiteaMetadataClient(GiteaProvisioningClient):
         owner, name = _repository_segments(repository)
         return self._list(f"/repos/{owner}/{name}/releases")
 
+    def _git_references(self, repository: str) -> dict[str, str]:
+        owner, name = _repository_segments(repository)
+        result: dict[str, str] = {}
+        for value in self._list(f"/repos/{owner}/{name}/git/refs"):
+            reference = value.get("ref")
+            target = value.get("object")
+            sha = target.get("sha") if isinstance(target, dict) else None
+            if (
+                not isinstance(reference, str)
+                or not isinstance(sha, str)
+                or len(sha) != 40
+                or any(character not in "0123456789abcdefABCDEF" for character in sha)
+                or reference in result
+            ):
+                raise MetadataTargetConflict("Gitea Git reference list is malformed")
+            result[reference] = sha.lower()
+        return result
+
+    def resolve_git_target(self, repository: str, target: str) -> str:
+        if len(target) == 40 and all(character in "0123456789abcdefABCDEF" for character in target):
+            return target.lower()
+        references = self._git_references(repository)
+        candidates = (
+            (target,)
+            if target.startswith("refs/")
+            else (f"refs/heads/{target}", f"refs/tags/{target}")
+        )
+        for candidate in candidates:
+            if candidate in references:
+                return references[candidate]
+        raise MetadataTargetConflict("release target cannot be resolved to a Git reference")
+
+    def tag_target(self, repository: str, tag_name: str) -> str | None:
+        return self._git_references(repository).get(f"refs/tags/{tag_name}")
+
     def get_release(self, repository: str, release_id: str) -> dict[str, Any]:
         owner, name = _repository_segments(repository)
         native = _numeric_path_segment(release_id, "release id")
@@ -172,27 +207,28 @@ class GiteaMetadataClient(GiteaProvisioningClient):
             not isinstance(url, str)
             or not isinstance(uuid, str)
             or not uuid
+            or len(uuid) > 255
+            or any(
+                not (character.isascii() and (character.isalnum() or character == "-"))
+                for character in uuid
+            )
             or type(size) is not int
             or size < 0
             or size > max_bytes
         ):
             raise MetadataTargetConflict("asset download facts are incomplete or oversized")
-        parsed = urlsplit(url)
         base = urlsplit(str(self._client.base_url))
         api_path = base.path.rstrip("/")
         api_suffix = "/api/v1"
         if not api_path.endswith(api_suffix):
             raise MetadataTargetConflict("asset download base URL is not a supported Gitea API URL")
         installation_prefix = api_path[: -len(api_suffix)]
-        if (
-            parsed.scheme != base.scheme
-            or parsed.netloc != base.netloc
-            or parsed.query
-            or parsed.fragment
-            or parsed.path != f"{installation_prefix}/attachments/{uuid}"
-        ):
-            raise MetadataTargetConflict("asset download URL is not the expected same-origin route")
-        with self._client.stream("GET", url) as response:
+        # Gitea 28.4.0 returns the native UUID route after upload but may expose a
+        # release-friendly browser URL when the same asset is listed later. Never
+        # follow either remote-provided URL: construct the documented native asset
+        # path from the already approved connection and native UUID.
+        download_url = f"{base.scheme}://{base.netloc}{installation_prefix}/attachments/{uuid}"
+        with self._client.stream("GET", download_url) as response:
             response.raise_for_status()
             if response.headers.get("content-encoding", "identity") != "identity":
                 raise MetadataTargetConflict("compressed asset responses are not accepted")

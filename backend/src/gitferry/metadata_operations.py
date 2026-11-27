@@ -94,6 +94,21 @@ def asset_values(value: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def verify_release_target(
+    client: GiteaMetadataClient,
+    repository: str,
+    expected: Mapping[str, Any],
+    *,
+    allow_missing_tag: bool = False,
+) -> None:
+    desired = client.resolve_git_target(repository, str(expected["target_commitish"]))
+    actual = client.tag_target(repository, str(expected["tag_name"]))
+    if actual is None and allow_missing_tag:
+        return
+    if actual != desired:
+        raise MetadataTargetConflict("release Git tag points at another target")
+
+
 def _operation_id(
     operation_type: str,
     origin_id: str,
@@ -185,7 +200,24 @@ def prepare_metadata_operation(
             except KeyError:
                 intent["expected"] = {"label_origin_ids": []}
             else:
-                raise OperationBlocked("existing issue label changes require an immutable baseline")
+                intent["expected"] = {"label_origin_ids": []}
+                operation_id = _operation_id(
+                    operation_type, origin_id, target_instance_key, intent, baseline_id
+                )
+                try:
+                    existing = state.get_operation(operation_id)
+                except KeyError:
+                    raise OperationBlocked(
+                        "existing issue label changes require an immutable baseline"
+                    ) from None
+                if (
+                    existing.status != "confirmed"
+                    or existing.target_repository_scope != target_repository_scope
+                ):
+                    raise OperationBlocked(
+                        "existing issue label changes require an immutable baseline"
+                    )
+                return existing
         else:
             baseline = state.get_baseline(baseline_id)
             if (
@@ -310,6 +342,17 @@ class MetadataApplication:
                     raise OperationBlocked(
                         "target release tag or name already exists without this mapping"
                     )
+                try:
+                    verify_release_target(
+                        self.client,
+                        operation.target_repository_scope,
+                        wanted,
+                        allow_missing_tag=True,
+                    )
+                except MetadataTargetConflict as exc:
+                    raise OperationBlocked(
+                        "release tag target cannot be represented safely"
+                    ) from exc
                 return
             mapping = self._mapping(operation.origin_id, operation.target_instance_key)
             value = self.client.get_release(
@@ -320,6 +363,10 @@ class MetadataApplication:
                 if operation.status == "confirmed"
                 else operation.intent["expected"]
             )
+            if operation.operation_type == "update_release" and operation.status != "confirmed":
+                wanted = operation.intent["values"]
+                if any(wanted[key] != expected[key] for key in ("tag_name", "target_commitish")):
+                    raise OperationBlocked("release tag target changes are not supported")
             try:
                 verify_release(
                     value,
@@ -327,6 +374,7 @@ class MetadataApplication:
                     author_login=binding.target_login,
                     author_id=binding.target_account_id,
                 )
+                verify_release_target(self.client, operation.target_repository_scope, expected)
             except MetadataTargetConflict as exc:
                 raise OperationBlocked("mapped target release differs from the baseline") from exc
             return
@@ -359,7 +407,15 @@ class MetadataApplication:
                 raise OperationBlocked("mapped issue has no repository index")
             desired_ids: list[int] = []
             for origin_id in operation.intent["label_origin_ids"]:
-                mapping = self._mapping(origin_id, operation.target_instance_key)
+                try:
+                    mapping = self._mapping(origin_id, operation.target_instance_key)
+                except OperationBlocked:
+                    if (
+                        operation.status != "confirmed"
+                        and planned_label_scopes.get(origin_id) == operation.target_repository_scope
+                    ):
+                        continue
+                    raise
                 if mapping.target_repository_scope != operation.target_repository_scope:
                     raise OperationBlocked("mapped label belongs to another repository")
                 desired_ids.append(int(mapping.target_global_id))
@@ -416,6 +472,11 @@ class MetadataApplication:
                 raise OperationBlocked("mapped target asset is missing from its parent")
             try:
                 verify_asset(matches[0], name=intent["name"], size=intent["size"])
+            except MetadataTargetConflict as exc:
+                raise OperationBlocked(
+                    f"mapped target {operation.operation_type} metadata differs"
+                ) from exc
+            try:
                 with tempfile.TemporaryDirectory() as temporary:
                     observed = Path(temporary) / "asset"
                     size, digest, _media_type = self.client.download_asset(
@@ -426,7 +487,9 @@ class MetadataApplication:
                         "mapped target asset bytes differ from the reviewed payload"
                     )
             except MetadataTargetConflict as exc:
-                raise OperationBlocked("mapped target asset differs from its baseline") from exc
+                raise OperationBlocked(
+                    f"mapped target {operation.operation_type} bytes differ"
+                ) from exc
         elif any(item.get("name") == intent["name"] for item in assets):
             raise OperationBlocked("target parent already has an unmapped asset with this name")
 
@@ -482,6 +545,7 @@ class MetadataApplication:
                     author_login=binding.target_login,
                     author_id=binding.target_account_id,
                 )
+                verify_release_target(self.client, scope, operation.intent["values"])
                 created_at = value.get("created_at")
                 return TargetConfirmation(
                     identifier,
@@ -501,6 +565,7 @@ class MetadataApplication:
                     author_login=binding.target_login,
                     author_id=binding.target_account_id,
                 )
+                verify_release_target(self.client, scope, operation.intent["values"])
                 return TargetConfirmation(
                     identifier, None, mapping.target_native_created_at, operation.intent["values"]
                 )

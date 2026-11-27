@@ -385,6 +385,7 @@ def main() -> None:
         choices=(
             "initial",
             "replay",
+            "confirmed-repackage",
             "crash",
             "lost",
             "asset-lost",
@@ -392,6 +393,8 @@ def main() -> None:
             "metadata-drift",
             "label-collision",
             "release-collision",
+            "release-target-collision",
+            "release-target-update",
             "metadata-omission",
             "resume",
             "repackage",
@@ -426,6 +429,15 @@ def main() -> None:
             return
         if args.mode == "initial":
             plan = initialize(state)
+        elif args.mode == "confirmed-repackage":
+            receive_package_archive(
+                Path("/package/application-plan.zip"),
+                ROOT / "packages" / "confirmed-repackage",
+            )
+            request = json.loads((ROOT / "request.json").read_text())
+            request["round_key"] = "confirmed-repackage"
+            request["package_ref"] = "confirmed-repackage"
+            plan = prepare_transfer_plan(state, request)
         elif args.mode == "asset-lost":
             request = json.loads((ROOT / "request.json").read_text())
             issue_origin_id = request["metadata"][1]["origin_id"]
@@ -536,6 +548,32 @@ def main() -> None:
             request["content"] = [{**source, "origin_id": origin.id}]
             request["round_key"] = args.mode
             (ROOT / (args.mode + "-request.json")).write_text(json.dumps(request))
+            plan = prepare_transfer_plan(state, request)
+        elif args.mode == "release-target-collision":
+            request = json.loads((ROOT / "request.json").read_text())
+            source = next(item for item in request["content"] if item["kind"] == "release")
+            origin = state.register_origin(OriginKey("source", REPOSITORY, "release", "64"))
+            request["repositories"] = []
+            request["metadata"] = []
+            request["content"] = [
+                {
+                    **source,
+                    "origin_id": origin.id,
+                    "values": {
+                        **source["values"],
+                        "tag_name": "wrong-target",
+                        "name": "Wrong target release",
+                    },
+                }
+            ]
+            request["round_key"] = "release-target-collision"
+            plan = prepare_transfer_plan(state, request)
+        elif args.mode == "release-target-update":
+            request = json.loads((ROOT / "metadata-update-request.json").read_text())
+            release = next(item for item in request["content"] if item["kind"] == "release")
+            release["values"] = {**release["values"], "target_commitish": "wrong-target"}
+            request["content"] = [release]
+            request["round_key"] = "release-target-update"
             plan = prepare_transfer_plan(state, request)
         elif args.mode == "metadata-omission":
             request = json.loads((ROOT / "request.json").read_text())

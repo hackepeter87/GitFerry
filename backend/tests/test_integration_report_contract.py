@@ -340,6 +340,7 @@ def complete_probe_report() -> dict[str, object]:
             "assertions": dict.fromkeys(
                 (
                     "confirmed_restart_no_duplicates",
+                    "confirmed_repackage_no_duplicates",
                     "control_repository_unchanged",
                     "crash_no_second_post",
                     "crash_remote_post_accepted",
@@ -361,6 +362,7 @@ def complete_probe_report() -> dict[str, object]:
                     "metadata_update_same_ids_and_timestamps",
                     "metadata_update_replay_no_writes",
                     "label_and_release_collisions_blocked",
+                    "release_tag_target_collision_blocked",
                     "metadata_omission_no_deletion",
                     "metadata_drift_blocks_overwrite",
                     "asset_lost_remote_post_accepted",

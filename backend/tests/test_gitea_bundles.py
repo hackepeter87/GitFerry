@@ -128,6 +128,42 @@ def test_push_rejects_divergent_existing_refs_without_write(tmp_path: Path, monk
     assert calls == ["ls-remote"]
 
 
+def test_remote_replay_allows_only_separately_confirmed_release_tags(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _, intent = _source(tmp_path)
+    pusher = GiteaBundlePusher(
+        tmp_path / "package",
+        tmp_path / "work",
+        "https://target.invalid:3000",
+        "synthetic-admin",
+        "synthetic-token",
+    )
+    expected = pusher._local_refs(pusher.preflight(intent).destination)
+    release_tag = "refs/tags/portable-v1"
+    observed = {**expected, release_tag: next(iter(expected.values()))}
+    monkeypatch.setattr(pusher, "_git_remote", lambda *_: observed)
+
+    assert (
+        pusher.check_remote(
+            "org/repo",
+            bundle=intent,
+            expected_empty=False,
+            allowed_extra_refs=frozenset({release_tag}),
+        )
+        == observed
+    )
+
+    observed["refs/heads/unrelated"] = next(iter(expected.values()))
+    with pytest.raises(GiteaBundleError, match="divergent refs"):
+        pusher.check_remote(
+            "org/repo",
+            bundle=intent,
+            expected_empty=False,
+            allowed_extra_refs=frozenset({release_tag}),
+        )
+
+
 def test_constructor_rejects_unsafe_roots_and_urls(tmp_path: Path) -> None:
     package = tmp_path / "package"
     package.mkdir()

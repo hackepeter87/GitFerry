@@ -79,6 +79,33 @@ def test_label_release_and_assignment_routes() -> None:
     client.close()
 
 
+def test_release_git_target_uses_live_branch_and_tag_refs() -> None:
+    main_sha = "1" * 40
+    old_sha = "2" * 40
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/repos/acme/repo/git/refs"
+        return response(
+            request,
+            200,
+            [
+                {"ref": "refs/heads/main", "object": {"sha": main_sha}},
+                {"ref": "refs/tags/portable-v1", "object": {"sha": old_sha}},
+            ],
+        )
+
+    client = GiteaMetadataClient(
+        "https://gitea.invalid",
+        username="admin",
+        token="token",  # noqa: S106 - synthetic MockTransport credential
+        transport=httpx.MockTransport(handler),
+    )
+    assert client.resolve_git_target("acme/repo", "main") == main_sha
+    assert client.tag_target("acme/repo", "portable-v1") == old_sha
+    assert client.tag_target("acme/repo", "missing") is None
+    client.close()
+
+
 def test_asset_upload_parent_routes_and_filename_validation(tmp_path: Path) -> None:
     payload = tmp_path / "payload.bin"
     payload.write_bytes(b"asset")
@@ -107,7 +134,7 @@ def test_asset_upload_parent_routes_and_filename_validation(tmp_path: Path) -> N
     client.close()
 
 
-def test_asset_download_requires_same_origin_uuid_size_and_digest(tmp_path: Path) -> None:
+def test_asset_download_uses_local_uuid_route_not_remote_browser_url(tmp_path: Path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/attachments/uuid-1"
         return httpx.Response(
@@ -139,20 +166,32 @@ def test_asset_download_requires_same_origin_uuid_size_and_digest(tmp_path: Path
         "text/plain",
     )
     assert destination.read_bytes() == b"asset"
-    with pytest.raises(MetadataTargetConflict, match="same-origin"):
+    assert (
         client.download_asset(
             {
                 "uuid": "uuid-1",
                 "size": 5,
-                "browser_download_url": "https://evil.invalid/attachments/uuid-1",
+                "browser_download_url": "https://evil.invalid/releases/download/v1/asset.bin",
             },
-            tmp_path / "evil.bin",
+            tmp_path / "ignored-browser-url.bin",
+            max_bytes=5,
+        )[0]
+        == 5
+    )
+    with pytest.raises(MetadataTargetConflict, match="facts"):
+        client.download_asset(
+            {
+                "uuid": "../uuid-1",
+                "size": 5,
+                "browser_download_url": "https://gitea.invalid/attachments/uuid-1",
+            },
+            tmp_path / "invalid-uuid.bin",
             max_bytes=5,
         )
     client.close()
 
 
-def test_asset_download_accepts_gitea_installation_subpath_but_not_sibling_path(
+def test_asset_download_constructs_gitea_installation_subpath(
     tmp_path: Path,
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
@@ -183,16 +222,18 @@ def test_asset_download_accepts_gitea_installation_subpath_but_not_sibling_path(
         )[0]
         == 5
     )
-    with pytest.raises(MetadataTargetConflict, match="same-origin"):
+    assert (
         client.download_asset(
             {
                 "uuid": "uuid-2",
                 "size": 5,
                 "browser_download_url": "https://gitea.invalid/gitea-other/attachments/uuid-2",
             },
-            tmp_path / "sibling.bin",
+            tmp_path / "ignored-sibling.bin",
             max_bytes=5,
-        )
+        )[0]
+        == 5
+    )
     client.close()
 
 

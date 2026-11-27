@@ -169,6 +169,28 @@ def test_new_issue_label_assignment_uses_mapped_origins_and_replays_without_put(
     assert replay.status == "confirmed"
     assert client.label_puts == 1
 
+    repackaged = prepare_metadata_operation(
+        state,
+        origin_id=issue.id,
+        target_instance_key="b",
+        target_repository_scope="acme/repo",
+        operation_type="assign_issue_labels",
+        values={"label_origin_ids": [label]},
+    )
+    assert repackaged.operation_id == operation.operation_id
+    assert repackaged.status == "confirmed"
+
+    another = state.register_origin(OriginKey("a", "acme/repo", "label", "14"))
+    with pytest.raises(OperationBlocked, match="immutable baseline"):
+        prepare_metadata_operation(
+            state,
+            origin_id=issue.id,
+            target_instance_key="b",
+            target_repository_scope="acme/repo",
+            operation_type="assign_issue_labels",
+            values={"label_origin_ids": [label, another.id]},
+        )
+
     client.issue_labels = [{"id": 99}]
     with OperationExecutor(state, "drift-assignment") as executor:
         with pytest.raises(OperationBlocked, match="differ from the baseline"):
@@ -214,6 +236,40 @@ def test_new_issue_label_assignment_preflight_accepts_planned_issue_and_label(
             planned_parent_scopes={issue.id: "acme/repo"},
             planned_label_scopes={label: "other/repo"},
         )
+
+
+def test_existing_issue_label_assignment_preflight_accepts_planned_new_label(
+    tmp_path: Path,
+) -> None:
+    state, issue, label = configured(tmp_path)
+    state.create_transfer_round("labels-round", "a", "b", "acme/repo")
+    state.create_baseline(
+        baseline_id="existing-labels",
+        transfer_round_id="labels-round",
+        origin_id=issue,
+        ruleset_name="gitea-issue-label-origins",
+        ruleset_version=1,
+        baseline={"label_origin_ids": []},
+        desired={"label_origin_ids": [label]},
+        observed={"label_origin_ids": []},
+        origin_created_at=None,
+        target_native_created_at=None,
+    )
+    operation = prepare_metadata_operation(
+        state,
+        origin_id=issue,
+        target_instance_key="b",
+        target_repository_scope="acme/repo",
+        operation_type="assign_issue_labels",
+        values={"label_origin_ids": [label]},
+        baseline_id="existing-labels",
+    )
+    app = MetadataApplication(state, MetadataClient(), tmp_path, max_bytes=1024)  # type: ignore[arg-type]
+
+    app.preflight(
+        operation.operation_id,
+        planned_label_scopes={label: "acme/repo"},
+    )
 
 
 def test_same_name_label_collision_is_blocked_without_mapping_or_post(tmp_path: Path) -> None:
@@ -408,7 +464,7 @@ def test_confirmed_asset_rejects_equal_size_remote_digest_drift(tmp_path: Path) 
         app.apply(operation.operation_id, executor)
 
     client.payload = b"synthetic asseX"
-    with pytest.raises(OperationBlocked, match="differs from its baseline"):
+    with pytest.raises(OperationBlocked, match="bytes differ"):
         app.preflight(operation.operation_id)
     assert client.asset_posts == 1
 

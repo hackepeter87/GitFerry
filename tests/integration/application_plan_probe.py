@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
+import subprocess
 from typing import Any
 
 import httpx
@@ -42,9 +44,11 @@ ASSERTIONS = frozenset(
         "metadata_update_same_ids_and_timestamps",
         "metadata_update_replay_no_writes",
         "label_and_release_collisions_blocked",
+        "release_tag_target_collision_blocked",
         "metadata_omission_no_deletion",
         "metadata_drift_blocks_overwrite",
         "confirmed_restart_no_duplicates",
+        "confirmed_repackage_no_duplicates",
         "crash_remote_post_accepted",
         "crash_restart_outcome_unknown",
         "crash_no_second_post",
@@ -290,6 +294,14 @@ def events() -> list[dict[str, Any]]:
     return [json.loads(line) for line in value.stdout.splitlines()]
 
 
+def write_events() -> list[dict[str, Any]]:
+    return [
+        event
+        for event in events()
+        if event["method"] not in ("GET", "HEAD") and not event["path"].endswith("/git-upload-pack")
+    ]
+
+
 def comments() -> list[dict[str, Any]]:
     return api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/issues/1/comments")
 
@@ -300,7 +312,22 @@ def run_application_plan_probe() -> dict[str, Any]:
     (package_root / "assets").mkdir()
     (package_root / "assets/issue-proof.txt").write_bytes(ISSUE_ASSET)
     (package_root / "assets/release-proof.txt").write_bytes(RELEASE_ASSET)
-    bundle = create_git_bundle(WORK / "permission-seed", package_root, "bundles/selected.bundle")
+    seed = WORK / "application-plan-seed"
+    shutil.copytree(WORK / "permission-seed", seed)
+    git = shutil.which("git")
+    if git is None:
+        raise ProbeFailure("git is required for the application-plan fixture")
+    wrong_target = subprocess.check_output(
+        [git, "-C", str(seed), "rev-parse", "HEAD"], text=True
+    ).strip()
+    (seed / "second-commit.txt").write_text("second synthetic commit\n")
+    subprocess.run([git, "-C", str(seed), "add", "second-commit.txt"], check=True)
+    subprocess.run(
+        [git, "-C", str(seed), "commit", "-m", "Add second synthetic commit"],
+        check=True,
+        capture_output=True,
+    )
+    bundle = create_git_bundle(seed, package_root, "bundles/selected.bundle")
     package_document = json.loads((ROOT / "examples/application-package.v1.json").read_text())
     package_document["sender"] = {
         "instance_key": "source",
@@ -470,6 +497,7 @@ def run_application_plan_probe() -> dict[str, Any]:
         ).content
         == RELEASE_ASSET,
     }
+    details: dict[str, Any] = {}
     before = events()
     catalog = worker("browse")
     assertions["source_catalog_lists_real_organization_and_repository_without_writes"] = (
@@ -488,6 +516,32 @@ def run_application_plan_probe() -> dict[str, Any]:
         and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/issues/1/assets")) == 1
         and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases/{release['id']}/assets")) == 1
     )
+    before_repackage_writes = write_events()
+    repackaged = worker("confirmed-repackage")
+    repackage_writes = write_events()[len(before_repackage_writes) :]
+    assertions["confirmed_repackage_no_duplicates"] = (
+        repackaged["plan"]["status"] == "confirmed"
+        # A newly admitted package is preflighted against live Gitea again, but
+        # stable origins must reuse confirmed operations without another write.
+        and not repackage_writes
+        and comments() == initial_comments
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/labels")) == len(labels)
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases")) == 1
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/issues/1/assets")) == 1
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases/{release['id']}/assets")) == 1
+    )
+    details["confirmed_repackage"] = {
+        "plan_status": repackaged["plan"]["status"],
+        "plan_reason": repackaged["plan"].get("reason"),
+        "operations": [
+            {
+                "operation_type": item["operation_type"],
+                "status": item["status"],
+            }
+            for item in repackaged["plan"]["operations"]
+        ],
+        "new_write_events": repackage_writes,
+    }
     before_update = events()
     update = worker("metadata-update", "metadata-update")
     updated_labels = api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/labels")
@@ -512,6 +566,12 @@ def run_application_plan_probe() -> dict[str, Any]:
     assertions["metadata_update_replay_no_writes"] = (
         update_replay["plan"]["status"] == "confirmed" and events() == after_update
     )
+    api(
+        TARGET_URL,
+        "POST",
+        f"/repos/{REPOSITORY}/tags",
+        json_body={"tag_name": "wrong-target", "target": wrong_target},
+    )
     before_collisions = events()
     label_collision = worker("label-collision", "label-collision")
     release_collision = worker("release-collision", "release-collision")
@@ -520,6 +580,14 @@ def run_application_plan_probe() -> dict[str, Any]:
         and release_collision["plan"]["status"] == "blocked"
         and events() == before_collisions
         and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/labels")) == len(labels)
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases")) == 1
+    )
+    target_collision = worker("release-target-collision", "release-target-collision")
+    target_update = worker("release-target-update", "release-target-update")
+    assertions["release_tag_target_collision_blocked"] = (
+        target_collision["plan"]["status"] == "blocked"
+        and target_update["plan"]["status"] == "blocked"
+        and events() == before_collisions
         and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases")) == 1
     )
     omission = worker("metadata-omission", "metadata-omission")
@@ -569,7 +637,6 @@ def run_application_plan_probe() -> dict[str, Any]:
                 sort_keys=True,
             )
         )
-    details: dict[str, Any] = {}
     for case, expected in (("crash", 91), ("lost", 0)):
         before = events()
         count = len(comments())
@@ -718,7 +785,10 @@ raise SystemExit(0 if clean else 1)
         docker_service_exec("gitferry-b", ["python", "-c", scan], check=False).returncode == 0
     )
     if set(assertions) != ASSERTIONS or not all(assertions.values()):
-        raise ProbeFailure(f"Application plan assertions failed: {assertions}")
+        raise ProbeFailure(
+            f"Application plan assertions failed: {assertions}; "
+            f"repackage diagnostics: {details.get('confirmed_repackage')}"
+        )
     return {
         "status": "passed",
         "assertions": assertions,
