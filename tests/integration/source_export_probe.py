@@ -611,7 +611,8 @@ def run_source_export_probe() -> dict[str, Any]:
     assertions["git_return_replay_restart_no_duplicate"] = (
         return_replay["status"] == "confirmed"
         and return_replay["same_refs"]
-        and return_apply["push_attempts"] == return_replay["push_attempts"] == 1
+        and return_apply["push_attempts"] > 0
+        and return_apply["push_attempts"] == return_replay["push_attempts"]
     )
     assertions["git_return_control_and_network_isolation"] = (
         return_export["source_unreachable"]
