@@ -276,6 +276,10 @@ def apply_return() -> dict[str, Any]:
                 LocalReferences(A_ROOT / "secrets", A_ROOT / "ca"),
             ),
         ).run(plan["plan_id"])
+    if result["status"] != "confirmed":
+        raise RuntimeError(
+            f"return application ended as {result['status']}: {result.get('reason')}"
+        )
     after = _git_refs(A_ROOT, A_URL, REPOSITORY)
     after_control = _git_refs(A_ROOT, A_URL, CONTROL_REPOSITORY)
     with state.read_connection() as connection:
@@ -333,6 +337,7 @@ def replay_return() -> dict[str, Any]:
             "restart replay did not resolve to the confirmed return plan: "
             f"existing={existing['plan_id']}:{existing['status']} "
             f"replayed={replayed['plan_id']}:{replayed['status']} "
+            f"reason={existing.get('reason')} "
             f"existing_digest={existing['document']['inventory']['request'].get('package_digest')} "
             f"artifact_digest={artifact.digest_sha256}"
         )
