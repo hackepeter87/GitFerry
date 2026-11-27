@@ -78,6 +78,18 @@ def test_capture_source_reads_only_selected_repository_and_reports_team_limits(
     ]
     assert any("administrative owner teams" in item for item in result["limitations"])
     assert any("explicitly excluded" in item for item in result["limitations"])
+    assert any(
+        "pull requests and pull-request conversations are inventory-only" in item
+        for item in result["limitations"]
+    )
+    assert any(
+        "reviews and inline review comments are inventory-only" in item
+        for item in result["limitations"]
+    )
+    assert any(
+        "timeline/system events are read-only inventory" in item for item in result["limitations"]
+    )
+    assert any("Gitea exposes no stable reaction ID" in item for item in result["limitations"])
     assert all("acme/other" not in call for call in calls)
 
 

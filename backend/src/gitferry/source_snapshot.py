@@ -430,7 +430,7 @@ class _SnapshotReader:
             self.limitations.append("issue and comment metadata was explicitly excluded")
         if not include_members:
             self.limitations.append("team members were explicitly excluded")
-        omitted = ["LFS", "wiki", "pull requests", "reviews", "other content classes"]
+        omitted = ["LFS", "wiki", "other content classes"]
         if not include_labels:
             omitted.append("labels")
         if not include_attachments:
@@ -442,6 +442,13 @@ class _SnapshotReader:
         self.limitations.extend(
             [
                 ", ".join(omitted) + " are not captured",
+                "pull requests and pull-request conversations are inventory-only; "
+                "required head/base refs and native authors are not transferred",
+                "reviews and inline review comments are inventory-only; commit/diff positions, "
+                "native authors and historical times are not transferred",
+                "timeline/system events are read-only inventory and are not transferred",
+                "reactions are inventory-only; Gitea exposes no stable reaction ID and "
+                "historical creation time cannot be restored",
                 "native timestamps are preserved as source strings; "
                 "create endpoints do not restore them",
             ]
