@@ -1014,12 +1014,16 @@ Gitea B. A admits the known forward reference, resolves the existing repository 
 the bundle and live A ref baseline, and publishes the selected ordinary refs without force.
 
 Mandatory `source_exports.assertions` cover the file-only boundary, exact returned object ID,
-restart replay with an unchanged remote-write attempt count, and unchanged control repository plus
-opposite-instance network isolation. Unit tests separately cover A drift, B technical-import
-normalization, deletion, existing-tag replacement, non-fast-forward, protected and unsupported refs,
-strict ref maps, immutable operation intent, lost response, exact reconciliation, and repackaging.
-The v5 plan request is serialized and validated again before preflight so a process restart cannot
-bypass strict input validation.
+selected-A drift and live protected-branch refusal before push, a real post-push process exit,
+persistent `outcome_unknown`, exact instance/repository/ref/object reconciliation, restart replay
+with an unchanged remote-write attempt count, and unchanged control repository plus
+opposite-instance network isolation. Unit tests separately cover B technical-import normalization,
+deletion, annotated and existing-tag behavior, non-fast-forward and unsupported refs, strict ref
+maps, corrupt or missing bundle evidence, repository identity mismatch before push, immutable
+operation intent, lost response, exact reconciliation, and repackaging. The v5 plan request is
+serialized and validated again before preflight so a process restart cannot bypass strict input
+validation. The same request contract is exercised through the REST endpoint, CLI and desktop
+source-export form; target application continues through the shared durable plan runner.
 
 This evidence qualifies only ordinary branch/tag ref return. It does not qualify Git merges,
 deletion, force updates, LFS/wiki return, protected-branch rule migration, general exactly-once, or
