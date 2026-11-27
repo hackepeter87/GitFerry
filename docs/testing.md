@@ -1004,3 +1004,24 @@ unsupported selected class is not blocked before writes, a limitation is omitted
 a complete transfer. The desktop inventory test separately verifies that unsupported selections are
 visible and cannot be exported. Package omission remains non-destructive, and the selected control
 repository must remain unchanged. See [the acceptance contract](verification-complete-scope.md).
+
+## Bounded Git ref return
+
+The source-export integration now performs a real file-only Git return between the two independent
+GitFerry state stores and the two pinned Gitea 28.4.0 instances. B creates an offline branch, emits
+an application-package v5 archive, and transfers only that archive to A. The A importer cannot reach
+Gitea B. A admits the known forward reference, resolves the existing repository replica, verifies
+the bundle and live A ref baseline, and publishes the selected ordinary refs without force.
+
+Mandatory `source_exports.assertions` cover the file-only boundary, exact returned object ID,
+restart replay with an unchanged remote-write attempt count, and unchanged control repository plus
+opposite-instance network isolation. Unit tests separately cover A drift, B technical-import
+normalization, deletion, existing-tag replacement, non-fast-forward, protected and unsupported refs,
+strict ref maps, immutable operation intent, lost response, exact reconciliation, and repackaging.
+The v5 plan request is serialized and validated again before preflight so a process restart cannot
+bypass strict input validation.
+
+This evidence qualifies only ordinary branch/tag ref return. It does not qualify Git merges,
+deletion, force updates, LFS/wiki return, protected-branch rule migration, general exactly-once, or
+the metadata return workflow. Exact commit, CI run, review and artifact identifiers belong to issue
+#22, PR #73 and their Actions artifacts rather than this product document.
