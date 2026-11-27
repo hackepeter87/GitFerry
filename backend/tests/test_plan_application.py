@@ -111,6 +111,37 @@ def test_comment_before_issue_uses_existing_journal_and_stable_plan(tmp_path: Pa
     assert "token" not in json.dumps(plan)
 
 
+def test_return_plan_uses_existing_repository_mapping_without_provisioning(tmp_path: Path) -> None:
+    state, _ = configured_plan(tmp_path)
+    origin = state.register_origin(OriginKey("source", "org/repo", "repository", "41"))
+    state.add_object_mapping(origin.id, "target", "org/repo", "84")
+    request = {
+        "version": 2,
+        "mode": "return",
+        "target_instance_key": "target",
+        "round_key": "return-1",
+        "package_ref": "return-package",
+        "package_digest": "d" * 64,
+        "repositories": [{
+            "repository_origin_id": origin.id,
+            "repository": "org/repo",
+            "target_repository_id": "84",
+            "bundle": {"member": "bundles/return.bundle", "sha256": "e" * 64, "size": 42},
+            "comparison": {
+                "ruleset": "git-refs",
+                "ruleset_version": 1,
+                "original_baseline": {"refs/heads/main": "1" * 40},
+                "confirmed_import": {"refs/heads/main": "1" * 40},
+                "desired": {"refs/heads/main": "2" * 40},
+            },
+        }],
+    }
+
+    plan = prepare_transfer_plan(state, request)
+    assert [step["operation_type"] for step in plan["operations"]] == ["push_git_ref"]
+    assert plan["document"]["inventory"]["request"]["mode"] == "return"
+
+
 def test_missing_author_or_parent_never_produces_executable_plan(tmp_path: Path) -> None:
     state, request = configured_plan(tmp_path)
     missing = deepcopy(request)

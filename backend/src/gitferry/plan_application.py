@@ -9,6 +9,8 @@ from typing import Annotated, Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from gitferry.comment_operations import prepare_comment_operation, resolve_author_binding
+from gitferry.git_return import compare_return_refs
+from gitferry.git_return_operations import prepare_git_ref_operation
 from gitferry.gitea_provisioning import _repository_segments
 from gitferry.issue_operations import prepare_issue_operation
 from gitferry.metadata_operations import prepare_metadata_operation
@@ -48,15 +50,33 @@ class BundleInput(_Input):
     size: Annotated[int, Field(gt=0)]
 
 
+class ReturnComparisonInput(_Input):
+    ruleset: Literal["git-refs"]
+    ruleset_version: Literal[1]
+    original_baseline: dict[str, str]
+    confirmed_import: dict[str, str]
+    desired: dict[str, str]
+    protected_refs: set[str] = Field(default_factory=set)
+
+
 class RepositoryInput(_Input):
-    organization_origin_id: Text
-    organization: Text
+    organization_origin_id: Text | None = None
+    organization: Text | None = None
     repository_origin_id: Text
     repository: Text
     teams: list[TeamInput] = Field(default_factory=list, max_length=1000)
     bundle: BundleInput | None = None
+    return_comparison: ReturnComparisonInput | None = None
+    return_repository_id: Text | None = None
+    # Compatibility names emitted by package admission's v5 return selector.
+    comparison: ReturnComparisonInput | None = None
+    target_repository_id: Text | None = None
+    changes: list[dict[str, Any]] = Field(default_factory=list, max_length=10000)
+    return_conflicts: list[dict[str, Any]] = Field(default_factory=list, max_length=10000)
 
     def provisioning(self, target: str) -> ProvisioningPlan:
+        if self.organization_origin_id is None or self.organization is None:
+            raise PlanConflict("first-import repository requires organization facts")
         return ProvisioningPlan(
             target,
             self.organization_origin_id,
@@ -104,7 +124,8 @@ class ContentInput(_Input):
 
 
 class PlanRequest(_Input):
-    version: Literal[1]
+    version: Literal[1, 2]
+    mode: Literal["first-import", "return"] = "first-import"
     target_instance_key: Reference
     round_key: Text
     package_ref: Reference | None = None
@@ -142,6 +163,25 @@ def parse_plan_request(value: Mapping[str, Any]) -> PlanRequest:
         _repository_segments(repository)
     if any(item.bundle for item in parsed.repositories) and parsed.package_ref is None:
         raise PlanConflict("bundle selections require an owned local package reference")
+    if parsed.mode == "return":
+        if parsed.version != 2:
+            raise PlanConflict("return plans require request version 2")
+        if not parsed.repositories or parsed.metadata or parsed.content:
+            raise PlanConflict("return plans support selected Git repositories only")
+        for selected_repo in parsed.repositories:
+            if (selected_repo.return_comparison or selected_repo.comparison) is None or (
+                selected_repo.return_repository_id or selected_repo.target_repository_id
+            ) is None:
+                raise PlanConflict("return repository is missing identity or comparison facts")
+            if selected_repo.bundle is None or parsed.package_ref is None:
+                raise PlanConflict("return repository requires an owned bundle package")
+    elif parsed.version != 1:
+        raise PlanConflict("invalid plan selection; version 2 plans require return mode")
+    elif any(
+        item.organization_origin_id is None or item.organization is None
+        for item in parsed.repositories
+    ):
+        raise PlanConflict("first-import repository requires organization facts")
     if parsed.package_digest is not None and parsed.package_ref is None:
         raise PlanConflict("package digest requires an owned package reference")
     if parsed.content and parsed.package_ref is None:
@@ -361,6 +401,78 @@ def prepare_transfer_plan(
     digest = hashlib.sha256(evidence["approved_identity"].encode()).hexdigest()
     operations: dict[str, OperationRecord] = {}
     dependencies: dict[str, list[str]] = {}
+    if request.mode == "return":
+        for item in sorted(request.repositories, key=lambda selected: selected.repository):
+            comparison = item.return_comparison or item.comparison
+            repository_id = item.return_repository_id or item.target_repository_id
+            if comparison is None or repository_id is None or item.bundle is None:
+                raise PlanConflict("return repository facts are incomplete")
+            try:
+                origin = state.get_origin(item.repository_origin_id)
+                mapping = state.get_object_mapping(origin.id, request.target_instance_key)
+            except KeyError:
+                raise PlanConflict(
+                    "return repository must have an existing target mapping"
+                ) from None
+            if (
+                origin.key.object_type != "repository"
+                or mapping.target_repository_scope != item.repository
+                or mapping.target_global_id != repository_id
+            ):
+                raise PlanConflict("return repository mapping does not match target identity")
+            comparison_plan = compare_return_refs(
+                comparison.original_baseline,
+                comparison.confirmed_import,
+                comparison.desired,
+                # The package cannot assert the live A state. Operations are
+                # prepared against the immutable local baseline and the adapter
+                # re-reads A immediately before each write.
+                comparison.original_baseline,
+                protected_refs=comparison.protected_refs,
+                is_ancestor=lambda _old, _new: True,
+            )
+            if comparison_plan.conflicts:
+                raise PlanConflict("return ref comparison has conflicts")
+            for change in comparison_plan.changes:
+                operation = prepare_git_ref_operation(
+                    state,
+                    origin_id=origin.id,
+                    target_instance_key=request.target_instance_key,
+                    repository_scope=item.repository,
+                    repository_id=repository_id,
+                    ref=str(change["ref"]),
+                    original_oid=change["old_oid"],
+                    desired_oid=str(change["new_oid"]),
+                    bundle_member=item.bundle.member,
+                    bundle_sha256=item.bundle.sha256,
+                    bundle_size=item.bundle.size,
+                )
+                operations[operation.operation_id] = operation
+                dependencies[operation.operation_id] = []
+        inventory = {
+            "request": request.model_dump(mode="json"),
+            "included_operations": sorted({o.operation_type for o in operations.values()}),
+            "inventory_complete": False,
+            "content_inventory": content_inventory,
+            "limitations": [
+                "Return plans support only branch/tag fast-forward changes",
+                "Ref deletion and force updates are not supported",
+                *request.source_limitations,
+            ],
+        }
+        required_bytes = 64 * 1024 * 1024 + 3 * sum(
+            item.bundle.size for item in request.repositories if item.bundle
+        )
+        return PlanService(state).create(
+            target_instance_key=request.target_instance_key,
+            profile_revision=profile["revision"],
+            evidence_digest=digest,
+            round_key=request.round_key,
+            inventory=inventory,
+            operation_ids=list(operations),
+            dependencies=dependencies,
+            required_bytes=required_bytes,
+        )
     for item in sorted(request.repositories, key=lambda selected: selected.repository):
         prepared, graph = prepare_provisioning_operations(
             state, item.provisioning(request.target_instance_key)

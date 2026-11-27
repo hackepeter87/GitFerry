@@ -35,7 +35,7 @@ from gitferry.plan_application import PlanRequest, parse_plan_request
 from gitferry.plan_diagnostics import PreflightBlocked, PreflightCheck
 from gitferry.provisioning import preflight_provisioning_operations, provision_selected_repository
 from gitferry.runtime import RuntimePaths
-from gitferry.state_store import OperationBlocked, OperationRecord, StateStore
+from gitferry.state_store import OperationBlocked, OperationRecord, StateStore, TargetConfirmation
 
 
 class GiteaPlanAdapter:
@@ -157,6 +157,13 @@ class GiteaPlanAdapter:
         )
         if str(administrator_id) != evidence["account_id"]:
             raise OperationBlocked("technical account changed since connection approval")
+        if request.mode == "return":
+            self.check = PreflightCheck.BUNDLE
+            self._preflight_bundles(
+                plan, profile.base_url, evidence["login"], token, profile.ca_ref, ca_digest
+            )
+            self.preflight_digest = plan["digest"]
+            return
         self.check = PreflightCheck.STRUCTURE
         for repository in request.repositories:
             self.scope = repository.repository
@@ -443,6 +450,41 @@ class GiteaPlanAdapter:
 
                 bundle = BundleIntent(**repository.bundle.model_dump())
                 imported = self.bundles.preflight(bundle)
+                if self.request.mode == "return":
+                    remote = self.admin.find_repository(repository.repository)
+                    repository_id = next(
+                        (
+                            operation.intent["repository_id"]
+                            for operation in (
+                                self.state.get_operation(step["operation_id"])
+                                for step in plan["operations"]
+                            )
+                            if operation.operation_type == "push_git_ref"
+                            and operation.target_repository_scope == repository.repository
+                        ),
+                        None,
+                    )
+                    if (
+                        remote is None
+                        or repository_id is None
+                        or str(remote.get("id")) != str(repository_id)
+                    ):
+                        raise OperationBlocked(
+                            "return repository identity does not match target"
+                        )
+                    refs = self.bundles._local_refs(imported.destination)
+                    for step in plan["operations"]:
+                        operation = self.state.get_operation(step["operation_id"])
+                        if (
+                            operation.operation_type != "push_git_ref"
+                            or operation.target_repository_scope != repository.repository
+                        ):
+                            continue
+                        if refs.get(operation.intent["ref"]) != operation.intent["new_oid"]:
+                            raise OperationBlocked(
+                                "return bundle does not contain the intended ref"
+                            )
+                    continue
                 if self.content_inventory is not None and self.bundles._local_refs(
                     imported.destination
                 ) != expected_git_refs(self.content_inventory, repository.repository):
@@ -479,6 +521,35 @@ class GiteaPlanAdapter:
     def apply(self, plan: dict[str, Any], executor: OperationExecutor) -> None:
         if self.preflight_digest != plan["digest"] or self.request is None or self.admin is None:
             raise OperationBlocked("complete preflight is required before execution")
+        if self.request.mode == "return":
+            if self.bundles is None:
+                raise OperationBlocked("return execution requires bundle preflight")
+            for step in plan["operations"]:
+                operation = self.state.get_operation(step["operation_id"])
+                if operation.operation_type != "push_git_ref":
+                    continue
+                target_scope = operation.target_repository_scope
+
+                def remote_write(
+                    intent: dict[str, Any], scope: str = target_scope
+                ) -> TargetConfirmation:
+                    if self.bundles is None:
+                        raise OperationBlocked("return execution requires bundle preflight")
+                    return self.bundles.push_return_ref(
+                        scope,
+                        bundle_member=intent["bundle"]["member"],
+                        bundle_sha256=intent["bundle"]["sha256"],
+                        bundle_size=intent["bundle"]["size"],
+                        expected_repository_id=str(intent["repository_id"]),
+                        ref=str(intent["ref"]),
+                        expected_old_oid=intent["old_oid"],
+                        desired_oid=str(intent["new_oid"]),
+                    )
+
+                result = executor.execute(operation.operation_id, remote_write)
+                if result.status != "confirmed":
+                    raise OperationBlocked("Git return operation needs local resolution")
+            return
         for repository in self.request.repositories:
             provision_selected_repository(
                 self.state,

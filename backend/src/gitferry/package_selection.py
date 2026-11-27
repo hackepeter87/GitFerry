@@ -365,7 +365,7 @@ def _build_return_selection(
         }
         repositories.append(repository_item)
     request = {
-        "version": 1,
+        "version": 2,
         "mode": "return",
         "target_instance_key": target,
         "round_key": document["transfer_round_id"],
