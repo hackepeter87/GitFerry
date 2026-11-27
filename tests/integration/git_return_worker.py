@@ -298,26 +298,38 @@ def apply_return() -> dict[str, Any]:
 def replay_return() -> dict[str, Any]:
     paths = _paths(A_ROOT)
     state = StateStore(paths.state_database)
-    plans = PlanService(state).list()
+    service = PlanService(state)
+    plans = service.list()
     return_plans = [
         plan for plan in plans if plan["document"]["inventory"]["request"]["mode"] == "return"
     ]
     if len(return_plans) != 1:
         raise RuntimeError("expected exactly one durable return plan")
-    plan = return_plans[0]
-    service = PlanService(state)
+    existing = return_plans[0]
     before = _git_refs(A_ROOT, A_URL, REPOSITORY)
-    plan_worker.ROOT = A_ROOT
-    plan_worker.URL = A_URL
-    with plan_worker.proxy(preserve_origin=True):
-        result = PlanRunner(
-            service,
-            lambda _: GiteaPlanAdapter(
-                state,
-                paths,
-                LocalReferences(A_ROOT / "secrets", A_ROOT / "ca"),
-            ),
-        ).run(plan["plan_id"])
+    admissions = PackageAdmissions(state, paths)
+    artifact = admissions.artifact("received-git-return")
+    admissions.admit(
+        "received-git-return",
+        target_instance_key="source",
+        profile_revision=1,
+        expected_digest=artifact.digest_sha256,
+    )
+    review = admissions.plan_review(
+        "received-git-return",
+        target_instance_key="source",
+        profile_revision=1,
+        include_metadata=False,
+    )
+    replayed = admissions.prepare_plan(
+        "received-git-return",
+        target_instance_key="source",
+        profile_revision=1,
+        expected_review_digest=review["review_digest"],
+        include_metadata=False,
+    )
+    if replayed["plan_id"] != existing["plan_id"] or replayed["status"] != "confirmed":
+        raise RuntimeError("restart replay did not resolve to the confirmed return plan")
     after = _git_refs(A_ROOT, A_URL, REPOSITORY)
     with state.read_connection() as connection:
         executing = connection.execute(
@@ -326,7 +338,7 @@ def replay_return() -> dict[str, Any]:
             "WHERE o.operation_type='push_git_ref' AND e.to_status='executing'"
         ).fetchone()[0]
     return {
-        "status": result["status"],
+        "status": replayed["status"],
         "same_refs": before == after,
         "push_attempts": executing,
     }
