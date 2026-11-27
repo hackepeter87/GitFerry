@@ -1093,6 +1093,17 @@ def test_pull_merge_live_evidence_is_mandatory() -> None:
     assert entry["status"] == "failed"
 
 
+def test_pull_merge_null_field_must_be_explicit() -> None:
+    report = complete_probe_report()
+    del report["content_inventory"]["pull_merge_evidence"]["merged_by_response"]
+    entry = next(
+        item
+        for item in report_contract().evidence_catalog(report, True)
+        if item["id"] == "selected_content_inventory_and_portable_plan"
+    )
+    assert entry["status"] == "failed"
+
+
 @pytest.mark.parametrize(
     "assertion",
     (

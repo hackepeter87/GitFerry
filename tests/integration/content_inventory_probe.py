@@ -768,7 +768,8 @@ def run_content_inventory_probe() -> dict[str, Any]:
         or merged_pull_object.facts.get("merged") is not True
         or not isinstance(merged_pull_object.facts.get("closed_at"), str)
         or not isinstance(merged_pull_object.facts.get("merged_at"), str)
-        or merged_pull_object.facts.get("merged_by") is not None
+        or "merged_by" not in merged_pull_object.facts
+        or merged_pull_object.facts["merged_by"] is not None
         or not isinstance(merged_pull_object.facts.get("merge_commit_sha"), str)
         or not merged_pull_object.facts.get("merge_commit_sha")
     ):
@@ -992,7 +993,7 @@ def run_content_inventory_probe() -> dict[str, Any]:
             "closed_at": merged_pull_object.facts["closed_at"],
             "merged_at": merged_pull_object.facts["merged_at"],
             "merge_commit_sha": merged_pull_object.facts["merge_commit_sha"],
-            "merged_by_response": merged_pull_object.facts.get("merged_by"),
+            "merged_by_response": merged_pull_object.facts["merged_by"],
             "timeline_merge_actor": merge_timeline_event.author["login"],
         },
     }

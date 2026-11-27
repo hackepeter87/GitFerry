@@ -483,8 +483,10 @@ def _issues(
             ),
             issue=True,
         )
-        if value.get("merged_by") is not None:
-            item.facts["merged_by"] = _user(value["merged_by"], "pull merger")
+        if "merged_by" in value:
+            item.facts["merged_by"] = (
+                _user(value["merged_by"], "pull merger") if value["merged_by"] is not None else None
+            )
         for side in ("head", "base"):
             if side in value:
                 ref = value[side]

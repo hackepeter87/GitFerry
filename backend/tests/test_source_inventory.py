@@ -101,6 +101,7 @@ def test_issue_and_pull_request_objects_and_children_keep_distinct_parents() -> 
                         "number": 4,
                         "title": "pull",
                         "content_version": 3,
+                        "merged_by": None,
                         "head": {
                             "ref": "feature",
                             "sha": "a" * 40,
@@ -158,6 +159,8 @@ def test_issue_and_pull_request_objects_and_children_keep_distinct_parents() -> 
         pull_request.status == "observed" and pull_request.objects[0].namespace == "global-pull-id"
     )
     assert pull_request.objects[0].facts["content_version"] == 3
+    assert "merged_by" in pull_request.objects[0].facts
+    assert pull_request.objects[0].facts["merged_by"] is None
     assert pull_request.objects[0].facts["head"]["repository"] == {
         "global_id": "9",
         "full_name": "acme/one",

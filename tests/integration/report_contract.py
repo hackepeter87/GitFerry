@@ -205,7 +205,8 @@ def _inventory_evidence(report: dict[str, Any]) -> bool:
         and isinstance(pull_merge.get("merged_at"), str)
         and isinstance(pull_merge.get("merge_commit_sha"), str)
         and bool(pull_merge["merge_commit_sha"])
-        and pull_merge.get("merged_by_response") is None
+        and "merged_by_response" in pull_merge
+        and pull_merge["merged_by_response"] is None
         and pull_merge.get("timeline_merge_actor") == "gitferry-admin"
     )
 
