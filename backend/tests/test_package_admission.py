@@ -17,6 +17,7 @@ from gitferry.operations import OperationExecutor
 from gitferry.package_admission import PackageAdmissionConflict, PackageAdmissions
 from gitferry.package_archive import receive_package_archive, write_package_archive
 from gitferry.package_selection import build_package_selection
+from gitferry.plan_application import parse_plan_request
 from gitferry.runtime import RuntimePaths
 from gitferry.state_migrations import MIGRATIONS, SCHEMA_VERSION
 from gitferry.state_store import OriginKey, StateStore
@@ -201,7 +202,11 @@ def test_return_package_admission_requires_forward_receipt_and_existing_replica(
             {
                 "origin": {"instance_key": "a", "global_id": "41"},
                 "repository": "org/repo",
-                "bundle": None,
+                "bundle": {
+                    "path": "bundles/return.bundle",
+                    "size": len(b"return bundle"),
+                    "sha256": hashlib.sha256(b"return bundle").hexdigest(),
+                },
                 "comparison": {
                     "ruleset": "git-refs",
                     "ruleset_version": 1,
@@ -216,6 +221,8 @@ def test_return_package_admission_requires_forward_receipt_and_existing_replica(
     }
     package_dir = tmp_path / "packages" / "return"
     package_dir.mkdir(parents=True)
+    (package_dir / "bundles").mkdir()
+    (package_dir / "bundles/return.bundle").write_bytes(b"return bundle")
     write_package(package_dir, package)
     paths = RuntimePaths(tmp_path / "runtime.sqlite", tmp_path / "packages", tmp_path / "work")
     paths.package_directory.mkdir(exist_ok=True)
@@ -225,6 +232,13 @@ def test_return_package_admission_requires_forward_receipt_and_existing_replica(
     report = service.review("return", target_instance_key="a", profile_revision=1)
     assert report["replay"] is False
     assert report["forward_reference"]["package_id"] == "forward-package-1"
+    selection = service.plan_review(
+        "return", target_instance_key="a", profile_revision=1, include_metadata=False
+    )["selection"]
+    request = parse_plan_request(selection["request"])
+    assert request.mode == "return"
+    assert request.repositories[0].return_repository_id == "41"
+    assert request.repositories[0].return_comparison is not None
 
 
 def test_receipt_replay_survives_real_process_restart(

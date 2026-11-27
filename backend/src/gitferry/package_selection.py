@@ -357,10 +357,17 @@ def _build_return_selection(
         repository_item = {
             "repository_origin_id": origin_identifier,
             "repository": repository,
-            "target_repository_id": mapping.target_global_id,
-            "bundle": bundle,
-            "comparison": comparison,
-            "changes": list(plan.changes),
+            "return_repository_id": mapping.target_global_id,
+            "bundle": (
+                {
+                    "member": bundle["path"],
+                    "size": bundle["size"],
+                    "sha256": bundle["sha256"],
+                }
+                if bundle is not None
+                else None
+            ),
+            "return_comparison": comparison,
         }
         repositories.append(repository_item)
     request = {
@@ -375,9 +382,6 @@ def _build_return_selection(
         "content": [],
         "author_credential_refs": {},
         "unsupported_items": list(document["limitations"]),
-        "return_conflicts": conflicts,
-        "operation_ids": [],
-        "forward_reference": document["forward_reference"],
     }
     return {
         "request": request,
