@@ -430,7 +430,7 @@ def prepare_transfer_plan(
                 # prepared against the immutable local baseline and the adapter
                 # re-reads A immediately before each write.
                 comparison.original_baseline,
-                protected_refs=comparison.protected_refs,
+                protected_refs=frozenset(comparison.protected_refs),
                 is_ancestor=lambda _old, _new: True,
             )
             if comparison_plan.conflicts:
