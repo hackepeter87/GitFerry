@@ -85,6 +85,13 @@ def parse_export_request(value: Mapping[str, Any]) -> dict[str, Any]:
                 raise ValueError("return export currently supports Git refs only")
         elif request["mode"] != "first-import":
             raise ValueError("return mode requires version five")
+        if request["version"] < 5:
+            # Preserve the byte- and shape-compatible v1-v4 request contract.
+            # Return-only fields were introduced with application package v5 and
+            # must not leak into normalized legacy requests through model defaults.
+            del request["mode"]
+            del request["forward_package_id"]
+            del request["forward_package_digest"]
         if request["version"] < 3:
             if "include_lfs" in value or "include_wiki" in value:
                 raise ValueError("legacy requests cannot select native payloads")
