@@ -10,6 +10,8 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
+import httpx
+
 from gitferry.operations import ExecutorBusy, OperationExecutor, RemoteWrite
 from gitferry.plan_diagnostics import PreflightBlocked, PreflightCheck
 from gitferry.state_store import OperationBlocked, OperationRecord
@@ -27,6 +29,12 @@ class PlanCancelled(RuntimeError):
 
 class PlanYielded(RuntimeError):
     """A service shutdown leaves confirmed work resumable at the next safe boundary."""
+
+
+def _failure_type(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code} {exc.request.method} {exc.request.url.path}"
+    return type(exc).__name__
 
 
 class _PlanExecutor(OperationExecutor):
@@ -120,10 +128,13 @@ class PlanRunner:
                 return self.service.finish(
                     plan_id, "blocked", "preflight or operation requires local resolution"
                 )
-            except Exception:
+            except Exception as exc:
                 # Remote response text and credentials never enter public plan diagnostics.
                 return self.service.finish(
-                    plan_id, "failed", "local execution failed; inspect selected operation evidence"
+                    plan_id,
+                    "failed",
+                    f"local execution failed ({_failure_type(exc)}); "
+                    "inspect selected operation evidence",
                 )
 
     def run_next(self) -> dict[str, Any] | None:

@@ -260,7 +260,10 @@ class MetadataApplication:
             )
             if len(matches) != 1:
                 raise OperationBlocked("mapped target label is missing")
-            verify_label(matches[0], expected)
+            try:
+                verify_label(matches[0], expected)
+            except MetadataTargetConflict as exc:
+                raise OperationBlocked("mapped target label differs from the baseline") from exc
             return
         if operation.operation_type in ("create_release", "update_release"):
             binding = self.state.get_identity_binding(operation.intent["author_binding_id"])
@@ -291,12 +294,15 @@ class MetadataApplication:
                 if operation.status == "confirmed"
                 else operation.intent["expected"]
             )
-            verify_release(
-                value,
-                expected,
-                author_login=binding.target_login,
-                author_id=binding.target_account_id,
-            )
+            try:
+                verify_release(
+                    value,
+                    expected,
+                    author_login=binding.target_login,
+                    author_id=binding.target_account_id,
+                )
+            except MetadataTargetConflict as exc:
+                raise OperationBlocked("mapped target release differs from the baseline") from exc
             return
         if operation.operation_type == "assign_issue_labels":
             issue = self._mapping(operation.origin_id, operation.target_instance_key)
@@ -336,7 +342,10 @@ class MetadataApplication:
             matches = [item for item in assets if str(item.get("id")) == mapping.target_global_id]
             if len(matches) != 1:
                 raise OperationBlocked("mapped target asset is missing from its parent")
-            verify_asset(matches[0], name=intent["name"], size=intent["size"])
+            try:
+                verify_asset(matches[0], name=intent["name"], size=intent["size"])
+            except MetadataTargetConflict as exc:
+                raise OperationBlocked("mapped target asset differs from its baseline") from exc
         elif any(item.get("name") == intent["name"] for item in assets):
             raise OperationBlocked("target parent already has an unmapped asset with this name")
 

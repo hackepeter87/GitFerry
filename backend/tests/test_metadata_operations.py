@@ -27,6 +27,15 @@ class MetadataClient:
         self.labels.append(value)
         return value
 
+    def update_label(
+        self, repository: str, label_id: str, values: dict[str, Any]
+    ) -> dict[str, Any]:
+        for label in self.labels:
+            if str(label["id"]) == label_id:
+                label.update(values)
+                return dict(label)
+        raise KeyError(label_id)
+
     def list_assets(
         self, repository: str, parent_kind: str, parent_id: str
     ) -> list[dict[str, Any]]:
@@ -120,6 +129,100 @@ def test_unknown_label_create_stays_blocked_without_second_post(tmp_path: Path) 
         with pytest.raises(OperationBlocked, match="reconciliation"):
             app.apply(operation.operation_id, executor)
     assert client.label_posts == 1
+
+
+def test_same_name_label_collision_is_blocked_without_mapping_or_post(tmp_path: Path) -> None:
+    state, _, label = configured(tmp_path)
+    client = MetadataClient()
+    client.labels.append({"id": 99, "name": "priority", "color": "aabbcc", "description": "Other"})
+    operation = prepare_metadata_operation(
+        state,
+        origin_id=label,
+        target_instance_key="b",
+        target_repository_scope="acme/repo",
+        operation_type="create_label",
+        values={"name": "priority", "color": "AABBCC", "description": "Synthetic"},
+    )
+    app = MetadataApplication(state, client, tmp_path, max_bytes=1024)  # type: ignore[arg-type]
+    with OperationExecutor(state, "collision") as executor:
+        with pytest.raises(OperationBlocked, match="already exists"):
+            app.apply(operation.operation_id, executor)
+    assert client.label_posts == 0
+    with pytest.raises(KeyError):
+        state.get_object_mapping(label, "b")
+
+
+def test_label_update_reuses_mapping_and_stale_baseline_blocks_patch(tmp_path: Path) -> None:
+    state, _, label = configured(tmp_path)
+    create = prepare_metadata_operation(
+        state,
+        origin_id=label,
+        target_instance_key="b",
+        target_repository_scope="acme/repo",
+        operation_type="create_label",
+        values={"name": "priority", "color": "AABBCC", "description": "Synthetic"},
+    )
+    client = MetadataClient()
+    app = MetadataApplication(state, client, tmp_path, max_bytes=1024)  # type: ignore[arg-type]
+    with OperationExecutor(state, "create") as executor:
+        app.apply(create.operation_id, executor)
+    state.create_transfer_round("label-round", "a", "b", "acme/repo")
+    baseline_values = {"name": "priority", "color": "aabbcc", "description": "Synthetic"}
+    state.create_baseline(
+        baseline_id="label-base",
+        transfer_round_id="label-round",
+        origin_id=label,
+        ruleset_name="gitea-label-fields",
+        ruleset_version=1,
+        baseline=baseline_values,
+        desired=baseline_values,
+        observed=baseline_values,
+        origin_created_at=None,
+        target_native_created_at=None,
+    )
+    update = prepare_metadata_operation(
+        state,
+        origin_id=label,
+        target_instance_key="b",
+        target_repository_scope="acme/repo",
+        operation_type="update_label",
+        baseline_id="label-base",
+        values={"name": "priority", "color": "112233", "description": "Changed"},
+    )
+    with OperationExecutor(state, "update") as executor:
+        result = app.apply(update.operation_id, executor)
+    assert result.status == "confirmed"
+    assert result.target_global_id == "41"
+    assert state.get_object_mapping(label, "b").target_global_id == "41"
+    assert client.labels[0]["description"] == "Changed"
+
+    state.create_transfer_round("label-round-stale", "a", "b", "acme/repo")
+    state.create_baseline(
+        baseline_id="label-base-stale",
+        transfer_round_id="label-round-stale",
+        origin_id=label,
+        ruleset_name="gitea-label-fields",
+        ruleset_version=1,
+        baseline={"name": "priority", "color": "112233", "description": "Changed"},
+        desired={"name": "priority", "color": "445566", "description": "New"},
+        observed={"name": "priority", "color": "112233", "description": "Changed"},
+        origin_created_at=None,
+        target_native_created_at=None,
+    )
+    client.labels[0]["description"] = "Foreign change"
+    stale = prepare_metadata_operation(
+        state,
+        origin_id=label,
+        target_instance_key="b",
+        target_repository_scope="acme/repo",
+        operation_type="update_label",
+        baseline_id="label-base-stale",
+        values={"name": "priority", "color": "445566", "description": "New"},
+    )
+    with OperationExecutor(state, "stale") as executor:
+        with pytest.raises(OperationBlocked, match="differ"):
+            app.apply(stale.operation_id, executor)
+    assert client.labels[0]["description"] == "Foreign change"
 
 
 def test_attachment_upload_verifies_parent_and_remote_bytes(tmp_path: Path) -> None:

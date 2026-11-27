@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from gitferry.connection_probe import approve_connection
 from gitferry.connection_profiles import ConnectionProfile, ProfileService
+from gitferry.operations import OperationExecutor
 from gitferry.plan_application import prepare_transfer_plan
 from gitferry.state_store import OperationBlocked, OriginKey, StateStore
 from gitferry.transfer_plans import PlanConflict
@@ -204,3 +205,46 @@ def test_label_and_attachment_operations_follow_repository_and_issue_dependencie
         by_type["create_issue"]["operation_id"]
         in dependencies[by_type["upload_attachment"]["operation_id"]]
     )
+
+
+def test_repackaging_cannot_bypass_unknown_portable_asset_create(tmp_path: Path) -> None:
+    state, request = configured_plan(tmp_path)
+    issue = state.get_origin(request["metadata"][1]["origin_id"])
+    state.add_object_mapping(issue.id, "target", "org/repo", "500", target_issue_index=7)
+    attachment = state.register_origin(
+        OriginKey("source", "org/repo", "attachment", "401", parent_origin_id=issue.id)
+    )
+    request.update(
+        {
+            "round_key": "asset-first",
+            "package_ref": "package-1",
+            "package_digest": "a" * 64,
+            "metadata": [],
+            "content": [
+                {
+                    "origin_id": attachment.id,
+                    "repository": "org/repo",
+                    "kind": "attachment",
+                    "values": {
+                        "name": "asset.txt",
+                        "size": 5,
+                        "sha256": hashlib.sha256(b"asset").hexdigest(),
+                        "media_type": "text/plain",
+                        "member": "assets/401",
+                        "parent_origin_id": issue.id,
+                    },
+                }
+            ],
+        }
+    )
+    plan = prepare_transfer_plan(state, request)
+    operation_id = plan["operations"][0]["operation_id"]
+    with OperationExecutor(state, "lost-asset") as executor:
+        with pytest.raises(OperationBlocked):
+            executor.execute(operation_id, lambda _: (_ for _ in ()).throw(RuntimeError("lost")))
+    assert state.get_operation(operation_id).status == "outcome_unknown"
+
+    repackaged = deepcopy(request)
+    repackaged["round_key"] = "asset-repackaged"
+    with pytest.raises(OperationBlocked, match="reconciliation"):
+        prepare_transfer_plan(state, repackaged)

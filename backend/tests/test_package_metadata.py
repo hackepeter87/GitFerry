@@ -137,12 +137,37 @@ def test_metadata_descriptors_and_payload_bytes_are_bound(tmp_path: Path) -> Non
         metadata_contents(tmp_path, value)
 
 
-def test_metadata_descriptor_rejects_path_origin_and_parent_conflicts() -> None:
-    for mutation in ("path", "origin", "parent"):
+def test_metadata_payload_rejects_missing_symlink_and_oversized_member(tmp_path: Path) -> None:
+    value = package()
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets/32").write_bytes(b"asset")
+    with pytest.raises(PackageError, match="missing"):
+        metadata_contents(tmp_path, value)
+
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"asset")
+    (tmp_path / "assets/31").symlink_to(outside)
+    with pytest.raises(PackageError, match="symbolic"):
+        metadata_contents(tmp_path, value)
+
+    (tmp_path / "assets/31").unlink()
+    (tmp_path / "assets/31").write_bytes(b"asset!")
+    with pytest.raises(PackageError, match="size limit"):
+        metadata_contents(tmp_path, value)
+
+
+@pytest.mark.parametrize("unsafe_path", ["../outside", "/etc/passwd", "assets//asset"])
+def test_metadata_descriptor_rejects_unsafe_paths(unsafe_path: str) -> None:
+    value = package()
+    value["content"][2]["file"]["path"] = unsafe_path
+    with pytest.raises(PackageError):
+        validate_metadata_descriptors(value)
+
+
+def test_metadata_descriptor_rejects_origin_and_parent_conflicts() -> None:
+    for mutation in ("origin", "parent"):
         value = package()
-        if mutation == "path":
-            value["content"][2]["file"]["path"] = "../outside"
-        elif mutation == "origin":
+        if mutation == "origin":
             value["content"][0]["origin"]["object_type"] = "release"
         else:
             value["content"][2]["parent_origin"]["object_type"] = "release"

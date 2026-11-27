@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -22,7 +23,11 @@ def test_gitea_per_unit_team_permission_allows_none_aggregate_permission() -> No
                 "permission": "none",
                 "includes_all_repositories": False,
                 "can_create_org_repo": False,
-                "units_map": {"repo.code": "read", "repo.issues": "read"},
+                "units_map": {
+                    "repo.code": "read",
+                    "repo.issues": "read",
+                    "repo.releases": "read",
+                },
             },
             "readers",
             "read",
@@ -44,7 +49,11 @@ def test_path_segments_are_validated_and_benign_segments_keep_exact_endpoint() -
                 "permission": "read",
                 "includes_all_repositories": False,
                 "can_create_org_repo": False,
-                "units_map": {"repo.code": "read", "repo.issues": "read"},
+                "units_map": {
+                    "repo.code": "read",
+                    "repo.issues": "read",
+                    "repo.releases": "read",
+                },
             },
         )
 
@@ -66,6 +75,11 @@ def test_path_segments_are_validated_and_benign_segments_keep_exact_endpoint() -
         ("POST", "/api/v1/orgs/safe-org/teams"),
         ("GET", "/api/v1/teams/7"),
     ]
+    assert json.loads(requests[0].content)["units_map"] == {
+        "repo.code": "read",
+        "repo.issues": "read",
+        "repo.releases": "read",
+    }
 
 
 @pytest.mark.parametrize("identifier", [True, False, 0, -1, "0", "-1", "abc"])
@@ -86,7 +100,11 @@ def test_security_relevant_response_fields_are_required(extra_permission: str) -
                 "permission": "read",
                 "includes_all_repositories": False,
                 "can_create_org_repo": True,
-                "units_map": {"repo.code": "read", "repo.issues": "read"},
+                "units_map": {
+                    "repo.code": "read",
+                    "repo.issues": "read",
+                    "repo.releases": "read",
+                },
             },
             "readers",
             "read",
@@ -102,8 +120,25 @@ def test_security_relevant_response_fields_are_required(extra_permission: str) -
                 "units_map": {
                     "repo.code": "read",
                     "repo.issues": "read",
-                    "repo.releases": extra_permission,
+                    "repo.releases": "read",
+                    "repo.wiki": extra_permission,
                 },
+            },
+            "readers",
+            "read",
+        )
+
+
+def test_release_unit_permission_is_required() -> None:
+    with pytest.raises(ProvisioningTargetConflict):
+        verify_team(
+            {
+                "id": 2,
+                "name": "readers",
+                "permission": "read",
+                "includes_all_repositories": False,
+                "can_create_org_repo": False,
+                "units_map": {"repo.code": "read", "repo.issues": "read"},
             },
             "readers",
             "read",

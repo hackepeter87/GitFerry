@@ -474,17 +474,21 @@ def _directory_authority_snapshot() -> dict[str, Any]:
         and selected in writer.get("repositories", [])
         and "source-export-lab/not-selected" not in reader.get("repositories", [])
         and "source-export-lab/not-selected" not in writer.get("repositories", []),
-        "reader_units_observed": reader.get("units") == ["repo.code", "repo.issues"],
-        "writer_units_observed": writer.get("units") == ["repo.code", "repo.issues"],
+        "reader_units_observed": reader.get("units")
+        == ["repo.code", "repo.issues", "repo.releases"],
+        "writer_units_observed": writer.get("units")
+        == ["repo.code", "repo.issues", "repo.releases"],
         "reader_unit_permissions": reader.get("unit_permissions")
         == {
             "repo.code": "read",
             "repo.issues": "read",
+            "repo.releases": "read",
         },
         "writer_unit_permissions": writer.get("unit_permissions")
         == {
             "repo.code": "write",
             "repo.issues": "write",
+            "repo.releases": "write",
         },
     }
 

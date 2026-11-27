@@ -264,6 +264,19 @@ def _content_operation(
         "attachment": "upload_attachment",
         "release_asset": "upload_release_asset",
     }[item.kind]
+    with state.read_connection() as connection:
+        prior_creates = list(
+            connection.execute(
+                "SELECT status FROM operations WHERE origin_id=? "
+                "AND target_instance_key=? AND operation_type=?",
+                (origin.id, request.target_instance_key, create_type),
+            )
+        )
+    if not mapped and any(
+        row["status"] in ("outcome_unknown", "executing", "conflict", "failed")
+        for row in prior_creates
+    ):
+        raise OperationBlocked("earlier portable content create requires reconciliation")
     if mapped and item.baseline_id is None:
         with state.read_connection() as connection:
             rows = connection.execute(

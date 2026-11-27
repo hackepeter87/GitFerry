@@ -72,7 +72,11 @@ class FakeProvisioningClient:
             "permission": permission,
             "can_create_org_repo": False,
             "includes_all_repositories": False,
-            "units_map": {"repo.code": permission, "repo.issues": permission},
+            "units_map": {
+                "repo.code": permission,
+                "repo.issues": permission,
+                "repo.releases": permission,
+            },
         }
         self.existing_teams[(organization, name)] = created
         return created

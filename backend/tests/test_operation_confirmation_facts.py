@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 import pytest
-from gitferry.state_store import OriginKey, StateStore, TargetConfirmation
+from gitferry.state_store import SCHEMA_VERSION, OriginKey, StateStore, TargetConfirmation
 
 
 def prepared(tmp_path):
@@ -137,6 +137,6 @@ state.mark_outcome_unknown('unknown','synthetic lost response')
     assert upgraded.get_operation("unknown").status == "outcome_unknown"
     assert upgraded.operation_evidence("unknown")["events"][-1]["to"] == "outcome_unknown"
     with upgraded.read_connection() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 17
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         assert not list(connection.execute("PRAGMA foreign_key_check"))
