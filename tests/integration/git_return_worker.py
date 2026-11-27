@@ -329,7 +329,13 @@ def replay_return() -> dict[str, Any]:
         include_metadata=False,
     )
     if replayed["plan_id"] != existing["plan_id"] or replayed["status"] != "confirmed":
-        raise RuntimeError("restart replay did not resolve to the confirmed return plan")
+        raise RuntimeError(
+            "restart replay did not resolve to the confirmed return plan: "
+            f"existing={existing['plan_id']}:{existing['status']} "
+            f"replayed={replayed['plan_id']}:{replayed['status']} "
+            f"existing_digest={existing['document']['inventory']['request'].get('package_digest')} "
+            f"artifact_digest={artifact.digest_sha256}"
+        )
     after = _git_refs(A_ROOT, A_URL, REPOSITORY)
     with state.read_connection() as connection:
         executing = connection.execute(
