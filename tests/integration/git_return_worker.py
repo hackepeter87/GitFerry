@@ -22,6 +22,7 @@ from gitferry.connection_probe import LocalReferences
 from gitferry.gitea_plan_adapter import GiteaPlanAdapter
 from gitferry.package_admission import PackageAdmissions
 from gitferry.package_archive import receive_package_archive
+from gitferry.plan_diagnostics import PreflightBlocked, PreflightCheck
 from gitferry.plan_runner import PlanRunner
 from gitferry.runtime import RuntimePaths
 from gitferry.source_export_jobs import SourceExportJobs
@@ -36,6 +37,21 @@ A_URL = "http://source:3000"
 B_URL = "http://target:3000"
 B_RETURN_ARCHIVE = B_ROOT / "git-return-real.zip"
 A_RETURN_ARCHIVE = A_ROOT / "git-return-real.zip"
+
+
+class DiagnosticReturnAdapter(GiteaPlanAdapter):
+    """Keep the closed product status while retaining synthetic lab diagnostics."""
+
+    preflight_failure: str | None = None
+
+    def preflight(self, plan: dict[str, Any]) -> None:
+        self.check = PreflightCheck.SELECTION
+        self.scope = None
+        try:
+            self._preflight(plan)
+        except Exception as exc:
+            self.preflight_failure = f"{type(exc).__name__}: {exc}"
+            raise PreflightBlocked(self.check, self.scope) from None
 
 
 def _paths(root: Path) -> RuntimePaths:
@@ -267,18 +283,24 @@ def apply_return() -> dict[str, Any]:
     before_control = _git_refs(A_ROOT, A_URL, CONTROL_REPOSITORY)
     plan_worker.ROOT = A_ROOT
     plan_worker.URL = A_URL
+    adapters: list[DiagnosticReturnAdapter] = []
+
+    def adapter(_: dict[str, Any]) -> DiagnosticReturnAdapter:
+        created = DiagnosticReturnAdapter(
+            state,
+            paths,
+            LocalReferences(A_ROOT / "secrets", A_ROOT / "ca"),
+        )
+        adapters.append(created)
+        return created
+
     with plan_worker.proxy(preserve_origin=True):
-        result = PlanRunner(
-            service,
-            lambda _: GiteaPlanAdapter(
-                state,
-                paths,
-                LocalReferences(A_ROOT / "secrets", A_ROOT / "ca"),
-            ),
-        ).run(plan["plan_id"])
+        result = PlanRunner(service, adapter).run(plan["plan_id"])
     if result["status"] != "confirmed":
+        diagnostic = adapters[-1].preflight_failure if adapters else "adapter was not created"
         raise RuntimeError(
-            f"return application ended as {result['status']}: {result.get('reason')}"
+            f"return application ended as {result['status']}: {result.get('reason')}; "
+            f"synthetic preflight diagnostic: {diagnostic}"
         )
     after = _git_refs(A_ROOT, A_URL, REPOSITORY)
     after_control = _git_refs(A_ROOT, A_URL, CONTROL_REPOSITORY)
