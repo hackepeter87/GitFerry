@@ -59,7 +59,9 @@ jobs:
       - name: Run unit tests
         run: make test
       - name: Run browser authentication tests
-        timeout-minutes: 5
+        # The complete desktop suite now contains more than fifty serial scenarios.
+        # Keep the check mandatory while allowing normal hosted-runner variance.
+        timeout-minutes: 10
         run: make test-browser
       - name: Upload browser diagnostics
         if: failure()
