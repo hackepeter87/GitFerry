@@ -28,12 +28,13 @@ from gitferry.gitea_provisioning import ProvisioningTargetConflict, _repository_
 from gitferry.inventory_jobs import InventoryJobs
 from gitferry.operations import OperationExecutor
 from gitferry.package_archive import _rename_noreplace, _sync_directory
+from gitferry.provisioning import BundleIntent
 from gitferry.runtime import RuntimePaths
 from gitferry.source_catalog import _SourceReferences
 from gitferry.source_export_state import record_source_capture
-from gitferry.source_package import build_source_documents
+from gitferry.source_package import build_return_package, build_source_documents
 from gitferry.source_snapshot import SourceSnapshotError, capture_source
-from gitferry.state_codec import canonical_json, now
+from gitferry.state_codec import canonical_json, now, origin_id
 from gitferry.state_store import StateStore
 from gitferry.transport import write_transport
 
@@ -238,7 +239,7 @@ class SourceExports:
     def _inventory(
         self, request: dict[str, Any], *, reobserve: bool = False
     ) -> InventoryDocument | None:
-        if request["version"] == 1:
+        if request["version"] in (1, 5):
             return None  # Existing bounded exports remain explicit legacy selections.
         try:
             service = InventoryJobs(self.state, self.references)
@@ -384,6 +385,10 @@ class SourceExports:
             raise SourceExportConflict("source connection evidence changed")
         token = references.token(profile.credential_ref)
         context, _ = references.tls(profile.ca_ref)
+        if request["version"] == 5:
+            return self._capture_return(
+                job, work, profile.base_url, evidence["login"], token, context
+            )
         selections = request["repositories"]
         options = {
             "include_metadata": request["include_metadata"],
@@ -595,6 +600,151 @@ class SourceExports:
         if metadata is not None:
             manifest = write_transport(directory / "metadata", metadata)
             package["metadata"]["digest_sha256"] = manifest.digest_sha256
+        return write_package(directory, package)
+
+    def _capture_return(
+        self,
+        job: dict[str, Any],
+        work: Path,
+        base_url: str,
+        login: str,
+        token: str,
+        context: ssl.SSLContext,
+    ) -> PackageArtifact:
+        """Build v5 only from the admitted forward package and immutable local observations."""
+
+        from gitferry.package_admission import PackageAdmissions
+        from gitferry.package_inventory import expected_git_refs, read_inventory
+
+        request = job["request"]
+        forward_id = request["forward_package_id"]
+        forward_digest = request["forward_package_digest"]
+        try:
+            forward = PackageAdmissions(self.state, self.paths).verify_receipt(
+                forward_id,
+                target_instance_key=request["source_instance_key"],
+                expected_digest=forward_digest,
+            )
+            inventory = read_inventory(forward.directory, forward.document)
+            if inventory is None:
+                raise ValueError("forward package has no reviewed inventory")
+        except (KeyError, PackageError, ValueError):
+            raise SourceExportConflict(
+                "return export requires the admitted forward package and its reviewed inventory"
+            ) from None
+        if (
+            forward.document["sender"]["instance_key"] != request["recipient_instance_key"]
+            or forward.document["recipient"]["instance_key"] != request["source_instance_key"]
+        ):
+            raise SourceExportConflict("return export direction differs from the forward package")
+
+        forward_by_scope = {
+            selected["repository"]: selected for selected in forward.document["repositories"]
+        }
+        directory = work / "package"
+        directory.mkdir(mode=0o700)
+        anchors = context.get_ca_certs(binary_form=True)
+        if not anchors:
+            raise ConnectionUnavailable("return Git capture needs a usable CA trust snapshot")
+        ca = work / "captured-return-ca.pem"
+        ca.write_text(
+            "".join(ssl.DER_cert_to_PEM_cert(certificate) for certificate in anchors),
+            encoding="ascii",
+        )
+        repositories: list[dict[str, Any]] = []
+        with GiteaBundlePusher(directory, work, base_url, login, token, ca_file=ca) as git:
+            remaining_bytes = self.max_git_bytes
+            for index, selected in enumerate(request["repositories"]):
+                scope = selected["repository"]
+                original = forward_by_scope.get(scope)
+                if original is None:
+                    raise SourceExportConflict(
+                        "return selection includes a repository absent from the forward package"
+                    )
+                source_origin = original["origin"]
+                repository_origin_id = origin_id(
+                    source_origin["instance_key"],
+                    scope,
+                    "repository",
+                    source_origin["global_id"],
+                )
+                try:
+                    mapping = self.state.get_object_mapping(
+                        repository_origin_id, request["source_instance_key"]
+                    )
+                    observation = self.state.get_git_import_observation(
+                        forward_package_id=forward_id,
+                        origin_id=repository_origin_id,
+                        target_instance_key=request["source_instance_key"],
+                    )
+                except KeyError:
+                    raise SourceExportConflict(
+                        "return selection has no confirmed local Git import observation"
+                    ) from None
+                if (
+                    mapping.target_repository_scope != scope
+                    or mapping.target_global_id != selected["global_id"]
+                    or observation.forward_package_digest != forward_digest
+                    or observation.target_repository_scope != scope
+                    or (observation.ruleset_name, observation.ruleset_version)
+                    != ("git-ref-return", 1)
+                ):
+                    raise SourceExportConflict(
+                        "return selection conflicts with its local repository mapping"
+                    )
+                bundle = git.export_bundle(
+                    scope,
+                    member=f"bundles/{index}.bundle",
+                    expected_repository_id=mapping.target_global_id,
+                    max_bytes=remaining_bytes,
+                )
+                desired = (
+                    {}
+                    if bundle is None
+                    else git.check_remote(
+                        scope,
+                        bundle=BundleIntent(bundle.member, bundle.sha256, bundle.size),
+                        expected_empty=False,
+                    )
+                )
+                payload = None
+                if bundle is not None:
+                    remaining_bytes -= bundle.size
+                    payload = {
+                        "path": bundle.member,
+                        "size": bundle.size,
+                        "sha256": bundle.sha256,
+                    }
+                repositories.append(
+                    {
+                        "origin": {
+                            "instance_key": source_origin["instance_key"],
+                            "global_id": source_origin["global_id"],
+                        },
+                        "repository": scope,
+                        "bundle": payload,
+                        "comparison": {
+                            "original_baseline": expected_git_refs(inventory, scope),
+                            "confirmed_import": observation.observed,
+                            "desired": desired,
+                        },
+                    }
+                )
+        package = build_return_package(
+            self.state,
+            package_id=job["export_id"],
+            transfer_round_id=job["export_id"],
+            created_at=job["created_at"],
+            sender=request["source_instance_key"],
+            recipient=request["recipient_instance_key"],
+            forward_package_id=forward_id,
+            forward_package_digest=forward_digest,
+            repositories=repositories,
+            limitations=[
+                "Git return carries selected ordinary refs only; "
+                "LFS and wiki return are not yet supported."
+            ],
+        )
         return write_package(directory, package)
 
 
