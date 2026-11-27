@@ -58,6 +58,9 @@ def configure(parser: argparse.ArgumentParser, database_default: str | None) -> 
     )
     prepare.add_argument("--include-metadata", action="store_true")
     prepare.add_argument("--include-members", action="store_true")
+    prepare.add_argument("--mode", choices=("first-import", "return"), default="first-import")
+    prepare.add_argument("--forward-package-id")
+    prepare.add_argument("--forward-package-digest")
     prepare.add_argument("--export-id")
     prepare.add_argument("--inventory-id")
     prepare.add_argument("--inventory-digest")
@@ -94,15 +97,30 @@ def execute(args: argparse.Namespace) -> int:
         action = args.export_action
         result: dict[str, Any] | list[dict[str, Any]]
         if action == "prepare":
+            if args.mode == "return":
+                if args.include_metadata or args.include_members:
+                    raise ValueError("return exports do not support metadata or members")
+                if args.inventory_id is not None or args.inventory_digest is not None:
+                    raise ValueError("return exports do not use inventory bindings")
+                if args.forward_package_id is None or args.forward_package_digest is None:
+                    raise ValueError("return exports require a forward package ID and digest")
+            elif args.forward_package_id is not None or args.forward_package_digest is not None:
+                raise ValueError("forward package references require return mode")
             request: dict[str, Any] = {
-                "version": 1,
+                "version": 5 if args.mode == "return" else 1,
+                "mode": args.mode,
                 "source_instance_key": args.source_instance_key,
                 "source_profile_revision": args.source_profile_revision,
                 "recipient_instance_key": args.recipient_instance_key,
                 "repositories": [_selection(value) for value in args.repositories],
-                "include_metadata": args.include_metadata,
-                "include_members": args.include_members,
+                "include_metadata": False if args.mode == "return" else args.include_metadata,
+                "include_members": False if args.mode == "return" else args.include_members,
             }
+            if args.mode == "return":
+                request.update(
+                    forward_package_id=args.forward_package_id,
+                    forward_package_digest=args.forward_package_digest,
+                )
             if args.inventory_id is not None or args.inventory_digest is not None:
                 request.update(
                     version=2,

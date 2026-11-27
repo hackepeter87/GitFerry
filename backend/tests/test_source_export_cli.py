@@ -102,6 +102,97 @@ def test_exports_reject_malformed_repository_without_leaking_input(
     assert "not-a-selection" not in output
 
 
+def test_exports_prepare_supports_bounded_git_return_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    service = configure_source(tmp_path)
+    monkeypatch.setenv("GITFERRY_PACKAGE_DIR", str(tmp_path / "packages"))
+    monkeypatch.setenv("GITFERRY_WORK_DIR", str(tmp_path / "work"))
+
+    assert (
+        main(
+            [
+                "exports",
+                "prepare",
+                "--database",
+                str(service.state.path),
+                "--mode",
+                "return",
+                "--source-instance",
+                "a",
+                "--source-revision",
+                "1",
+                "--recipient-instance",
+                "b",
+                "--repository",
+                "synthetic/selected=7",
+                "--forward-package-id",
+                "forward-1",
+                "--forward-package-digest",
+                "a" * 64,
+                "--export-id",
+                "synthetic-return",
+            ]
+        )
+        == 0
+    )
+    prepared = json.loads(capsys.readouterr().out)
+    assert prepared["request"] == {
+        "version": 5,
+        "mode": "return",
+        "forward_package_id": "forward-1",
+        "forward_package_digest": "a" * 64,
+        "source_instance_key": "a",
+        "source_profile_revision": 1,
+        "recipient_instance_key": "b",
+        "repositories": [{"repository": "synthetic/selected", "global_id": "7"}],
+        "include_metadata": False,
+        "include_members": False,
+        "include_lfs": False,
+        "include_wiki": False,
+        "include_labels": False,
+        "include_attachments": False,
+        "include_releases": False,
+        "include_release_assets": False,
+        "inventory_id": None,
+        "inventory_digest": None,
+    }
+
+
+@pytest.mark.parametrize("option", ["--include-metadata", "--include-members", "--inventory-id"])
+def test_exports_reject_incompatible_return_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], option: str
+) -> None:
+    service = configure_source(tmp_path)
+    monkeypatch.setenv("GITFERRY_PACKAGE_DIR", str(tmp_path / "packages"))
+    monkeypatch.setenv("GITFERRY_WORK_DIR", str(tmp_path / "work"))
+    values = [
+        "exports",
+        "prepare",
+        "--database",
+        str(service.state.path),
+        "--mode",
+        "return",
+        "--source-instance",
+        "a",
+        "--source-revision",
+        "1",
+        "--recipient-instance",
+        "b",
+        "--repository",
+        "synthetic/selected=7",
+        "--forward-package-id",
+        "forward-1",
+        "--forward-package-digest",
+        "a" * 64,
+        option,
+    ]
+    if option == "--inventory-id":
+        values.append("inventory-1")
+    assert main(values) == 2
+    assert json.loads(capsys.readouterr().out)["status"] == "failed"
+
+
 @pytest.mark.parametrize("failure", [SourceSnapshotError, GiteaBundleError])
 def test_exports_run_sanitizes_capture_failures(
     tmp_path: Path,
