@@ -188,6 +188,7 @@ def test_schema_11_upgrade_preserves_existing_plan_and_operation(tmp_path):
     store, service, plan, _ = setup(tmp_path)
     with store.transaction() as c:
         c.execute("DROP TABLE source_inventory_jobs")
+        c.execute("DROP TABLE git_import_observations")
         c.execute("DROP TABLE directory_configuration_events")
         c.execute("DROP TABLE directory_configurations")
         c.execute("DROP TABLE directory_bootstrap_events")

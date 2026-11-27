@@ -47,8 +47,7 @@ def build_return_package(
         },
         "repositories": [],
         "limitations": sorted(
-            set(limitations or [])
-            | {"Ref deletion and force updates are not supported."}
+            set(limitations or []) | {"Ref deletion and force updates are not supported."}
         ),
         "deletion_semantics": "absence-does-not-delete",
     }

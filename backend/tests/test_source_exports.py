@@ -122,8 +122,7 @@ def test_build_return_package_preserves_forward_facts_and_reverses_endpoints(
     assert package["sender"]["instance_key"] == "b"
     assert package["recipient"]["instance_key"] == "a"
     assert (
-        package["repositories"][0]["comparison"]["original_baseline"]["refs/heads/main"]
-        == "1" * 40
+        package["repositories"][0]["comparison"]["original_baseline"]["refs/heads/main"] == "1" * 40
     )
 
 
