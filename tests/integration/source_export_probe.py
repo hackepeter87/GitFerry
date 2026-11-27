@@ -339,8 +339,8 @@ def run_source_export_probe() -> dict[str, Any]:
     target_replay = _target_worker("replay")
     return_export = _git_return_worker("gitferry-b", "export-b")
     return_archive = PACKAGE / "git-return-real.zip"
-    docker_copy("gitferry-b:/package/git-return-real.zip", return_archive)
-    docker_copy(return_archive, "gitferry-a:/package/git-return-real.zip")
+    docker_copy("gitferry-b:/state/package-admission/git-return-real.zip", return_archive)
+    docker_copy(return_archive, "gitferry-a:/state/source-export/git-return-real.zip")
     return_apply = _git_return_worker("gitferry-a", "apply-a")
     return_replay = _git_return_worker("gitferry-a", "replay-a")
     (WORK / "git-return-evidence.json").write_text(

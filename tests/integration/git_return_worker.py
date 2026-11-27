@@ -34,7 +34,8 @@ A_ROOT = Path("/state/source-export")
 B_ROOT = Path("/state/package-admission")
 A_URL = "http://source:3000"
 B_URL = "http://target:3000"
-RETURN_ARCHIVE = Path("/package/git-return-real.zip")
+B_RETURN_ARCHIVE = B_ROOT / "git-return-real.zip"
+A_RETURN_ARCHIVE = A_ROOT / "git-return-real.zip"
 
 
 def _paths(root: Path) -> RuntimePaths:
@@ -222,7 +223,7 @@ def export_return() -> dict[str, Any]:
         detail = capture_failure[-1] if capture_failure else "no capture exception recorded"
         raise RuntimeError(f"return export did not reach ready: {detail}")
     stream, details = jobs.open_download("git-return-real")
-    with stream, RETURN_ARCHIVE.open("wb") as output:
+    with stream, B_RETURN_ARCHIVE.open("wb") as output:
         shutil.copyfileobj(stream, output)
     return {
         "status": details["status"],
@@ -239,7 +240,7 @@ def apply_return() -> dict[str, Any]:
     package_ref = "received-git-return"
     destination = paths.package_directory / package_ref
     if not destination.exists():
-        receive_package_archive(RETURN_ARCHIVE, destination)
+        receive_package_archive(A_RETURN_ARCHIVE, destination)
     admissions = PackageAdmissions(state, paths)
     artifact = admissions.artifact(package_ref)
     admissions.admit(
