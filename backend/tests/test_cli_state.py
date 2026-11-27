@@ -127,6 +127,51 @@ def test_cli_generic_resolution_rejects_metadata_without_live_verification(
     assert state.get_operation("label-18").status == "outcome_unknown"
 
 
+def test_cli_generic_resolution_rejects_git_ref_without_live_verification(
+    tmp_path: Path, capsys: object
+) -> None:
+    database, state = unknown_operation(tmp_path)
+    state.end_executor_session("restart")
+    origin = state.register_origin(OriginKey("instance-a", "org/repo", "repository", "41"))
+    state.prepare_operation(
+        operation_id="ref-41",
+        origin_id=origin.id,
+        target_instance_key="instance-b",
+        target_repository_scope="org/repo",
+        operation_type="push_git_ref",
+        mapping_version=1,
+        baseline_id=None,
+        intent={"ref": "refs/heads/main", "old_oid": "a" * 40, "new_oid": "b" * 40},
+    )
+    state.start_executor_session("ref-crash")
+    state.claim_operation("ref-41", "ref-crash")
+    state.start_executor_session("ref-restart", recover_abandoned=True)
+    evidence_file = tmp_path / "ref-observed.json"
+    evidence_file.write_text(json.dumps({"ref": "refs/heads/main"}), encoding="utf-8")
+
+    exit_code = main(
+        [
+            "state",
+            "resolve-unknown",
+            "--database",
+            str(database),
+            "--operation-id",
+            "ref-41",
+            "--target-global-id",
+            "41",
+            "--observed-intent",
+            str(evidence_file),
+            "--evidence",
+            "untrusted operator assertion",
+        ]
+    )
+
+    assert exit_code == 2
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert "generic resolve-unknown cannot confirm push_git_ref" in output["error"]
+    assert state.get_operation("ref-41").status == "outcome_unknown"
+
+
 def test_cli_creates_verifies_and_admits_transport(tmp_path: Path, capsys: object) -> None:
     a_database = tmp_path / "a.sqlite3"
     b_database = tmp_path / "b.sqlite3"
