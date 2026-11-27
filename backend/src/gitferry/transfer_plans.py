@@ -25,6 +25,7 @@ _TYPES = frozenset(
         "assign_team_repository",
         "add_team_member",
         "push_git_bundle",
+        "push_git_ref",
         "upload_lfs_object",
         "bootstrap_wiki",
         "push_wiki_bundle",
