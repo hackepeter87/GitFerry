@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from gitferry.git_bundle import create_git_bundle
+from gitferry.git_refs import ref_confirmation
 from gitferry.gitea_bundles import GiteaBundleError, GiteaBundlePusher
 from gitferry.provisioning import BundleIntent
 
@@ -232,6 +233,9 @@ def test_push_uses_imported_object_store_and_exact_replay(tmp_path: Path, monkey
             expected_repository_id="15",
         )
         assert result.target_global_id == "15"
+        assert result.observed_state == ref_confirmation(
+            pusher._git_remote("ls-remote", str(remote), None)
+        )
         assert checked == [("org/repo", "15")]
         pusher.check_remote("org/repo", bundle=bundle, expected_empty=False)
         assert (
@@ -380,8 +384,6 @@ def test_push_wiki_bundle_uses_leases_and_rejects_stale_expected_refs(
         result = pusher.push_wiki_bundle(
             "org/repo", bundle.member, bundle.sha256, bundle.size, "42", {}
         )
-        from gitferry.git_refs import ref_confirmation
-
         assert result.observed_state == ref_confirmation(
             pusher._git_remote("ls-remote", str(remote), None)
         )

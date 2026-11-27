@@ -33,7 +33,11 @@ from gitferry.operations import OperationExecutor
 from gitferry.package_inventory import expected_git_refs, read_inventory
 from gitferry.plan_application import PlanRequest, parse_plan_request
 from gitferry.plan_diagnostics import PreflightBlocked, PreflightCheck
-from gitferry.provisioning import preflight_provisioning_operations, provision_selected_repository
+from gitferry.provisioning import (
+    BundleIntent,
+    preflight_provisioning_operations,
+    provision_selected_repository,
+)
 from gitferry.runtime import RuntimePaths
 from gitferry.state_store import OperationBlocked, OperationRecord, StateStore, TargetConfirmation
 
@@ -57,6 +61,7 @@ class GiteaPlanAdapter:
         self.native: NativePayloadApplication | None = None
         self.native_payloads: list[dict[str, Any]] | None = None
         self.metadata_apps: dict[str, MetadataApplication] = {}
+        self.forward_package: tuple[str, str] | None = None
         # Imported lazily so the existing issue/comment operations remain independent.
         from gitferry.gitea_bundles import GiteaBundlePusher
 
@@ -101,6 +106,7 @@ class GiteaPlanAdapter:
             raise OperationBlocked("selected unsupported contents require a revised selection")
         self.content_inventory = None
         self.native_payloads = None
+        self.forward_package = None
         if request.package_digest is not None:
             from gitferry.package_admission import PackageAdmissions
 
@@ -112,6 +118,7 @@ class GiteaPlanAdapter:
                 expected_digest=request.package_digest,
             )
             self.content_inventory = read_inventory(artifact.directory, artifact.document)
+            self.forward_package = (str(artifact.document["package_id"]), artifact.digest_sha256)
             if artifact.document["schema_version"] in (3, 4):
                 self.native_payloads = [
                     {key: item[key] for key in ("repository", "lfs", "wiki")}
@@ -559,6 +566,8 @@ class GiteaPlanAdapter:
                 bundle_pusher=self.bundles,
                 references=self.references,
             )
+            if self.native is None:
+                self._record_git_import_observation(repository)
         if self.native is not None:
             for step in plan["operations"]:
                 if step["operation_type"] in NATIVE_OPERATION_TYPES:
@@ -573,6 +582,7 @@ class GiteaPlanAdapter:
                     bundle_pusher=self.bundles,
                     references=self.references,
                 )
+                self._record_git_import_observation(repository)
         # PlanService stored the dependency order, independent of input ordering.
         metadata_ids = {item.operation_id for item in self._metadata(plan)}
         content_ids = {item.operation_id for item in self._portable_content(plan)}
@@ -598,3 +608,31 @@ class GiteaPlanAdapter:
                 )
             if result.status != "confirmed":
                 raise OperationBlocked("metadata operation needs local resolution")
+
+    def _record_git_import_observation(self, repository: Any) -> None:
+        """Freeze the exact target refs after a confirmed forward bundle import."""
+
+        if repository.bundle is None:
+            return
+        if self.request is None or self.bundles is None or self.forward_package is None:
+            raise OperationBlocked("confirmed Git import lacks its local package evidence")
+        package_id, package_digest = self.forward_package
+        mapping = self.state.get_object_mapping(
+            repository.repository_origin_id, self.request.target_instance_key
+        )
+        self.bundles._verify_repository_id(repository.repository, mapping.target_global_id)
+        refs = self.bundles.check_remote(
+            repository.repository,
+            bundle=BundleIntent(**repository.bundle.model_dump()),
+            expected_empty=False,
+        )
+        self.state.record_git_import_observation(
+            forward_package_id=package_id,
+            forward_package_digest=package_digest,
+            origin_id=repository.repository_origin_id,
+            target_instance_key=self.request.target_instance_key,
+            target_repository_scope=repository.repository,
+            ruleset_name="git-ref-return",
+            ruleset_version=1,
+            observed=refs,
+        )

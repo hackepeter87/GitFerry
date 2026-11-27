@@ -167,11 +167,15 @@ class GiteaBundlePusher(AbstractContextManager["GiteaBundlePusher"]):
         self._verify_repository_id(repository, expected_repository_id)
         observed = self._git_remote("ls-remote", self._repository_url(repository), None)
         if observed:
-            self.check_remote(repository, bundle=bundle, expected_empty=False)
-            return TargetConfirmation(expected_repository_id, None)
+            confirmed = self.check_remote(repository, bundle=bundle, expected_empty=False)
+            return TargetConfirmation(
+                expected_repository_id, None, observed_state=ref_confirmation(confirmed)
+            )
         self._push_refs(self._repository_url(repository), expected, imported.destination)
-        self.check_remote(repository, bundle=bundle, expected_empty=False)
-        return TargetConfirmation(expected_repository_id, None)
+        confirmed = self.check_remote(repository, bundle=bundle, expected_empty=False)
+        return TargetConfirmation(
+            expected_repository_id, None, observed_state=ref_confirmation(confirmed)
+        )
 
     def export_bundle(
         self,

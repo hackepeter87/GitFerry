@@ -12,6 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
 
+from gitferry.git_refs import is_ref_map
 from gitferry.state_codec import (
     canonical_json as _canonical_json,
 )
@@ -33,11 +34,13 @@ from gitferry.state_models import (
     BaselineRecord,
     BindingConflict,
     ExecutorLeaseConflict,
+    GitImportObservationRecord,
     IdentityBindingRecord,
     InstanceRegistration,
     MappingConflict,
     ObjectMappingRecord,
     ObjectType,
+    ObservationConflict,
     OperationBlocked,
     OperationConflict,
     OperationRecord,
@@ -56,7 +59,9 @@ __all__ = [
     "ExecutorLeaseConflict",
     "IdentityBindingRecord",
     "InstanceRegistration",
+    "GitImportObservationRecord",
     "MappingConflict",
+    "ObservationConflict",
     "ObjectMappingRecord",
     "OperationBlocked",
     "OperationConflict",
@@ -637,6 +642,156 @@ class StateStore:
                 "SELECT * FROM object_mappings WHERE origin_id = ? AND target_instance_key = ?",
                 (origin_id, target_instance_key),
             )
+        )
+
+    def record_git_import_observation(
+        self,
+        *,
+        forward_package_id: str,
+        forward_package_digest: str,
+        origin_id: str,
+        target_instance_key: str,
+        target_repository_scope: str,
+        ruleset_name: str,
+        ruleset_version: int,
+        observed: Mapping[str, Any],
+    ) -> GitImportObservationRecord:
+        """Freeze the refs observed after one confirmed forward package import.
+
+        The package receipt and object origin are deliberately checked in the
+        same transaction. A later observation may confirm the exact same facts,
+        but it can never redirect an existing package/origin/target tuple.
+        """
+
+        for value, name in (
+            (forward_package_id, "forward_package_id"),
+            (forward_package_digest, "forward_package_digest"),
+            (origin_id, "origin_id"),
+            (target_instance_key, "target_instance_key"),
+            (target_repository_scope, "target_repository_scope"),
+            (ruleset_name, "ruleset_name"),
+        ):
+            _require_text(value, name)
+        if len(forward_package_digest) != 64 or any(
+            character not in "0123456789abcdef" for character in forward_package_digest
+        ):
+            raise ValueError("forward_package_digest must be a lowercase SHA-256 digest")
+        if type(ruleset_version) is not int or ruleset_version <= 0:
+            raise ValueError("ruleset_version must be a positive integer")
+        observed_refs = dict(observed)
+        if not is_ref_map(observed_refs):
+            raise ValueError("observed must contain a valid native Git ref map")
+        encoded = _canonical_json(observed_refs)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            receipt = connection.execute(
+                "SELECT digest_sha256, target_instance_key FROM package_receipts "
+                "WHERE package_id = ?",
+                (forward_package_id,),
+            ).fetchone()
+            if receipt is None:
+                raise StateStoreError("forward package receipt is not available locally")
+            if receipt["digest_sha256"] != forward_package_digest:
+                raise ObservationConflict("forward package digest does not match its receipt")
+            if receipt["target_instance_key"] != target_instance_key:
+                raise ObservationConflict("forward package receipt belongs to another target")
+            origin = connection.execute(
+                "SELECT object_type, origin_repository_scope FROM object_origins "
+                "WHERE origin_id = ?",
+                (origin_id,),
+            ).fetchone()
+            if origin is None:
+                raise StateStoreError("Git import observation origin is not registered")
+            if origin["object_type"] != "repository":
+                raise ValueError("Git import observations require a repository origin")
+            mapping = connection.execute(
+                "SELECT target_repository_scope FROM object_mappings "
+                "WHERE origin_id=? AND target_instance_key=?",
+                (origin_id, target_instance_key),
+            ).fetchone()
+            if mapping is None or mapping["target_repository_scope"] != target_repository_scope:
+                raise ObservationConflict(
+                    "Git import observation does not match the local repository mapping"
+                )
+            now = _now()
+            existing = connection.execute(
+                "SELECT * FROM git_import_observations WHERE forward_package_id=? "
+                "AND origin_id=? AND target_instance_key=?",
+                (forward_package_id, origin_id, target_instance_key),
+            ).fetchone()
+            expected = (
+                forward_package_digest,
+                target_repository_scope,
+                ruleset_name,
+                ruleset_version,
+                encoded,
+            )
+            if existing is not None:
+                actual = (
+                    existing["forward_package_digest"],
+                    existing["target_repository_scope"],
+                    existing["ruleset_name"],
+                    existing["ruleset_version"],
+                    existing["observed_json"],
+                )
+                if actual != expected:
+                    raise ObservationConflict("confirmed Git import observation is immutable")
+                connection.commit()
+                return self._git_import_observation(existing)
+            connection.execute(
+                "INSERT INTO git_import_observations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    forward_package_id,
+                    forward_package_digest,
+                    origin_id,
+                    target_instance_key,
+                    target_repository_scope,
+                    ruleset_name,
+                    ruleset_version,
+                    encoded,
+                    now,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM git_import_observations WHERE forward_package_id=? "
+                "AND origin_id=? AND target_instance_key=?",
+                (forward_package_id, origin_id, target_instance_key),
+            ).fetchone()
+            connection.commit()
+            if row is None:
+                raise StateStoreError("stored Git import observation could not be reloaded")
+            return self._git_import_observation(row)
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def get_git_import_observation(
+        self, *, forward_package_id: str, origin_id: str, target_instance_key: str
+    ) -> GitImportObservationRecord:
+        return self._git_import_observation(
+            self._one(
+                "SELECT * FROM git_import_observations WHERE forward_package_id=? "
+                "AND origin_id=? AND target_instance_key=?",
+                (forward_package_id, origin_id, target_instance_key),
+            )
+        )
+
+    @staticmethod
+    def _git_import_observation(row: sqlite3.Row) -> GitImportObservationRecord:
+        return GitImportObservationRecord(
+            row["forward_package_id"],
+            row["forward_package_digest"],
+            row["origin_id"],
+            row["target_instance_key"],
+            row["target_repository_scope"],
+            row["ruleset_name"],
+            row["ruleset_version"],
+            _decode_object(row["observed_json"]),
+            row["recorded_at"],
         )
 
     @staticmethod

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -803,5 +803,21 @@ CREATE TABLE operations (
 
 INSERT INTO operations SELECT * FROM operations_backup;
 DROP TABLE operations_backup;
+""",
+    20: """
+CREATE TABLE git_import_observations (
+    forward_package_id TEXT NOT NULL REFERENCES package_receipts(package_id),
+    forward_package_digest TEXT NOT NULL CHECK (length(forward_package_digest) = 64),
+    origin_id TEXT NOT NULL REFERENCES object_origins(origin_id),
+    target_instance_key TEXT NOT NULL REFERENCES instances(instance_key),
+    target_repository_scope TEXT NOT NULL,
+    ruleset_name TEXT NOT NULL,
+    ruleset_version INTEGER NOT NULL CHECK (ruleset_version > 0),
+    observed_json TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (forward_package_id, origin_id, target_instance_key)
+);
+CREATE INDEX git_import_observations_target
+    ON git_import_observations(target_instance_key, target_repository_scope);
 """,
 }
