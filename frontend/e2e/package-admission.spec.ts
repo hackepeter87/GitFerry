@@ -13,6 +13,7 @@ async function open(page: import("@playwright/test").Page, overrides: { connecti
   await page.route("**/api/v1/exports", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/exports/recipients", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/package-uploads", (route) => route.fulfill({ json: overrides.uploads ?? [ready] }));
+  await page.route("**/api/v1/packages", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/package-uploads/upload-01234567-89ab-cdef-0123-456789abcdef", (route) => route.fulfill({ json: ready }));
   await page.goto("/");
   await page.getByRole("button", { name: /upload-01234567/ }).click();
