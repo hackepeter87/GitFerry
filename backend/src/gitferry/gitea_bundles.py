@@ -127,7 +127,12 @@ class GiteaBundlePusher(AbstractContextManager["GiteaBundlePusher"]):
         return imported
 
     def check_remote(
-        self, repository: str, *, bundle: BundleIntent, expected_empty: bool
+        self,
+        repository: str,
+        *,
+        bundle: BundleIntent,
+        expected_empty: bool,
+        allowed_extra_refs: Mapping[str, str] | None = None,
     ) -> dict[str, str]:
         """Read the target's refs; never alters the remote repository."""
 
@@ -135,8 +140,14 @@ class GiteaBundlePusher(AbstractContextManager["GiteaBundlePusher"]):
         refs = self._git_remote("ls-remote", self._repository_url(repository), None)
         if expected_empty and refs:
             raise GiteaBundleError("target repository is not empty")
-        if not expected_empty and refs != expected:
-            raise GiteaBundleError("target repository has divergent refs")
+        if not expected_empty:
+            allowed = allowed_extra_refs or {}
+            if (
+                any(refs.get(name) != sha for name, sha in expected.items())
+                or (set(refs) - set(expected) - set(allowed))
+                or any(refs.get(name) != sha for name, sha in allowed.items())
+            ):
+                raise GiteaBundleError("target repository has divergent refs")
         return refs
 
     def push(

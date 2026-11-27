@@ -5,7 +5,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from gitferry.issue_operations import execute_issue_operation, prepare_issue_operation
+from gitferry.issue_operations import (
+    execute_issue_operation,
+    preflight_issue_operation,
+    prepare_issue_operation,
+)
 from gitferry.operations import OperationBlocked, OperationExecutor
 from gitferry.state_store import OperationConflict, OriginKey, StateStore
 
@@ -154,3 +158,17 @@ def test_missing_author_and_changed_unknown_create_do_not_send(tmp_path: Path) -
     with OperationExecutor(state, "retry") as executor, pytest.raises(OperationBlocked):
         execute_issue_operation(state, executor, client, operation.operation_id)
     assert client.posts == 1
+
+
+def test_separate_label_operation_owns_confirmed_issue_label_preflight(tmp_path: Path) -> None:
+    state, origin = configured(tmp_path)
+    client = Issues()
+    operation = prepare(state, origin)
+    with OperationExecutor(state, "create") as executor:
+        execute_issue_operation(state, executor, client, operation.operation_id)
+
+    client.objects[7]["labels"] = [{"name": "portable-priority"}]
+    with pytest.raises(OperationBlocked, match="selected issue fields"):
+        preflight_issue_operation(state, client, operation.operation_id)
+
+    preflight_issue_operation(state, client, operation.operation_id, check_labels=False)

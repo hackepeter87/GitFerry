@@ -71,6 +71,62 @@ def _request() -> dict[str, Any]:
     }
 
 
+def _inventory_object(name: str) -> dict[str, object]:
+    native_ids = {
+        "labels": "11",
+        "releases": "21",
+        "attachments": "31",
+        "release_assets": "32",
+    }
+    native_id = native_ids.get(name)
+    facts: dict[str, object] = {"value": name}
+    author = (
+        {"account_id": "1", "login": "synthetic-author"}
+        if name in {"issues", "comments", "releases"}
+        else None
+    )
+    parent = None
+    size_bytes = None
+    if name in {"teams", "permissions"}:
+        facts.update(
+            permission="read",
+            units_map={"repo.code": "read", "repo.issues": "read"},
+        )
+    elif name == "labels":
+        facts = {"name": "priority", "color": "112233", "description": "Synthetic"}
+    elif name == "releases":
+        facts = {
+            "tag_name": "v1",
+            "target_commitish": "main",
+            "name": "Release",
+            "body": "Notes",
+            "draft": False,
+            "prerelease": False,
+            "created_at": "2026-01-01T00:00:00Z",
+            "published_at": "2026-01-01T00:00:00Z",
+        }
+    elif name in {"attachments", "release_assets"}:
+        parent = {
+            "content_class": "comments" if name == "attachments" else "releases",
+            "key": "comments-1" if name == "attachments" else "21",
+        }
+        facts = {
+            "uuid": "synthetic-uuid",
+            "name": "asset.txt",
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+        size_bytes = 5
+    return {
+        "key": native_id or f"{name}-1",
+        "namespace": "repo",
+        "facts": facts,
+        "author": author,
+        "native_id": native_id,
+        "parent": parent,
+        "size_bytes": size_bytes,
+    }
+
+
 def _document(job: dict[str, Any], *, repository: str = "synthetic/selected", source: str = "a"):
     requested = job["request"]["requested_classes"]
     return parse_inventory(
@@ -93,29 +149,7 @@ def _document(job: dict[str, Any], *, repository: str = "synthetic/selected", so
                             "content_class": name,
                             "status": "observed",
                             "count": 1,
-                            "objects": [
-                                {
-                                    "key": f"{name}-1",
-                                    "namespace": "repo",
-                                    "facts": (
-                                        {
-                                            "value": name,
-                                            "permission": "read",
-                                            "units_map": {
-                                                "repo.code": "read",
-                                                "repo.issues": "read",
-                                            },
-                                        }
-                                        if name in {"teams", "permissions"}
-                                        else {"value": name}
-                                    ),
-                                    "author": (
-                                        {"account_id": "1", "login": "synthetic-author"}
-                                        if name in {"issues", "comments"}
-                                        else None
-                                    ),
-                                }
-                            ],
+                            "objects": [_inventory_object(name)],
                             "reason": "",
                             "limitations": [],
                         }

@@ -26,6 +26,11 @@ from gitferry.auth import AuthError, AuthService
 from gitferry.blueprints import BlueprintValidationError, load_and_validate
 from gitferry.comment_operations import resolve_unknown_comment_operation
 from gitferry.gitea_comments import CommentTargetConflict, GiteaCommentClient
+from gitferry.gitea_metadata import GiteaMetadataClient, MetadataTargetConflict
+from gitferry.metadata_operations import (
+    METADATA_OPERATION_TYPES,
+    resolve_unknown_metadata_operation,
+)
 from gitferry.state_store import StateStore, StateStoreError
 from gitferry.transport import (
     ManifestValidationError,
@@ -100,6 +105,17 @@ def build_parser() -> argparse.ArgumentParser:
     resolve_comment.add_argument("--username", required=True)
     resolve_comment.add_argument("--password-env", default="GITFERRY_GITEA_PASSWORD")
     resolve_comment.add_argument("--ca-file", type=Path)
+
+    resolve_metadata = state_commands.add_parser("resolve-unknown-metadata")
+    resolve_metadata.add_argument(
+        "--database", type=Path, default=database_default, required=database_default is None
+    )
+    resolve_metadata.add_argument("--operation-id", required=True)
+    resolve_metadata.add_argument("--target-global-id", required=True)
+    resolve_metadata.add_argument("--username", required=True)
+    resolve_metadata.add_argument("--password-env", default="GITFERRY_GITEA_PASSWORD")
+    resolve_metadata.add_argument("--ca-file", type=Path)
+    resolve_metadata.add_argument("--evidence", required=True)
 
     transport = subparsers.add_parser("transport")
     transport_commands = transport.add_subparsers(dest="transport_command", required=True)
@@ -260,9 +276,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.state_command == "resolve-unknown":
                 from gitferry.native_operations import NATIVE_OPERATION_TYPES
 
-                if state.get_operation(args.operation_id).operation_type in NATIVE_OPERATION_TYPES:
+                operation_type = state.get_operation(args.operation_id).operation_type
+                if operation_type in NATIVE_OPERATION_TYPES:
                     raise ValueError(
                         "native payloads require plans resolve-native with live target verification"
+                    )
+                if operation_type in METADATA_OPERATION_TYPES:
+                    raise ValueError(
+                        "portable metadata requires state resolve-unknown-metadata "
+                        "with live target verification"
+                    )
+                if operation_type in ("create_comment", "update_comment"):
+                    raise ValueError(
+                        "comments require state resolve-unknown-comment "
+                        "with live target verification"
                     )
                 operation = state.resolve_unknown_operation(
                     args.operation_id,
@@ -285,6 +312,44 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 )
                 return 0
+            if args.state_command == "resolve-unknown-metadata":
+                password = os.environ.get(args.password_env)
+                if password is None:
+                    raise ValueError(
+                        "metadata reconciliation password environment is unset: "
+                        f"{args.password_env}"
+                    )
+                operation = state.get_operation(args.operation_id)
+                instance = state.get_instance(operation.target_instance_key)
+                metadata_verify: bool | str = str(args.ca_file) if args.ca_file else True
+                metadata_client = GiteaMetadataClient(
+                    instance.base_url,
+                    username=args.username,
+                    password=password,
+                    verify=metadata_verify,
+                )
+                with metadata_client:
+                    resolved = resolve_unknown_metadata_operation(
+                        state,
+                        metadata_client,
+                        args.operation_id,
+                        target_global_id=args.target_global_id,
+                        evidence=args.evidence,
+                    )
+                print(
+                    json.dumps(
+                        {
+                            "operation_id": resolved.operation_id,
+                            "status": resolved.status,
+                            "target": {
+                                "global_id": resolved.target_global_id,
+                                "issue_index": resolved.target_issue_index,
+                            },
+                        },
+                        sort_keys=True,
+                    )
+                )
+                return 0
             if args.state_command == "resolve-unknown-comment":
                 password = os.environ.get(args.password_env)
                 if password is None:
@@ -293,12 +358,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 operation = state.get_operation(args.operation_id)
                 instance = state.get_instance(operation.target_instance_key)
-                verify: bool | str = str(args.ca_file) if args.ca_file else True
+                comment_verify: bool | str = str(args.ca_file) if args.ca_file else True
                 with GiteaCommentClient(
                     instance.base_url,
                     username=args.username,
                     password=password,
-                    verify=verify,
+                    verify=comment_verify,
                 ) as comments:
                     resolved = resolve_unknown_comment_operation(
                         state,
@@ -326,6 +391,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             KeyError,
             StateStoreError,
             CommentTargetConflict,
+            MetadataTargetConflict,
             httpx.HTTPError,
         ) as exc:
             print(json.dumps({"status": "failed", "error": str(exc)}, sort_keys=True))

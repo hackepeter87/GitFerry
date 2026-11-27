@@ -57,6 +57,7 @@ def remote(method: str, path: str, *, username: str = ADMIN, **kwargs: Any) -> A
 def proxy(
     *,
     lose_comment_response: bool = False,
+    lose_asset_response: bool = False,
     preserve_origin: bool = False,
     lose_lfs_response: bool = False,
 ):
@@ -90,6 +91,14 @@ def proxy(
                 trust_env=False,
                 follow_redirects=False,
             )
+            response_content = response.content
+            if preserve_origin and response.headers.get("content-type", "").startswith(
+                "application/json"
+            ):
+                response_content = response_content.replace(
+                    b"http://target:3000/attachments/",
+                    b"https://localhost:34443/attachments/",
+                )
             if self.command in ("POST", "PATCH", "PUT"):
                 with (ROOT / "remote-events.jsonl").open("a") as stream:
                     stream.write(
@@ -134,16 +143,25 @@ def proxy(
                 self.connection.shutdown(socket.SHUT_RDWR)
                 self.connection.close()
                 return
+            if (
+                lose_asset_response
+                and self.command == "POST"
+                and self.path.endswith("/assets")
+                and response.status_code == 201
+            ):
+                self.connection.shutdown(socket.SHUT_RDWR)
+                self.connection.close()
+                return
             self.send_response(response.status_code)
             self.send_header(
                 "Content-Type", response.headers.get("content-type", "application/octet-stream")
             )
-            self.send_header("Content-Length", str(len(response.content)))
+            self.send_header("Content-Length", str(len(response_content)))
             for header in ("WWW-Authenticate", "X-Total-Count", "Link"):
                 if header in response.headers:
                     self.send_header(header, response.headers[header])
             self.end_headers()
-            self.wfile.write(response.content)
+            self.wfile.write(response_content)
 
         do_GET = do_POST = do_PUT = do_PATCH = forward
 
@@ -234,6 +252,73 @@ def initialize(state: StateStore) -> dict[str, Any]:
         raise RuntimeError("received package scope or target disagrees with the local plan")
     payload = selected["bundle"]
     bundle = {"member": payload["path"], "sha256": payload["sha256"], "size": payload["size"]}
+    origins: dict[tuple[str, str], str] = {("issue", "53"): issue.id}
+    for item in package.document.get("content", []):
+        if item["kind"] not in ("label", "release"):
+            continue
+        portable = item["origin"]
+        record = state.register_origin(
+            OriginKey(
+                portable["instance_key"],
+                portable["repository"],
+                portable["object_type"],
+                portable["global_id"],
+            )
+        )
+        origins[(portable["object_type"], portable["global_id"])] = record.id
+    for item in package.document.get("content", []):
+        if item["kind"] not in ("attachment", "release_asset"):
+            continue
+        portable = item["origin"]
+        parent = item["parent_origin"]
+        record = state.register_origin(
+            OriginKey(
+                portable["instance_key"],
+                portable["repository"],
+                portable["object_type"],
+                portable["global_id"],
+                parent_origin_id=origins[(parent["object_type"], parent["global_id"])],
+            )
+        )
+        origins[(portable["object_type"], portable["global_id"])] = record.id
+    content = []
+    for item in package.document.get("content", []):
+        values = item.get("values")
+        if item["kind"] in ("attachment", "release_asset"):
+            parent = item["parent_origin"]
+            values = {
+                "name": item["name"],
+                "size": item["file"]["size"],
+                "sha256": item["file"]["sha256"],
+                "media_type": item["media_type"],
+                "member": item["file"]["path"],
+                "parent_origin_id": origins[(parent["object_type"], parent["global_id"])],
+            }
+        content.append(
+            {
+                "origin_id": origins[(item["origin"]["object_type"], item["origin"]["global_id"])],
+                "repository": item["repository"],
+                "kind": item["kind"],
+                "values": values,
+                **({"author": item["author"]} if "author" in item else {}),
+            }
+        )
+    for assignment in package.document.get("label_assignments", []):
+        issue_origin = assignment["issue_origin"]
+        label_origins = assignment["label_origins"]
+        content.append(
+            {
+                "origin_id": origins[(issue_origin["object_type"], issue_origin["global_id"])],
+                "repository": assignment["repository"],
+                "kind": "label_assignment",
+                "values": {
+                    "label_origin_ids": [
+                        origins[(label["object_type"], label["global_id"])]
+                        for label in label_origins
+                    ]
+                },
+            }
+        )
     request = {
         "version": 1,
         "target_instance_key": "target",
@@ -278,6 +363,7 @@ def initialize(state: StateStore) -> dict[str, Any]:
                 },
             },
         ],
+        "content": content,
         "author_credential_refs": {name: name for name in ("issue-author", "comment-author")},
     }
     (ROOT / "request.json").write_text(json.dumps(request))
@@ -296,13 +382,35 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "mode",
-        choices=("initial", "replay", "crash", "lost", "resume", "repackage", "resolve", "browse"),
+        choices=(
+            "initial",
+            "replay",
+            "confirmed-repackage",
+            "crash",
+            "lost",
+            "asset-lost",
+            "metadata-update",
+            "metadata-drift",
+            "label-collision",
+            "release-collision",
+            "release-target-collision",
+            "release-target-update",
+            "metadata-omission",
+            "resume",
+            "repackage",
+            "resolve",
+            "browse",
+        ),
     )
     parser.add_argument("--case", default="initial")
     parser.add_argument("--target-comment-id")
     args = parser.parse_args()
     state = StateStore(DATABASE)
-    with proxy(lose_comment_response=args.mode == "lost"):
+    with proxy(
+        lose_comment_response=args.mode == "lost",
+        lose_asset_response=args.mode == "asset-lost",
+        preserve_origin=True,
+    ):
         if args.mode == "browse":
             service = ProfileService(state)
             refs = LocalReferences(ROOT / "secrets", ROOT)
@@ -321,6 +429,161 @@ def main() -> None:
             return
         if args.mode == "initial":
             plan = initialize(state)
+        elif args.mode == "confirmed-repackage":
+            receive_package_archive(
+                Path("/package/application-plan.zip"),
+                ROOT / "packages" / "confirmed-repackage",
+            )
+            request = json.loads((ROOT / "request.json").read_text())
+            request["round_key"] = "confirmed-repackage"
+            request["package_ref"] = "confirmed-repackage"
+            plan = prepare_transfer_plan(state, request)
+        elif args.mode == "asset-lost":
+            request = json.loads((ROOT / "request.json").read_text())
+            issue_origin_id = request["metadata"][1]["origin_id"]
+            origin = state.register_origin(
+                OriginKey(
+                    "source",
+                    REPOSITORY,
+                    "attachment",
+                    "61",
+                    parent_origin_id=issue_origin_id,
+                )
+            )
+            source_asset = next(item for item in request["content"] if item["kind"] == "attachment")
+            request["content"] = [
+                {
+                    **source_asset,
+                    "origin_id": origin.id,
+                    "values": {
+                        **source_asset["values"],
+                        "name": "lost-response-proof.txt",
+                    },
+                }
+            ]
+            request["metadata"] = []
+            request["repositories"] = []
+            request["round_key"] = "asset-lost"
+            (ROOT / "asset-lost-request.json").write_text(json.dumps(request))
+            plan = prepare_transfer_plan(state, request)
+        elif args.mode == "metadata-update":
+            request = json.loads((ROOT / "request.json").read_text())
+            request["metadata"] = []
+            request["repositories"] = []
+            request["round_key"] = "metadata-update"
+            state.create_transfer_round("metadata-update-round", "source", "target", REPOSITORY)
+            updates = []
+            for item in request["content"]:
+                if item["kind"] not in ("label", "release"):
+                    continue
+                baseline_id = "metadata-update-" + item["kind"]
+                changed = dict(item["values"])
+                if item["kind"] == "label":
+                    changed.update(color="224466", description="Portable label updated on target")
+                    ruleset = "gitea-label-fields"
+                else:
+                    changed.update(name="Portable release updated", body="Updated release notes")
+                    ruleset = "gitea-release-fields"
+                state.create_baseline(
+                    baseline_id=baseline_id,
+                    transfer_round_id="metadata-update-round",
+                    origin_id=item["origin_id"],
+                    ruleset_name=ruleset,
+                    ruleset_version=1,
+                    baseline=item["values"],
+                    desired=changed,
+                    observed=item["values"],
+                    origin_created_at=None,
+                    target_native_created_at=state.get_object_mapping(
+                        item["origin_id"], "target"
+                    ).target_native_created_at,
+                )
+                updates.append({**item, "baseline_id": baseline_id, "values": changed})
+            request["content"] = updates
+            (ROOT / "metadata-update-request.json").write_text(json.dumps(request))
+            plan = prepare_transfer_plan(state, request)
+        elif args.mode == "metadata-drift":
+            request = json.loads((ROOT / "metadata-update-request.json").read_text())
+            request["round_key"] = "metadata-drift"
+            label = next(item for item in request["content"] if item["kind"] == "label")
+            previous = dict(label["values"])
+            desired = {**previous, "color": "445566", "description": "Desired second update"}
+            state.create_transfer_round("metadata-drift-round", "source", "target", REPOSITORY)
+            state.create_baseline(
+                baseline_id="metadata-drift-label",
+                transfer_round_id="metadata-drift-round",
+                origin_id=label["origin_id"],
+                ruleset_name="gitea-label-fields",
+                ruleset_version=1,
+                baseline=previous,
+                desired=desired,
+                observed=previous,
+                origin_created_at=None,
+                target_native_created_at=None,
+            )
+            label["baseline_id"] = "metadata-drift-label"
+            label["values"] = desired
+            request["content"] = [label]
+            mapping = state.get_object_mapping(label["origin_id"], "target")
+            remote(
+                "PATCH",
+                f"/repos/{REPOSITORY}/labels/{mapping.target_global_id}",
+                json={
+                    "name": previous["name"],
+                    "color": "778899",
+                    "description": "Foreign drift",
+                },
+            )
+            (ROOT / "metadata-drift-request.json").write_text(json.dumps(request))
+            plan = prepare_transfer_plan(state, request)
+        elif args.mode in ("label-collision", "release-collision"):
+            request = json.loads((ROOT / "request.json").read_text())
+            kind = "label" if args.mode == "label-collision" else "release"
+            source = next(item for item in request["content"] if item["kind"] == kind)
+            origin = state.register_origin(
+                OriginKey("source", REPOSITORY, kind, "62" if kind == "label" else "63")
+            )
+            request["repositories"] = []
+            request["metadata"] = []
+            request["content"] = [{**source, "origin_id": origin.id}]
+            request["round_key"] = args.mode
+            (ROOT / (args.mode + "-request.json")).write_text(json.dumps(request))
+            plan = prepare_transfer_plan(state, request)
+        elif args.mode == "release-target-collision":
+            request = json.loads((ROOT / "request.json").read_text())
+            source = next(item for item in request["content"] if item["kind"] == "release")
+            origin = state.register_origin(OriginKey("source", REPOSITORY, "release", "64"))
+            request["repositories"] = []
+            request["metadata"] = []
+            request["content"] = [
+                {
+                    **source,
+                    "origin_id": origin.id,
+                    "values": {
+                        **source["values"],
+                        "tag_name": "wrong-target",
+                        "name": "Wrong target release",
+                    },
+                }
+            ]
+            request["round_key"] = "release-target-collision"
+            plan = prepare_transfer_plan(state, request)
+        elif args.mode == "release-target-update":
+            request = json.loads((ROOT / "metadata-update-request.json").read_text())
+            release = next(item for item in request["content"] if item["kind"] == "release")
+            release["values"] = {**release["values"], "target_commitish": "wrong-target"}
+            request["content"] = [release]
+            request["round_key"] = "release-target-update"
+            plan = prepare_transfer_plan(state, request)
+        elif args.mode == "metadata-omission":
+            request = json.loads((ROOT / "request.json").read_text())
+            request["repositories"] = []
+            # Retain one already-confirmed non-asset object so the plan remains
+            # a real replay while all portable metadata classes are omitted.
+            request["metadata"] = request["metadata"][:1]
+            request["content"] = []
+            request["round_key"] = "metadata-omission"
+            plan = prepare_transfer_plan(state, request)
         elif args.mode in ("crash", "lost"):
             request = json.loads((ROOT / "request.json").read_text())
             parent = request["metadata"][1]["origin_id"]
@@ -342,6 +605,7 @@ def main() -> None:
                 }
             ]
             request["repositories"] = []
+            request["content"] = []
             request["round_key"] = args.mode
             (ROOT / (args.mode + "-request.json")).write_text(json.dumps(request))
             plan = prepare_transfer_plan(state, request)

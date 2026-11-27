@@ -60,6 +60,27 @@ test.describe("transfer plan review (mocked API)", () => {
   });
 });
 
+test("renders portable metadata operation types and durable results", async ({ page }) => {
+  const metadataPlan = {
+    ...plan,
+    status: "confirmed",
+    operations: ["create_label", "upload_attachment", "create_release", "upload_release_asset"].map((operation_type, index) => ({
+      ...plan.operations[0],
+      operation_id: `metadata-${index}`,
+      operation_type,
+      status: "confirmed",
+      target_global_id: String(40 + index),
+    })),
+  };
+  await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [metadataPlan] }));
+  await page.route(/\/api\/v1\/plans\/a[^?]*$/, (route) => route.fulfill({ json: metadataPlan }));
+  await signIn(page);
+  for (const label of ["create label", "upload attachment", "create release", "upload release asset"]) {
+    await expect(page.getByText(label, { exact: true })).toBeVisible();
+  }
+  await expect(page.locator(".operation-status", { hasText: "Confirmed" })).toHaveCount(4);
+});
+
 test("real backend/simulated remote: queues, survives browser close, and confirms", async ({ page, context }) => {
   const seeded = await page.request.post("http://127.0.0.1:8089/__test__/seed-plan");
   expect(seeded.ok()).toBeTruthy();

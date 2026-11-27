@@ -101,13 +101,13 @@ def _portable_origin(item: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 
 
 def _parent_origin_id(origin: dict[str, Any]) -> str | None:
-    parent = origin.get("parent_issue_origin")
+    parent = origin.get("parent_origin", origin.get("parent_issue_origin"))
     if parent is None:
         return None
     return origin_id(
         parent["instance_key"],
         parent["repository"],
-        "issue",
+        _internal_object_type(parent["object_type"]),
         parent["global_id"],
     )
 

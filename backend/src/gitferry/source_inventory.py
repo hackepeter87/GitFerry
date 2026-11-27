@@ -275,7 +275,16 @@ def _repository(
         (
             "releases",
             "/releases",
-            ("tag_name", "name", "body", "draft", "prerelease", "created_at", "published_at"),
+            (
+                "tag_name",
+                "target_commitish",
+                "name",
+                "body",
+                "draft",
+                "prerelease",
+                "created_at",
+                "published_at",
+            ),
             {},
         ),
     ):

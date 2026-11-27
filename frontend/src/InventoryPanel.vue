@@ -14,9 +14,15 @@ const props = withDefaults(defineProps<{
   includeMembers: boolean;
   includeLfs?: boolean;
   includeWiki?: boolean;
+  includeLabels?: boolean;
+  includeAttachments?: boolean;
+  includeReleases?: boolean;
 }>(), {
   includeLfs: false,
   includeWiki: false,
+  includeLabels: false,
+  includeAttachments: false,
+  includeReleases: false,
 });
 const emit = defineEmits<{
   (event: "session-expired"): void;
@@ -56,6 +62,9 @@ const requiredClasses = computed(() => {
   const required = [...CORE];
   if (props.includeMembers || props.includeMetadata) required.push("identities");
   if (props.includeMetadata) required.push(...metadataClasses);
+  if (props.includeLabels) required.push("labels");
+  if (props.includeAttachments) required.push("attachments");
+  if (props.includeReleases) required.push("releases", "release_assets");
   if (props.includeLfs) required.push("lfs");
   if (props.includeWiki) required.push("wiki");
   return new Set(required);
@@ -80,12 +89,18 @@ watch(() => props.includeMetadata, () => { resetDefaults(); invalidateReview(); 
 watch(() => props.includeMembers, () => { resetDefaults(); invalidateReview(); });
 watch(() => props.includeLfs, () => { resetDefaults(); invalidateReview(); });
 watch(() => props.includeWiki, () => { resetDefaults(); invalidateReview(); });
+watch(() => props.includeLabels, () => { resetDefaults(); invalidateReview(); });
+watch(() => props.includeAttachments, () => { resetDefaults(); invalidateReview(); });
+watch(() => props.includeReleases, () => { resetDefaults(); invalidateReview(); });
 watch([scopeKey, currentRequestKey], () => invalidateReview());
 
 function resetDefaults(): void {
   const next = [...CORE];
   if (props.includeMembers || props.includeMetadata) next.push("identities");
   if (props.includeMetadata) next.push(...metadataClasses);
+  if (props.includeLabels) next.push("labels");
+  if (props.includeAttachments) next.push("attachments");
+  if (props.includeReleases) next.push("releases", "release_assets");
   if (props.includeLfs) next.push("lfs");
   if (props.includeWiki) next.push("wiki");
   selectedClasses.value = [...new Set(next)].filter((item) => classes.value.includes(item));

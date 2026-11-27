@@ -41,7 +41,19 @@ CONTENT_CLASSES = (
     "other_content",
 )
 TRANSFER_CLASSES = frozenset(
-    {"git_refs", "organizations", "teams", "permissions", "identities", "issues", "comments"}
+    {
+        "git_refs",
+        "organizations",
+        "teams",
+        "permissions",
+        "identities",
+        "issues",
+        "labels",
+        "comments",
+        "attachments",
+        "releases",
+        "release_assets",
+    }
 )
 COMPARISON_VERSION = 1
 NativeId = Annotated[str, Field(min_length=1, max_length=512)]
@@ -257,12 +269,25 @@ def inventory_summary(document: InventoryDocument) -> dict[str, Any]:
                 reason = _native_transfer_reason(observation)
             elif observation.content_class not in TRANSFER_CLASSES:
                 reason = "Transfer for this class is not implemented"
+            elif observation.content_class in {
+                "labels",
+                "attachments",
+                "releases",
+                "release_assets",
+            }:
+                reason = _metadata_transfer_reason(observation)
             else:
                 reason = ""
                 if observation.content_class == "issues" and any(
                     item.facts.get("label_ids") for item in observation.objects
                 ):
-                    reason = "Issue label assignments need the unimplemented label adapter"
+                    labels = next(
+                        item for item in repository.classes if item.content_class == "labels"
+                    )
+                    if labels.content_class not in repository.requested_classes:
+                        reason = "Issue label assignments require selected label definitions"
+                    elif labels.status != "observed":
+                        reason = "Issue label definitions were not completely observed"
                 if observation.content_class == "issues" and any(
                     item.facts.get("milestone_id") or item.facts.get("assignees")
                     for item in observation.objects
@@ -383,8 +408,52 @@ def _native_transfer_reason(observation: ClassObservation) -> str:
     return ""
 
 
+def _metadata_transfer_reason(observation: ClassObservation) -> str:
+    for item in observation.objects:
+        if item.native_id is None:
+            return "Metadata transfer requires a stable native source ID"
+        if observation.content_class == "labels":
+            try:
+                from gitferry.metadata_operations import label_values
+
+                label_values(item.facts)
+            except (TypeError, ValueError):
+                return "Label fields are incomplete or invalid"
+        elif observation.content_class == "releases":
+            required = {"tag_name", "name", "body", "draft", "prerelease"}
+            if not required <= set(item.facts) or item.author is None:
+                return "Release fields or native author are incomplete"
+        else:
+            if (
+                item.size_bytes is None
+                or item.parent is None
+                or not isinstance(item.facts.get("uuid"), str)
+                or not isinstance(item.facts.get("name"), str)
+            ):
+                return "Asset payload or parent facts are incomplete"
+            if observation.content_class == "attachments" and item.parent["content_class"] not in {
+                "issues",
+                "comments",
+            }:
+                return "Only normal issue and normal comment attachments are supported"
+            if (
+                observation.content_class == "release_assets"
+                and item.parent["content_class"] != "releases"
+            ):
+                return "Release asset parent is invalid"
+    return ""
+
+
 def export_classes(
-    *, metadata: bool, members: bool, lfs: bool = False, wiki: bool = False
+    *,
+    metadata: bool,
+    members: bool,
+    lfs: bool = False,
+    wiki: bool = False,
+    labels: bool = False,
+    attachments: bool = False,
+    releases: bool = False,
+    release_assets: bool = False,
 ) -> list[str]:
     """The bounded first-import selection; additional classes need their own adapters."""
     classes = {"git_refs", "organizations", "teams", "permissions"}
@@ -392,6 +461,14 @@ def export_classes(
         classes.add("identities")
     if metadata:
         classes.update(("issues", "comments"))
+    if labels:
+        classes.add("labels")
+    if attachments:
+        classes.update(("issues", "comments", "attachments"))
+    if releases:
+        classes.add("releases")
+    if release_assets:
+        classes.update(("releases", "release_assets"))
     if lfs:
         classes.add("lfs")
     if wiki:

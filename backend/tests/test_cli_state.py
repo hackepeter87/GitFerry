@@ -82,6 +82,51 @@ def test_cli_explicit_resolution_checks_evidence_and_records_target(
     assert state.get_operation("op-17").status == "confirmed"
 
 
+def test_cli_generic_resolution_rejects_metadata_without_live_verification(
+    tmp_path: Path, capsys: object
+) -> None:
+    database, state = unknown_operation(tmp_path)
+    state.end_executor_session("restart")
+    label = state.register_origin(OriginKey("instance-a", "org/repo", "label", "18"))
+    state.prepare_operation(
+        operation_id="label-18",
+        origin_id=label.id,
+        target_instance_key="instance-b",
+        target_repository_scope="org/repo",
+        operation_type="create_label",
+        mapping_version=1,
+        baseline_id=None,
+        intent={"values": {"name": "priority", "color": "112233", "description": ""}},
+    )
+    state.start_executor_session("metadata-crash")
+    state.claim_operation("label-18", "metadata-crash")
+    state.start_executor_session("metadata-restart", recover_abandoned=True)
+    evidence_file = tmp_path / "metadata-observed.json"
+    evidence_file.write_text("{}", encoding="utf-8")
+
+    exit_code = main(
+        [
+            "state",
+            "resolve-unknown",
+            "--database",
+            str(database),
+            "--operation-id",
+            "label-18",
+            "--target-global-id",
+            "71",
+            "--observed-intent",
+            str(evidence_file),
+            "--evidence",
+            "untrusted operator assertion",
+        ]
+    )
+
+    assert exit_code == 2
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert "resolve-unknown-metadata" in output["error"]
+    assert state.get_operation("label-18").status == "outcome_unknown"
+
+
 def test_cli_creates_verifies_and_admits_transport(tmp_path: Path, capsys: object) -> None:
     a_database = tmp_path / "a.sqlite3"
     b_database = tmp_path / "b.sqlite3"

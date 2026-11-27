@@ -23,6 +23,10 @@ from gitferry.gitea_provisioning import (
 )
 from gitferry.identity_observations import require_current_account
 from gitferry.issue_operations import execute_issue_operation, preflight_issue_operation
+from gitferry.metadata_operations import (
+    METADATA_OPERATION_TYPES,
+    MetadataApplication,
+)
 from gitferry.native_application import NativePayloadApplication
 from gitferry.native_operations import NATIVE_OPERATION_TYPES
 from gitferry.operations import OperationExecutor
@@ -52,6 +56,7 @@ class GiteaPlanAdapter:
         self.content_inventory: InventoryDocument | None = None
         self.native: NativePayloadApplication | None = None
         self.native_payloads: list[dict[str, Any]] | None = None
+        self.metadata_apps: dict[str, MetadataApplication] = {}
         # Imported lazily so the existing issue/comment operations remain independent.
         from gitferry.gitea_bundles import GiteaBundlePusher
 
@@ -69,6 +74,13 @@ class GiteaPlanAdapter:
             for step in plan["operations"]
             if step["operation_type"]
             in ("create_issue", "update_issue", "create_comment", "update_comment")
+        ]
+
+    def _portable_content(self, plan: dict[str, Any]) -> list[OperationRecord]:
+        return [
+            self.state.get_operation(step["operation_id"])
+            for step in plan["operations"]
+            if step["operation_type"] in METADATA_OPERATION_TYPES
         ]
 
     def preflight(self, plan: dict[str, Any]) -> None:
@@ -100,7 +112,7 @@ class GiteaPlanAdapter:
                 expected_digest=request.package_digest,
             )
             self.content_inventory = read_inventory(artifact.directory, artifact.document)
-            if artifact.document["schema_version"] == 3:
+            if artifact.document["schema_version"] in (3, 4):
                 self.native_payloads = [
                     {key: item[key] for key in ("repository", "lfs", "wiki")}
                     for item in artifact.document["repositories"]
@@ -133,6 +145,12 @@ class GiteaPlanAdapter:
                 profile.base_url, username=evidence["login"], token=token, verify=context
             )
         )
+        from gitferry.gitea_metadata import GiteaMetadataClient
+
+        technical_metadata = GiteaMetadataClient(
+            profile.base_url, username=evidence["login"], token=token, verify=context
+        )
+        self.resources.enter_context(technical_metadata)
         self.check = PreflightCheck.ADMINISTRATOR
         administrator_id = verify_technical_administrator(
             self.admin.get_authenticated_user(), evidence["login"]
@@ -150,9 +168,14 @@ class GiteaPlanAdapter:
             )
         self.scope = None
         metadata = self._metadata(plan)
+        portable_content = self._portable_content(plan)
         # Resolve every actor before any target mutation. A token for the issue
         # author or technical administrator cannot stand in for a comment author.
-        for operation in metadata:
+        for operation in metadata + [
+            item
+            for item in portable_content
+            if item.operation_type in ("create_release", "update_release")
+        ]:
             self.scope = operation.target_repository_scope
             self.check = PreflightCheck.AUTHOR_CREDENTIAL
             binding_id = str(operation.intent["author_binding_id"])
@@ -189,14 +212,77 @@ class GiteaPlanAdapter:
                     verify=context,
                 )
             )
-        planned_parents = frozenset(
-            operation.origin_id
-            for operation in metadata
-            if operation.operation_type == "create_issue"
+        if self.request.package_ref is None and portable_content:
+            raise OperationBlocked("portable content requires an admitted local package")
+        package_root = (
+            self.paths.package_directory / self.request.package_ref
+            if self.request.package_ref
+            else self.paths.package_directory
         )
+        maximum = int(os.environ.get("GITFERRY_EXPORT_MAX_GIT_BYTES", str(1024**3)))
+        if maximum <= 0:
+            raise OperationBlocked("metadata payload bound must be positive")
+        for operation in portable_content:
+            client = technical_metadata
+            if operation.operation_type in ("create_release", "update_release"):
+                binding_id = str(operation.intent["author_binding_id"])
+                author_token = self.references.token(
+                    self.request.author_credential_refs[binding_id]
+                )
+                client = GiteaMetadataClient(
+                    profile.base_url,
+                    username=self.state.get_identity_binding(binding_id).target_login,
+                    token=author_token,
+                    verify=context,
+                )
+                self.resources.enter_context(client)
+            self.metadata_apps[operation.operation_id] = MetadataApplication(
+                self.state, client, package_root, max_bytes=maximum
+            )
         self.check = PreflightCheck.METADATA
+        planned_repositories = {
+            operation.target_repository_scope
+            for operation in (
+                self.state.get_operation(step["operation_id"]) for step in plan["operations"]
+            )
+            if operation.operation_type == "create_repository"
+        }
+        planned_parent_scopes = {
+            operation.origin_id: operation.target_repository_scope
+            for operation in metadata + portable_content
+            if operation.operation_type in ("create_issue", "create_comment", "create_release")
+        }
+        planned_label_scopes = {
+            operation.origin_id: operation.target_repository_scope
+            for operation in portable_content
+            if operation.operation_type == "create_label"
+        }
+        for operation in portable_content:
+            self.scope = operation.target_repository_scope
+            self.check = PreflightCheck.METADATA
+            self.metadata_apps[operation.operation_id].preflight(
+                operation.operation_id,
+                planned_repository=operation.target_repository_scope in planned_repositories,
+                planned_parent_scopes=planned_parent_scopes,
+                planned_label_scopes=planned_label_scopes,
+            )
+        planned_labels = {
+            (operation.target_repository_scope, operation.intent["values"]["name"])
+            for operation in portable_content
+            if operation.operation_type == "create_label"
+        }
+        managed_issue_labels = frozenset(
+            operation.origin_id
+            for operation in portable_content
+            if operation.operation_type == "assign_issue_labels"
+        )
         for operation in metadata:
-            self._preflight_metadata(operation, planned_parents)
+            self._preflight_metadata(
+                operation,
+                frozenset(planned_parent_scopes),
+                frozenset(planned_labels),
+                managed_issue_labels,
+            )
         if self.native_payloads is not None or any(
             repository.bundle for repository in request.repositories
         ):
@@ -240,7 +326,11 @@ class GiteaPlanAdapter:
         self.preflight_digest = plan["digest"]
 
     def _preflight_metadata(
-        self, operation: OperationRecord, planned_parents: frozenset[str]
+        self,
+        operation: OperationRecord,
+        planned_parents: frozenset[str],
+        planned_labels: frozenset[tuple[str, str]],
+        managed_issue_labels: frozenset[str],
     ) -> None:
         if self.request is None:
             raise OperationBlocked("plan request has not been validated")
@@ -261,12 +351,22 @@ class GiteaPlanAdapter:
         elif remote.get("archived") or remote.get("has_issues") is not True:
             raise OperationBlocked("selected repository does not permit issue operations")
         if operation.operation_type in ("create_issue", "update_issue"):
-            preflight_issue_operation(self.state, client, operation.operation_id)
+            preflight_issue_operation(
+                self.state,
+                client,
+                operation.operation_id,
+                check_labels=operation.origin_id not in managed_issue_labels,
+            )
             labels = operation.intent["values"]["labels"]
             if labels:
                 if remote is None:
-                    raise OperationBlocked("new repositories require separate label provisioning")
-                client.label_ids(repository, labels)
+                    if any((repository, label) not in planned_labels for label in labels):
+                        raise OperationBlocked(
+                            "new repository issue labels need planned label definitions"
+                        )
+                    return
+                unplanned = [label for label in labels if (repository, label) not in planned_labels]
+                client.label_ids(repository, unplanned)
         else:
             parent_origin = str(operation.intent["parent_origin_id"])
             try:
@@ -354,8 +454,26 @@ class GiteaPlanAdapter:
                         and step["status"] == "confirmed"
                         for step in plan["operations"]
                     )
+                    allowed_release_tags = {
+                        f"refs/tags/{operation.intent['values']['tag_name']}": (
+                            self.metadata_apps[operation.operation_id].client.resolve_git_target(
+                                operation.target_repository_scope,
+                                str(operation.intent["values"]["target_commitish"]),
+                            )
+                        )
+                        for operation in (
+                            self.state.get_operation(step["operation_id"])
+                            for step in plan["operations"]
+                        )
+                        if operation.operation_type == "create_release"
+                        and operation.status == "confirmed"
+                        and operation.target_repository_scope == repository.repository
+                    }
                     self.bundles.check_remote(
-                        repository.repository, bundle=bundle, expected_empty=not confirmed
+                        repository.repository,
+                        bundle=bundle,
+                        expected_empty=not confirmed,
+                        allowed_extra_refs=allowed_release_tags,
                     )
 
     def apply(self, plan: dict[str, Any], executor: OperationExecutor) -> None:
@@ -387,7 +505,19 @@ class GiteaPlanAdapter:
                     references=self.references,
                 )
         # PlanService stored the dependency order, independent of input ordering.
-        for operation in self._metadata(plan):
+        metadata_ids = {item.operation_id for item in self._metadata(plan)}
+        content_ids = {item.operation_id for item in self._portable_content(plan)}
+        for step in plan["operations"]:
+            operation = self.state.get_operation(step["operation_id"])
+            if operation.operation_id in content_ids:
+                result = self.metadata_apps[operation.operation_id].apply(
+                    operation.operation_id, executor
+                )
+                if result.status != "confirmed":
+                    raise OperationBlocked("portable content operation needs local resolution")
+                continue
+            if operation.operation_id not in metadata_ids:
+                continue
             binding_id = str(operation.intent["author_binding_id"])
             if operation.operation_type in ("create_issue", "update_issue"):
                 result = execute_issue_operation(

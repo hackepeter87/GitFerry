@@ -2,10 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 
 const source = { instance_key: "source-a", display_name: "Synthetic source A", revision: 7, enabled: true, locally_approved: true };
 const classes = ["git_refs", "lfs", "wiki", "organizations", "teams", "permissions", "identities", "issues", "labels", "comments", "attachments", "releases", "release_assets", "pull_requests", "pull_comments", "reviews", "review_comments", "timelines", "reactions", "milestones", "other_content"];
-const supported = ["git_refs", "organizations", "teams", "permissions", "identities", "issues", "comments"];
+const supported = ["git_refs", "organizations", "teams", "permissions", "identities", "issues", "labels", "comments", "attachments", "releases", "release_assets"];
 
 function documentFor(id: string, requested: string[], blocked: boolean) {
-  return { format: "gitferry.content-inventory", schema_version: 1, comparison_version: 1, snapshot_id: id, created_at: "2026-01-01T00:00:00Z", source_instance_key: source.instance_key, source_installation_marker: "install-source-a", gitea_version: "1.27.2", deletion_semantics: "absence-does-not-delete", repositories: [{ repository: "synthetic-org/first", native_id: "101", requested_classes: requested, git_size_estimate_bytes: 2048, size_assumptions: [], classes: classes.map((content_class) => ({ content_class, status: requested.includes(content_class) ? blocked && content_class === "lfs" ? "not-supported" : "observed" : "excluded", count: requested.includes(content_class) && !(blocked && content_class === "lfs") ? 0 : null, objects: [], reason: requested.includes(content_class) ? blocked && content_class === "lfs" ? "Transfer for this class is not implemented" : "" : "Not requested", limitations: [] })) }] };
+  return { format: "gitferry.content-inventory", schema_version: 1, comparison_version: 1, snapshot_id: id, created_at: "2026-01-01T00:00:00Z", source_instance_key: source.instance_key, source_installation_marker: "install-source-a", gitea_version: "28.4.0", deletion_semantics: "absence-does-not-delete", repositories: [{ repository: "synthetic-org/first", native_id: "101", requested_classes: requested, git_size_estimate_bytes: 2048, size_assumptions: [], classes: classes.map((content_class) => ({ content_class, status: requested.includes(content_class) ? blocked && content_class === "lfs" ? "not-supported" : "observed" : "excluded", count: requested.includes(content_class) && !(blocked && content_class === "lfs") ? 0 : null, objects: [], reason: requested.includes(content_class) ? blocked && content_class === "lfs" ? "Transfer for this class is not implemented" : "" : "Not requested", limitations: [] })) }] };
 }
 
 async function open(page: Page, nativeReady = false): Promise<{
@@ -107,5 +107,28 @@ test("native options request v3 with exact selected classes", async ({ page }) =
     version: 3,
     include_lfs: true,
     include_wiki: true,
+  });
+});
+
+test("portable metadata options request v4 with exact selected classes", async ({ page }) => {
+  const requests = await open(page, true);
+  await page.getByLabel("Include labels and issue label assignments").check();
+  await page.getByLabel("Include issue and comment attachments").check();
+  await page.getByLabel("Include releases and release assets").check();
+  await page.getByRole("button", { name: "Inspect selected content" }).click();
+  await expect(page.getByRole("button", { name: "Use this inventory" })).toBeEnabled();
+  await expect.poll(() => requests.inventoryRequest()?.requested_classes).toEqual([
+    "attachments", "comments", "git_refs", "identities", "issues", "labels",
+    "organizations", "permissions", "release_assets", "releases", "teams",
+  ]);
+  await page.getByRole("button", { name: "Use this inventory" }).click();
+  await page.getByLabel("Recipient registration").selectOption("recipient-b");
+  await page.getByRole("button", { name: "Create and queue export" }).click();
+  await expect.poll(() => requests.exportRequest()).toMatchObject({
+    version: 4,
+    include_labels: true,
+    include_attachments: true,
+    include_releases: true,
+    include_release_assets: true,
   });
 });

@@ -130,7 +130,13 @@ def verify_issue(
     return TargetConfirmation(str(identifier), index, native_created_at)
 
 
-def preflight_issue_operation(state: StateStore, client: IssueClient, operation_id: str) -> None:
+def preflight_issue_operation(
+    state: StateStore,
+    client: IssueClient,
+    operation_id: str,
+    *,
+    check_labels: bool = True,
+) -> None:
     operation = state.get_operation(operation_id)
     if operation.status in ("outcome_unknown", "conflict", "failed", "executing"):
         raise OperationBlocked("issue operation requires reconciliation")
@@ -163,9 +169,12 @@ def preflight_issue_operation(state: StateStore, client: IssueClient, operation_
         if operation.status == "confirmed"
         else operation.intent["expected"]
     )
+    value = client.get_issue(operation.target_repository_scope, mapping.target_issue_index)
+    if not check_labels:
+        expected = {**expected, "labels": issue_values(value)["labels"]}
     try:
         verify_issue(
-            client.get_issue(operation.target_repository_scope, mapping.target_issue_index),
+            value,
             account_id=binding.target_account_id,
             login=binding.target_login,
             expected=expected,

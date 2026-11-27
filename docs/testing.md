@@ -24,6 +24,39 @@
 
 Mocks do not replace Gitea integration evidence.
 
+## Issue #19: portable metadata and binary payloads
+
+The metadata application-plan probe uses the pinned Gitea 28.4.0 baseline and synthetic
+source/target accounts. It transfers a repository label and issue-label relation, an issue
+attachment, a release authored through an explicit binding, and a release asset. The probe
+checks native target IDs, parent relationships, author selection, payload bytes and SHA-256
+digests, then replays the same durable plan after a process restart without additional
+objects. The unselected control repository is compared before and after execution.
+
+The same probe exercises a hard process exit and a discarded successful HTTP response. After
+restart, each affected operation is `outcome_unknown`, the remote object is verified by a
+separate read, and no second POST is issued. Explicit reconciliation rejects a wrong parent,
+author or content candidate before confirmation. These are halted operations, not an
+Exactly-once claim.
+
+Package and API tests reject unsafe payload paths (absolute, traversal and symlink), external
+download URLs, duplicate references, inaccessible files, unsupported sizes and digest/size
+mismatches before any Gitea write. Payloads are copied only through the transport directory;
+the importer does not access the exporter database or source Gitea network. Missing package
+entries do not delete target metadata.
+
+The bounded support contract is create/replay for labels, issue/comment attachments, releases
+and release assets, plus same-ID label/release updates with immutable baselines. Issue-label
+relations use stable issue and label origins and run only after their target mappings are
+confirmed. Confirmed asset replay re-downloads the mapped target and verifies its size and
+SHA-256. The real probe blocks same-name/tag collisions and stale target drift and proves that
+omission does not delete target metadata. Native historical timestamps and attachment author fields are retained as
+origin facts where the tested regular endpoints cannot restore them. Label-assignment
+replacement, deletion, binary replacement, and a complete metadata return workflow remain
+separately qualified work.
+Manifest v1 and v2 fixtures continue to be verified by their original byte digests; v4 is
+validated by its own schema and explicit parser branch.
+
 ## Python and planning contracts
 
 Python 3.11 is the declared development minimum; the required quality job installs and runs

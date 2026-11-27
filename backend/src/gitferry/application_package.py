@@ -132,7 +132,7 @@ def _issue_key(value: dict[str, Any]) -> tuple[str, str, str]:
 
 def _validate(document: dict[str, Any]) -> None:
     version = document.get("schema_version")
-    if type(version) is not int or version not in (1, 2, 3):
+    if type(version) is not int or version not in (1, 2, 3, 4):
         raise PackageError("unsupported application package version")
     errors = Draft202012Validator(_schema(version), format_checker=FormatChecker()).iter_errors(
         document
@@ -199,6 +199,14 @@ def _validate(document: dict[str, Any]) -> None:
     from gitferry.package_native import validate_native_descriptors
 
     validate_native_descriptors(document)
+    from gitferry.package_metadata import validate_metadata_descriptors
+
+    validate_metadata_descriptors(document)
+    if document["schema_version"] == 4 and any(
+        item["kind"] == "release" and item["author"]["realm_key"] not in realms
+        for item in document["content"]
+    ):
+        raise PackageError("release author references an undeclared realm")
     metadata = document["metadata"]
     if metadata:
         authors = metadata["issue_authors"]
@@ -227,6 +235,12 @@ def _contents(directory: Path, document: dict[str, Any]) -> dict[str, tuple[int,
     from gitferry.package_native import native_contents
 
     files.update(native_contents(directory, document))
+    from gitferry.package_metadata import metadata_contents
+
+    for member, facts in metadata_contents(directory, document).items():
+        if member in files and files[member] != facts:
+            raise PackageError("package payload path has conflicting facts")
+        files[member] = facts
     reference = document["metadata"]
     if reference is None:
         validate_inventory_contents(directory, document, None)

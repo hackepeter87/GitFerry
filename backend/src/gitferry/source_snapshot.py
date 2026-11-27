@@ -58,6 +58,22 @@ def _user(value: Any, label: str) -> dict[str, str]:
     }
 
 
+def _asset(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise SourceSnapshotError(f"source {label} is malformed")
+    size = value.get("size")
+    if type(size) is not int or size < 0:
+        raise SourceSnapshotError(f"source {label} size is invalid")
+    return {
+        "global_id": str(_id(value.get("id"), label)),
+        "uuid": _text(value.get("uuid"), f"{label} uuid"),
+        "name": _text(value.get("name"), f"{label} name"),
+        "size": size,
+        "created_at": _text(value.get("created_at"), f"{label} created_at"),
+        "download_url": _text(value.get("browser_download_url"), f"{label} download URL"),
+    }
+
+
 class _SnapshotReader:
     def __init__(
         self,
@@ -220,7 +236,15 @@ class _SnapshotReader:
         return {"global_id": str(team_id), "name": name, "permission": effective, "_id": team_id}
 
     def capture(
-        self, selections: list[dict[str, str]], *, include_metadata: bool, include_members: bool
+        self,
+        selections: list[dict[str, str]],
+        *,
+        include_metadata: bool,
+        include_members: bool,
+        include_labels: bool = False,
+        include_attachments: bool = False,
+        include_releases: bool = False,
+        include_release_assets: bool = False,
     ) -> dict[str, Any]:
         repositories: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -281,6 +305,20 @@ class _SnapshotReader:
                         members.append(_user(member, "team member"))
                 teams.append({**team, "members": members})
             issues: list[dict[str, Any]] = []
+            source_labels: list[dict[str, Any]] = []
+            releases: list[dict[str, Any]] = []
+            if include_labels:
+                for raw_label in self._page(f"/repos/{owner}/{name}/labels", metadata=True):
+                    source_labels.append(
+                        {
+                            "global_id": str(_id(raw_label.get("id"), "label")),
+                            "name": _text(raw_label.get("name"), "label name"),
+                            "color": _text(raw_label.get("color"), "label color"),
+                            "description": _text(
+                                raw_label.get("description", ""), "label description"
+                            ),
+                        }
+                    )
             if include_metadata:
                 for raw_issue in self._page(
                     f"/repos/{owner}/{name}/issues",
@@ -293,10 +331,10 @@ class _SnapshotReader:
                     ):
                         raise SourceSnapshotError("source issue list contains a pull request")
                     index = _id(raw_issue.get("number"), "issue index")
-                    labels = raw_issue.get("labels")
-                    if not isinstance(labels, list) or any(
+                    issue_labels = raw_issue.get("labels")
+                    if not isinstance(issue_labels, list) or any(
                         not isinstance(label, Mapping) or not isinstance(label.get("name"), str)
-                        for label in labels
+                        for label in issue_labels
                     ):
                         raise SourceSnapshotError("source issue labels are malformed")
                     issue: dict[str, Any] = {
@@ -305,31 +343,78 @@ class _SnapshotReader:
                         "title": _text(raw_issue.get("title"), "issue title"),
                         "body": _text(raw_issue.get("body"), "issue body"),
                         "state": _text(raw_issue.get("state"), "issue state"),
-                        "labels": sorted(label["name"] for label in labels),
+                        "labels": sorted(label["name"] for label in issue_labels),
                         "author": _user(raw_issue.get("user"), "issue author"),
                         "created_at": _text(raw_issue.get("created_at"), "issue created_at"),
                         "updated_at": _text(raw_issue.get("updated_at"), "issue updated_at"),
                         "comments": [],
+                        "attachments": [],
                     }
+                    if include_attachments:
+                        for raw_asset in self._page(
+                            f"/repos/{owner}/{name}/issues/{index}/assets", metadata=True
+                        ):
+                            issue["attachments"].append(_asset(raw_asset, "issue attachment"))
                     for raw_comment in self._page(
                         f"/repos/{owner}/{name}/issues/{index}/comments", metadata=True
                     ):
                         if not isinstance(raw_comment, Mapping):
                             raise SourceSnapshotError("source comment is malformed")
-                        issue["comments"].append(
-                            {
-                                "global_id": str(_id(raw_comment.get("id"), "comment")),
-                                "body": _text(raw_comment.get("body"), "comment body"),
-                                "author": _user(raw_comment.get("user"), "comment author"),
-                                "created_at": _text(
-                                    raw_comment.get("created_at"), "comment created_at"
-                                ),
-                                "updated_at": _text(
-                                    raw_comment.get("updated_at"), "comment updated_at"
-                                ),
-                            }
-                        )
+                        comment: dict[str, Any] = {
+                            "global_id": str(_id(raw_comment.get("id"), "comment")),
+                            "body": _text(raw_comment.get("body"), "comment body"),
+                            "author": _user(raw_comment.get("user"), "comment author"),
+                            "created_at": _text(
+                                raw_comment.get("created_at"), "comment created_at"
+                            ),
+                            "updated_at": _text(
+                                raw_comment.get("updated_at"), "comment updated_at"
+                            ),
+                            "attachments": [],
+                        }
+                        if include_attachments:
+                            for raw_asset in self._page(
+                                f"/repos/{owner}/{name}/issues/comments/{comment['global_id']}/assets",
+                                metadata=True,
+                            ):
+                                comment["attachments"].append(
+                                    _asset(raw_asset, "comment attachment")
+                                )
+                        issue["comments"].append(comment)
                     issues.append(issue)
+            if include_releases:
+                for raw_release in self._page(f"/repos/{owner}/{name}/releases", metadata=True):
+                    release = {
+                        "global_id": str(_id(raw_release.get("id"), "release")),
+                        "tag_name": _text(raw_release.get("tag_name"), "release tag"),
+                        "target_commitish": _text(
+                            raw_release.get("target_commitish"), "release target"
+                        ),
+                        "name": _text(raw_release.get("name", ""), "release name"),
+                        "body": _text(raw_release.get("body", ""), "release body"),
+                        "draft": raw_release.get("draft"),
+                        "prerelease": raw_release.get("prerelease"),
+                        "author": _user(raw_release.get("author"), "release author"),
+                        "created_at": _text(raw_release.get("created_at"), "release created_at"),
+                        "published_at": raw_release.get("published_at"),
+                        "assets": [],
+                    }
+                    if (
+                        type(release["draft"]) is not bool
+                        or type(release["prerelease"]) is not bool
+                        or (
+                            release["published_at"] is not None
+                            and not isinstance(release["published_at"], str)
+                        )
+                    ):
+                        raise SourceSnapshotError("source release state is malformed")
+                    if include_release_assets:
+                        for raw_asset in self._page(
+                            f"/repos/{owner}/{name}/releases/{release['global_id']}/assets",
+                            metadata=True,
+                        ):
+                            release["assets"].append(_asset(raw_asset, "release asset"))
+                    releases.append(release)
             repositories.append(
                 {
                     "repository": repository,
@@ -337,18 +422,28 @@ class _SnapshotReader:
                     "organization": organization_out,
                     "teams": teams,
                     "issues": issues,
+                    "labels": source_labels,
+                    "releases": releases,
                 }
             )
         if not include_metadata:
             self.limitations.append("issue and comment metadata was explicitly excluded")
         if not include_members:
             self.limitations.append("team members were explicitly excluded")
+        omitted = ["LFS", "wiki", "pull requests", "reviews", "other content classes"]
+        if not include_labels:
+            omitted.append("labels")
+        if not include_attachments:
+            omitted.append("attachments")
+        if not include_releases:
+            omitted.append("releases")
+        if not include_release_assets:
+            omitted.append("release assets")
         self.limitations.extend(
             [
-                "LFS, wiki, attachments, releases, pull requests, reviews, and "
-                "other content classes are not captured",
+                ", ".join(omitted) + " are not captured",
                 "native timestamps are preserved as source strings; "
-                "write/PATCH operations are not part of a snapshot",
+                "create endpoints do not restore them",
             ]
         )
         return {"repositories": repositories, "limitations": list(dict.fromkeys(self.limitations))}
@@ -382,12 +477,22 @@ def capture_source(
     *,
     include_metadata: bool,
     include_members: bool,
+    include_labels: bool = False,
+    include_attachments: bool = False,
+    include_releases: bool = False,
+    include_release_assets: bool = False,
     transport: httpx.BaseTransport | None = None,
 ) -> dict[str, Any]:
     reader = _SnapshotReader(base_url, token, context, transport)
     try:
         return reader.capture(
-            selections, include_metadata=include_metadata, include_members=include_members
+            selections,
+            include_metadata=include_metadata,
+            include_members=include_members,
+            include_labels=include_labels,
+            include_attachments=include_attachments,
+            include_releases=include_releases,
+            include_release_assets=include_release_assets,
         )
     finally:
         reader.close()

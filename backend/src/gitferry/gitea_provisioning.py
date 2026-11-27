@@ -90,7 +90,11 @@ class GiteaProvisioningClient:
                 "permission": permission,
                 "can_create_org_repo": False,
                 "includes_all_repositories": False,
-                "units_map": {"repo.code": permission, "repo.issues": permission},
+                "units_map": {
+                    "repo.code": permission,
+                    "repo.issues": permission,
+                    "repo.releases": permission,
+                },
             },
         )
         team_id = _numeric_path_segment(require_numeric_id(created, "team"), "team id")
@@ -209,7 +213,7 @@ def verify_organization(value: Mapping[str, Any], username: str) -> str:
 def verify_team(value: Mapping[str, Any], name: str, permission: str) -> str:
     units = value.get("units_map")
     unit_permissions_safe = isinstance(units, Mapping) and all(
-        unit in {"repo.code", "repo.issues"} or unit_permission == "none"
+        unit in {"repo.code", "repo.issues", "repo.releases"} or unit_permission == "none"
         for unit, unit_permission in units.items()
     )
     if (
@@ -218,6 +222,7 @@ def verify_team(value: Mapping[str, Any], name: str, permission: str) -> str:
         or not isinstance(units, Mapping)
         or units.get("repo.code") != permission
         or units.get("repo.issues") != permission
+        or units.get("repo.releases") != permission
         or value.get("includes_all_repositories") is not False
         or value.get("can_create_org_repo") is not False
         or not unit_permissions_safe

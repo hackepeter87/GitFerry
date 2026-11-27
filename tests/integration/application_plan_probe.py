@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import shutil
+import subprocess
 from typing import Any
 
+import httpx
 from connection_profile_probe import certificate
 from gitferry.application_package import write_package
+from gitferry.content_inventory import CONTENT_CLASSES, parse_inventory
 from gitferry.git_bundle import create_git_bundle
 from gitferry.package_archive import write_package_archive
+from gitferry.package_inventory import attach_inventory
 from support import (
+    ADMIN,
     PACKAGE,
     ROOT,
     TARGET_URL,
@@ -30,13 +37,28 @@ ASSERTIONS = frozenset(
         "parent_mapping_confirmed",
         "target_only_context",
         "application_package_bundle_received_and_used",
+        "portable_metadata_confirmed",
+        "label_assignment_uses_mapped_label",
+        "attachment_parent_and_bytes_confirmed",
+        "release_author_and_asset_confirmed",
+        "metadata_update_same_ids_and_timestamps",
+        "metadata_update_replay_no_writes",
+        "label_and_release_collisions_blocked",
+        "release_tag_target_collision_blocked",
+        "metadata_omission_no_deletion",
+        "metadata_drift_blocks_overwrite",
         "confirmed_restart_no_duplicates",
+        "confirmed_repackage_no_duplicates",
         "crash_remote_post_accepted",
         "crash_restart_outcome_unknown",
         "crash_no_second_post",
         "lost_remote_post_accepted",
         "lost_restart_outcome_unknown",
         "lost_no_second_post",
+        "asset_lost_remote_post_accepted",
+        "asset_lost_restart_outcome_unknown",
+        "asset_lost_no_second_post",
+        "asset_lost_repackage_still_blocked",
         "new_packaging_cannot_bypass_unknown",
         "explicit_resolution_rejects_wrong_parent_author_and_content",
         "explicit_resolution_then_restart_confirms_without_post",
@@ -45,6 +67,205 @@ ASSERTIONS = frozenset(
         "source_catalog_lists_real_organization_and_repository_without_writes",
     }
 )
+
+ISSUE_ASSET = b"portable issue attachment\n"
+RELEASE_ASSET = b"portable release asset\n"
+
+
+def _observation(content_class: str) -> dict[str, Any]:
+    objects: list[dict[str, Any]] = []
+    if content_class == "git_refs":
+        objects = [
+            {
+                "key": "refs/heads/main",
+                "namespace": "git-ref",
+                "facts": {"ref": "refs/heads/main", "sha": "0" * 40},
+            }
+        ]
+    elif content_class == "organizations":
+        objects = [
+            {
+                "key": "50",
+                "native_id": "50",
+                "namespace": "organization-id",
+                "facts": {"name": "application-plan-lab"},
+            }
+        ]
+    elif content_class == "issues":
+        objects = [
+            {
+                "key": "53",
+                "native_id": "53",
+                "namespace": "global-issue-id",
+                "issue_index": "1",
+                "author": {"account_id": "11", "login": "issue-author"},
+                "facts": {
+                    "title": "Application plan",
+                    "body": "Issue body",
+                    "state": "open",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                },
+            }
+        ]
+    elif content_class == "labels":
+        objects = [
+            {
+                "key": "57",
+                "native_id": "57",
+                "namespace": "label-id",
+                "facts": {
+                    "name": "portable-priority",
+                    "color": "336699",
+                    "description": "Portable synthetic label",
+                },
+            }
+        ]
+    elif content_class == "attachments":
+        objects = [
+            {
+                "key": "59",
+                "native_id": "59",
+                "namespace": "attachment-id",
+                "parent": {"content_class": "issues", "key": "53"},
+                "facts": {
+                    "uuid": "source-issue-asset",
+                    "name": "issue-proof.txt",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+                "size_bytes": len(ISSUE_ASSET),
+            }
+        ]
+    elif content_class == "releases":
+        objects = [
+            {
+                "key": "58",
+                "native_id": "58",
+                "namespace": "release-id",
+                "author": {"account_id": "11", "login": "issue-author"},
+                "facts": {
+                    "tag_name": "portable-v1",
+                    "target_commitish": "main",
+                    "name": "Portable release",
+                    "body": "Portable release notes",
+                    "draft": False,
+                    "prerelease": False,
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "published_at": "2026-01-01T00:00:00Z",
+                },
+            }
+        ]
+    elif content_class == "release_assets":
+        objects = [
+            {
+                "key": "60",
+                "native_id": "60",
+                "namespace": "release-asset-id",
+                "parent": {"content_class": "releases", "key": "58"},
+                "facts": {
+                    "uuid": "source-release-asset",
+                    "name": "release-proof.txt",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+                "size_bytes": len(RELEASE_ASSET),
+            }
+        ]
+    requested = content_class in {
+        "git_refs",
+        "organizations",
+        "teams",
+        "permissions",
+        "issues",
+        "comments",
+        "labels",
+        "attachments",
+        "releases",
+        "release_assets",
+    }
+    return {
+        "content_class": content_class,
+        "status": "observed" if requested else "excluded",
+        "count": len(objects) if requested else None,
+        "objects": objects if requested else [],
+        "reason": "" if requested else "Not selected for this bounded package",
+        "limitations": [],
+    }
+
+
+def _portable_content() -> list[dict[str, Any]]:
+    def origin(kind: str, identifier: str) -> dict[str, str]:
+        return {
+            "instance_key": "source",
+            "repository": REPOSITORY,
+            "object_type": kind,
+            "global_id": identifier,
+        }
+
+    return [
+        {
+            "kind": "label",
+            "origin": origin("label", "57"),
+            "repository": REPOSITORY,
+            "source_native_id": "57",
+            "values": {
+                "name": "portable-priority",
+                "color": "336699",
+                "description": "Portable synthetic label",
+            },
+        },
+        {
+            "kind": "release",
+            "origin": origin("release", "58"),
+            "repository": REPOSITORY,
+            "source_native_id": "58",
+            "author": {
+                "realm_key": "synthetic-source",
+                "login": "issue-author",
+                "external_id": "source-issue-author",
+                "ou_path": "OU=Source",
+            },
+            "values": {
+                "tag_name": "portable-v1",
+                "target_commitish": "main",
+                "name": "Portable release",
+                "body": "Portable release notes",
+                "draft": False,
+                "prerelease": False,
+            },
+            "source_created_at": "2026-01-01T00:00:00Z",
+            "source_published_at": "2026-01-01T00:00:00Z",
+        },
+        {
+            "kind": "attachment",
+            "origin": origin("attachment", "59"),
+            "repository": REPOSITORY,
+            "source_native_id": "59",
+            "parent_origin": origin("issue", "53"),
+            "name": "issue-proof.txt",
+            "media_type": "text/plain",
+            "source_created_at": "2026-01-01T00:00:00Z",
+            "file": {
+                "path": "assets/issue-proof.txt",
+                "size": len(ISSUE_ASSET),
+                "sha256": hashlib.sha256(ISSUE_ASSET).hexdigest(),
+            },
+        },
+        {
+            "kind": "release_asset",
+            "origin": origin("release_asset", "60"),
+            "repository": REPOSITORY,
+            "source_native_id": "60",
+            "parent_origin": origin("release", "58"),
+            "name": "release-proof.txt",
+            "media_type": "text/plain",
+            "source_created_at": "2026-01-01T00:00:00Z",
+            "file": {
+                "path": "assets/release-proof.txt",
+                "size": len(RELEASE_ASSET),
+                "sha256": hashlib.sha256(RELEASE_ASSET).hexdigest(),
+            },
+        },
+    ]
 
 
 def worker(
@@ -73,6 +294,14 @@ def events() -> list[dict[str, Any]]:
     return [json.loads(line) for line in value.stdout.splitlines()]
 
 
+def write_events() -> list[dict[str, Any]]:
+    return [
+        event
+        for event in events()
+        if event["method"] not in ("GET", "HEAD") and not event["path"].endswith("/git-upload-pack")
+    ]
+
+
 def comments() -> list[dict[str, Any]]:
     return api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/issues/1/comments")
 
@@ -80,7 +309,25 @@ def comments() -> list[dict[str, Any]]:
 def run_application_plan_probe() -> dict[str, Any]:
     package_root = WORK / "application-package"
     package_root.mkdir()
-    bundle = create_git_bundle(WORK / "permission-seed", package_root, "bundles/selected.bundle")
+    (package_root / "assets").mkdir()
+    (package_root / "assets/issue-proof.txt").write_bytes(ISSUE_ASSET)
+    (package_root / "assets/release-proof.txt").write_bytes(RELEASE_ASSET)
+    seed = WORK / "application-plan-seed"
+    shutil.copytree(WORK / "permission-seed", seed)
+    git = shutil.which("git")
+    if git is None:
+        raise ProbeFailure("git is required for the application-plan fixture")
+    wrong_target = subprocess.check_output(
+        [git, "-C", str(seed), "rev-parse", "HEAD"], text=True
+    ).strip()
+    (seed / "second-commit.txt").write_text("second synthetic commit\n")
+    subprocess.run([git, "-C", str(seed), "add", "second-commit.txt"], check=True)
+    subprocess.run(
+        [git, "-C", str(seed), "commit", "-m", "Add second synthetic commit"],
+        check=True,
+        capture_output=True,
+    )
+    bundle = create_git_bundle(seed, package_root, "bundles/selected.bundle")
     package_document = json.loads((ROOT / "examples/application-package.v1.json").read_text())
     package_document["sender"] = {
         "instance_key": "source",
@@ -94,6 +341,90 @@ def run_application_plan_probe() -> dict[str, Any]:
     selected["repository"] = REPOSITORY
     selected["organization"]["name"] = "application-plan-lab"
     selected["bundle"] = {"path": bundle.member, "size": bundle.size, "sha256": bundle.sha256}
+    selected["lfs"] = None
+    selected["wiki"] = None
+    package_document["realms"] = [
+        {
+            "realm_key": "synthetic-source",
+            "kind": "external",
+            "description": "Synthetic source directory",
+        }
+    ]
+    requested_classes = {
+        "git_refs",
+        "organizations",
+        "teams",
+        "permissions",
+        "issues",
+        "comments",
+        "labels",
+        "attachments",
+        "releases",
+        "release_assets",
+    }
+    inventory = parse_inventory(
+        {
+            "format": "gitferry.content-inventory",
+            "schema_version": 3,
+            "comparison_version": 3,
+            "snapshot_id": "application-plan-v4",
+            "created_at": "2026-01-01T00:00:00Z",
+            "source_instance_key": "source",
+            "source_installation_marker": "source-plan-install",
+            "gitea_version": "28.4.0",
+            "deletion_semantics": "absence-does-not-delete",
+            "repositories": [
+                {
+                    "repository": REPOSITORY,
+                    "native_id": "51",
+                    "requested_classes": sorted(requested_classes),
+                    "classes": [_observation(name) for name in CONTENT_CLASSES],
+                    "git_size_estimate_bytes": bundle.size,
+                    "size_assumptions": [],
+                }
+            ],
+        }
+    )
+    attach_inventory(
+        package_root,
+        package_document,
+        inventory,
+        {
+            "repositories": [
+                {
+                    "repository": REPOSITORY,
+                    "global_id": "51",
+                    "organization": {"global_id": "50"},
+                    "teams": [],
+                }
+            ]
+        },
+        include_members=False,
+        include_labels=True,
+        include_attachments=True,
+        include_releases=True,
+        include_release_assets=True,
+    )
+    package_document["content"] = _portable_content()
+    package_document["label_assignments"] = [
+        {
+            "repository": REPOSITORY,
+            "issue_origin": {
+                "instance_key": "source",
+                "repository": REPOSITORY,
+                "object_type": "issue",
+                "global_id": "53",
+            },
+            "label_origins": [
+                {
+                    "instance_key": "source",
+                    "repository": REPOSITORY,
+                    "object_type": "label",
+                    "global_id": "57",
+                }
+            ],
+        }
+    ]
     package_artifact = write_package(package_root, package_document)
     write_package_archive(package_root, PACKAGE / "application-plan.zip")
     directory = WORK / "application-plan-tls"
@@ -113,6 +444,11 @@ def run_application_plan_probe() -> dict[str, Any]:
         )
     issue = api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/issues/1")
     initial_comments = comments()
+    labels = api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/labels")
+    target_label = next(value for value in labels if value["name"] == "portable-priority")
+    release = api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases/tags/portable-v1")
+    issue_assets = api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/issues/1/assets")
+    release_assets = api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases/{release['id']}/assets")
     assertions = {
         "structure_bundle_and_metadata_confirmed": all(
             step["status"] == "confirmed" for step in plan["operations"]
@@ -132,7 +468,36 @@ def run_application_plan_probe() -> dict[str, Any]:
                 for step in plan["operations"]
             )
         ),
+        "portable_metadata_confirmed": all(
+            any(
+                step["operation_type"] == kind and step["status"] == "confirmed"
+                for step in plan["operations"]
+            )
+            for kind in (
+                "create_label",
+                "create_release",
+                "upload_attachment",
+                "upload_release_asset",
+            )
+        ),
+        "label_assignment_uses_mapped_label": len(issue["labels"]) == 1
+        and issue["labels"][0]["name"] == "portable-priority"
+        and any(value["id"] == issue["labels"][0]["id"] for value in labels),
+        "attachment_parent_and_bytes_confirmed": len(issue_assets) == 1
+        and issue_assets[0]["name"] == "issue-proof.txt"
+        and httpx.get(
+            f"{TARGET_URL}/attachments/{issue_assets[0]['uuid']}", auth=ADMIN, timeout=15
+        ).content
+        == ISSUE_ASSET,
+        "release_author_and_asset_confirmed": release["author"]["login"] == "issue-author"
+        and len(release_assets) == 1
+        and release_assets[0]["name"] == "release-proof.txt"
+        and httpx.get(
+            f"{TARGET_URL}/attachments/{release_assets[0]['uuid']}", auth=ADMIN, timeout=15
+        ).content
+        == RELEASE_ASSET,
     }
+    details: dict[str, Any] = {}
     before = events()
     catalog = worker("browse")
     assertions["source_catalog_lists_real_organization_and_repository_without_writes"] = (
@@ -146,8 +511,132 @@ def run_application_plan_probe() -> dict[str, Any]:
         replay["plan"]["status"] == "confirmed"
         and events() == before
         and comments() == initial_comments
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/labels")) == len(labels)
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases")) == 1
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/issues/1/assets")) == 1
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases/{release['id']}/assets")) == 1
     )
-    details: dict[str, Any] = {}
+    before_repackage_writes = write_events()
+    repackaged = worker("confirmed-repackage")
+    repackage_writes = write_events()[len(before_repackage_writes) :]
+    assertions["confirmed_repackage_no_duplicates"] = (
+        repackaged["plan"]["status"] == "confirmed"
+        # A newly admitted package is preflighted against live Gitea again, but
+        # stable origins must reuse confirmed operations without another write.
+        and not repackage_writes
+        and comments() == initial_comments
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/labels")) == len(labels)
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases")) == 1
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/issues/1/assets")) == 1
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases/{release['id']}/assets")) == 1
+    )
+    details["confirmed_repackage"] = {
+        "plan_status": repackaged["plan"]["status"],
+        "plan_reason": repackaged["plan"].get("reason"),
+        "operations": [
+            {
+                "operation_type": item["operation_type"],
+                "status": item["status"],
+            }
+            for item in repackaged["plan"]["operations"]
+        ],
+        "new_write_events": repackage_writes,
+    }
+    before_update = events()
+    update = worker("metadata-update", "metadata-update")
+    updated_labels = api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/labels")
+    updated_label = next(value for value in updated_labels if value["name"] == "portable-priority")
+    updated_release = api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases/tags/portable-v1")
+    updated_issue = api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/issues/1")
+    assertions["metadata_update_same_ids_and_timestamps"] = (
+        update["plan"]["status"] == "confirmed"
+        and updated_label["id"] == target_label["id"]
+        and updated_label["color"].lower() == "224466"
+        and updated_label["description"] == "Portable label updated on target"
+        and updated_release["id"] == release["id"]
+        and updated_release["name"] == "Portable release updated"
+        and updated_release["body"] == "Updated release notes"
+        and updated_release["author"] == release["author"]
+        and updated_release["created_at"] == release["created_at"]
+        and updated_issue["labels"][0]["id"] == target_label["id"]
+        and len(events()) == len(before_update) + 2
+    )
+    after_update = events()
+    update_replay = worker("resume", "metadata-update")
+    assertions["metadata_update_replay_no_writes"] = (
+        update_replay["plan"]["status"] == "confirmed" and events() == after_update
+    )
+    api(
+        TARGET_URL,
+        "POST",
+        f"/repos/{REPOSITORY}/tags",
+        json_body={"tag_name": "wrong-target", "target": wrong_target},
+    )
+    before_collisions = events()
+    label_collision = worker("label-collision", "label-collision")
+    release_collision = worker("release-collision", "release-collision")
+    assertions["label_and_release_collisions_blocked"] = (
+        label_collision["plan"]["status"] == "blocked"
+        and release_collision["plan"]["status"] == "blocked"
+        and events() == before_collisions
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/labels")) == len(labels)
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases")) == 1
+    )
+    target_collision = worker("release-target-collision", "release-target-collision")
+    target_update = worker("release-target-update", "release-target-update")
+    assertions["release_tag_target_collision_blocked"] = (
+        target_collision["plan"]["status"] == "blocked"
+        and target_update["plan"]["status"] == "blocked"
+        and events() == before_collisions
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases")) == 1
+    )
+    omission = worker("metadata-omission", "metadata-omission")
+    assertions["metadata_omission_no_deletion"] = (
+        omission["plan"]["status"] == "confirmed"
+        and events() == before_collisions
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/labels")) == len(labels)
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/releases")) == 1
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/issues/1/assets")) == 1
+        and len(
+            api(
+                TARGET_URL,
+                "GET",
+                f"/repos/{REPOSITORY}/releases/{release['id']}/assets",
+            )
+        )
+        == 1
+    )
+    before_drift = events()
+    drift = worker("metadata-drift", "metadata-drift")
+    drift_events = events()[len(before_drift) :]
+    drifted_label = next(
+        value
+        for value in api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/labels")
+        if value["id"] == target_label["id"]
+    )
+    assertions["metadata_drift_blocks_overwrite"] = (
+        drift["plan"]["status"] == "blocked"
+        and not drift_events
+        and drifted_label["description"] == "Foreign drift"
+        and drifted_label["color"].lower() == "778899"
+    )
+    if not assertions["metadata_drift_blocks_overwrite"]:
+        raise ProbeFailure(
+            "Metadata drift evidence differed: "
+            + json.dumps(
+                {
+                    "plan_status": drift["plan"]["status"],
+                    "plan_reason": drift["plan"].get("reason"),
+                    "writes": drift_events,
+                    "label": {
+                        "id": drifted_label.get("id"),
+                        "color": drifted_label.get("color"),
+                        "description": drifted_label.get("description"),
+                    },
+                },
+                sort_keys=True,
+            )
+        )
     for case, expected in (("crash", 91), ("lost", 0)):
         before = events()
         count = len(comments())
@@ -161,10 +650,15 @@ def run_application_plan_probe() -> dict[str, Any]:
         )
         after = events()
         resumed = worker("resume", case)
-        states = [step["status"] for step in resumed["plan"]["operations"]]
-        assertions[case + "_restart_outcome_unknown"] = resumed["plan"][
-            "status"
-        ] == "blocked" and states == ["outcome_unknown"]
+        resumed_operations = resumed["plan"]["operations"]
+        states = [step["status"] for step in resumed_operations]
+        unknown_steps = [step for step in resumed_operations if step["status"] == "outcome_unknown"]
+        assertions[case + "_restart_outcome_unknown"] = (
+            resumed["plan"]["status"] == "blocked"
+            and len(unknown_steps) == 1
+            and unknown_steps[0]["operation_type"] == "create_comment"
+            and all(status in {"confirmed", "outcome_unknown"} for status in states)
+        )
         assertions[case + "_no_second_post"] = events() == after and len(comments()) == count + 1
         repackaged = worker("repackage", case)
         assertions["new_packaging_cannot_bypass_unknown"] = (
@@ -181,6 +675,48 @@ def run_application_plan_probe() -> dict[str, Any]:
                 "status", "process exited before confirmation"
             ),
         }
+    before = events()
+    issue_asset_count = len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/issues/1/assets"))
+    interrupted_asset = worker("asset-lost", "asset-lost")
+    accepted_asset = events()[len(before) :]
+    live_assets = api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/issues/1/assets")
+    assertions["asset_lost_remote_post_accepted"] = (
+        interrupted_asset["plan"]["status"] == "blocked"
+        and len(accepted_asset) == 1
+        and accepted_asset[0]["method"] == "POST"
+        and accepted_asset[0]["path"].endswith("/issues/1/assets")
+        and accepted_asset[0]["status"] == 201
+        and len(live_assets) == issue_asset_count + 1
+        and any(asset["name"] == "lost-response-proof.txt" for asset in live_assets)
+    )
+    after_asset = events()
+    resumed_asset = worker("resume", "asset-lost")
+    unknown_assets = [
+        step for step in resumed_asset["plan"]["operations"] if step["status"] == "outcome_unknown"
+    ]
+    assertions["asset_lost_restart_outcome_unknown"] = (
+        resumed_asset["plan"]["status"] == "blocked"
+        and len(unknown_assets) == 1
+        and unknown_assets[0]["operation_type"] == "upload_attachment"
+        and unknown_assets[0]["target_global_id"] is None
+    )
+    assertions["asset_lost_no_second_post"] = (
+        events() == after_asset
+        and len(api(TARGET_URL, "GET", f"/repos/{REPOSITORY}/issues/1/assets"))
+        == issue_asset_count + 1
+    )
+    repackaged_asset = worker("repackage", "asset-lost")
+    assertions["asset_lost_repackage_still_blocked"] = (
+        repackaged_asset["blocked"] and events() == after_asset
+    )
+    details["asset_lost"] = {
+        "remote": accepted_asset,
+        "restart_plan_status": resumed_asset["plan"]["status"],
+        "operation_statuses": [step["status"] for step in resumed_asset["plan"]["operations"]],
+        "target_id_known_locally": unknown_assets[0]["target_global_id"]
+        if unknown_assets
+        else None,
+    }
     # Only after restart/repackaging has proved the unresolved halt, simulate an
     # explicit operator selection. IDs are never fed into automatic recovery.
     other_issue = api(
@@ -205,7 +741,8 @@ def run_application_plan_probe() -> dict[str, Any]:
         result = worker("resolve", "crash", target_comment_id=str(decoy["id"]))
         rejected.append(
             result.get("rejected") is True
-            and result["plan"]["operations"][0]["status"] == "outcome_unknown"
+            and sum(step["status"] == "outcome_unknown" for step in result["plan"]["operations"])
+            == 1
         )
     assertions["explicit_resolution_rejects_wrong_parent_author_and_content"] = all(rejected)
     accepted_comment = next(
@@ -217,9 +754,14 @@ def run_application_plan_probe() -> dict[str, Any]:
     comment_count = len(comments())
     resolved = worker("resolve", "crash", target_comment_id=str(accepted_comment["id"]))
     restarted = worker("resume", "crash")
+    resolved_comment = next(
+        step
+        for step in restarted["plan"]["operations"]
+        if step["operation_type"] == "create_comment"
+    )
     assertions["explicit_resolution_then_restart_confirms_without_post"] = (
         resolved["plan"]["status"] == restarted["plan"]["status"] == "confirmed"
-        and restarted["plan"]["operations"][0]["target_global_id"] == str(accepted_comment["id"])
+        and resolved_comment["target_global_id"] == str(accepted_comment["id"])
         and events() == before_resolution
         and len(comments()) == comment_count
     )
@@ -243,7 +785,10 @@ raise SystemExit(0 if clean else 1)
         docker_service_exec("gitferry-b", ["python", "-c", scan], check=False).returncode == 0
     )
     if set(assertions) != ASSERTIONS or not all(assertions.values()):
-        raise ProbeFailure(f"Application plan assertions failed: {assertions}")
+        raise ProbeFailure(
+            f"Application plan assertions failed: {assertions}; "
+            f"repackage diagnostics: {details.get('confirmed_repackage')}"
+        )
     return {
         "status": "passed",
         "assertions": assertions,

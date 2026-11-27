@@ -114,7 +114,7 @@ def test_matrix_does_not_overstate_label_return_and_names_foundational_gap_owner
     rows = {row["ID"].strip("`"): row for row in matrix_rows()}
     labels = rows["labels"]
 
-    assert labels["Implementation"] == "not-implemented"
+    assert labels["Implementation"] == "supported-with-limits"
     assert labels["First import"] == "supported-with-limits"
     assert labels["Return"] == "not-checked"
     for capability_id, (release, issue) in EXPLICIT_GAP_OWNERS.items():

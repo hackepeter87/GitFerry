@@ -8,6 +8,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from gitferry.operations import ExecutorBusy, OperationExecutor
 from gitferry.plan_runner import PlanRunner
@@ -94,7 +95,12 @@ def test_preflight_failure_has_no_writes_and_single_executor(tmp_path: Path) -> 
         release.set()
         thread.join(timeout=5)
     assert not thread.is_alive() and not writes
-    assert service.get(plan["plan_id"])["status"] == "failed"
+    failed = service.get(plan["plan_id"])
+    assert failed["status"] == "failed"
+    assert (
+        failed["reason"]
+        == "local execution failed (ValueError); inspect selected operation evidence"
+    )
     assert store.get_operation("op-1").status == "prepared"
 
 
@@ -147,3 +153,29 @@ def test_lost_response_remains_unknown_and_cancel_stops_before_write(tmp_path: P
     assert runner.run(repackaged["plan_id"])["status"] == "blocked"
     assert store.get_operation("repackaged-operation").status == "prepared"
     assert writes == ["accepted"]
+
+
+def test_http_failure_diagnostic_keeps_only_method_status_and_path(tmp_path: Path) -> None:
+    store, evidence = _store(tmp_path)
+    service = PlanService(store)
+    plan = _plan(service, evidence)
+    service.queue(plan["plan_id"], plan["digest"])
+
+    class Adapter:
+        def preflight(self, plan: dict[str, Any]) -> None:
+            request = httpx.Request(
+                "GET",
+                "https://user:secret@example.invalid/api/v1/repos/acme/private/releases?token=secret",
+            )
+            response = httpx.Response(404, request=request)
+            raise httpx.HTTPStatusError("secret response", request=request, response=response)
+
+        def apply(self, plan: dict[str, Any], executor: OperationExecutor) -> None:
+            raise AssertionError("preflight must stop execution")
+
+    failed = PlanRunner(service, lambda _: nullcontext(Adapter())).run(plan["plan_id"])
+    assert failed["reason"] == (
+        "local execution failed (HTTP 404 GET /api/v1/repos/acme/private/releases); "
+        "inspect selected operation evidence"
+    )
+    assert "secret" not in failed["reason"]

@@ -22,7 +22,12 @@ def _origin(
 ) -> dict[str, Any]:
     existing = state.find_origin_for_replica(source, scope, kind, value["global_id"])
     parent_identifier = (
-        origin_id(parent["instance_key"], parent["repository"], "issue", parent["global_id"])
+        origin_id(
+            parent["instance_key"],
+            parent["repository"],
+            "comment" if parent["object_type"] == "issue_comment" else parent["object_type"],
+            parent["global_id"],
+        )
         if parent
         else None
     )
@@ -61,7 +66,7 @@ def _origin(
             result["issue_index"] = str(value["issue_index"])
         if "created_at" in value:
             result["created_at"] = value["created_at"]
-    if parent:
+    if parent and kind == "comment":
         result["parent_issue_origin"] = {
             key: parent[key] for key in ("instance_key", "repository", "object_type", "global_id")
         }
@@ -77,6 +82,10 @@ def build_source_documents(
     source: str,
     recipient: str,
     include_metadata: bool,
+    include_labels: bool = False,
+    include_attachments: bool = False,
+    include_releases: bool = False,
+    include_release_assets: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     sender = state.get_instance(source)
     receiver = state.get_instance(recipient)
@@ -154,6 +163,10 @@ def build_source_documents(
         "payloads": [],
     }
     issue_authors = []
+    if include_labels or include_attachments or include_releases or include_release_assets:
+        package["content"] = []
+    if include_labels:
+        package["label_assignments"] = []
     for repository in snapshot["repositories"]:
         scope = repository["repository"]
         organization = repository["organization"]
@@ -180,8 +193,29 @@ def build_source_documents(
                 }
             )
         package["repositories"].append(selected)
+        label_origins_by_name: dict[str, dict[str, Any]] = {}
+        if include_labels:
+            for label in repository["labels"]:
+                label_origin = _origin(state, source, scope, "label", label)
+                if label["name"] in label_origins_by_name:
+                    raise MappingConflict("source label names are ambiguous within a repository")
+                label_origins_by_name[label["name"]] = label_origin
+                package["content"].append(
+                    {
+                        "kind": "label",
+                        "origin": {
+                            key: label_origin[key]
+                            for key in ("instance_key", "repository", "object_type", "global_id")
+                        },
+                        "repository": scope,
+                        "source_native_id": label["global_id"],
+                        "values": {key: label[key] for key in ("name", "color", "description")},
+                    }
+                )
         if not include_metadata:
-            continue
+            issues = []
+        else:
+            issues = repository["issues"]
         metadata["selected_repositories"].append(
             {
                 "repository": scope,
@@ -191,8 +225,11 @@ def build_source_documents(
                 "limitations": ["native-created-at-not-restored", "normal-issue-comments-only"],
             }
         )
-        for issue in repository["issues"]:
+        issue_origins: dict[str, dict[str, Any]] = {}
+        comment_origins: dict[str, dict[str, Any]] = {}
+        for issue in issues:
             issue_origin = _origin(state, source, scope, "issue", issue)
+            issue_origins[issue["global_id"]] = issue_origin
             values = {key: issue[key] for key in ("title", "body", "state", "labels")}
             issue_authors.append(
                 {
@@ -204,10 +241,39 @@ def build_source_documents(
                 }
             )
             metadata["objects"].append(_item(issue_origin, source, scope, issue, values, export_id))
+            if include_labels and issue["labels"]:
+                try:
+                    assigned = [label_origins_by_name[name] for name in issue["labels"]]
+                except KeyError:
+                    raise MappingConflict(
+                        "issue label assignment references an uncaptured label definition"
+                    ) from None
+                package["label_assignments"].append(
+                    {
+                        "repository": scope,
+                        "issue_origin": {
+                            key: issue_origin[key]
+                            for key in ("instance_key", "repository", "object_type", "global_id")
+                        },
+                        "label_origins": [
+                            {
+                                key: label_origin[key]
+                                for key in (
+                                    "instance_key",
+                                    "repository",
+                                    "object_type",
+                                    "global_id",
+                                )
+                            }
+                            for label_origin in assigned
+                        ],
+                    }
+                )
             for comment in issue["comments"]:
                 comment_origin = _origin(
                     state, source, scope, "comment", comment, parent=issue_origin
                 )
+                comment_origins[comment["global_id"]] = comment_origin
                 item = _item(
                     comment_origin,
                     source,
@@ -219,6 +285,67 @@ def build_source_documents(
                 )
                 item["author"] = author(comment["author"])
                 metadata["objects"].append(item)
+                if include_attachments:
+                    for asset in comment["attachments"]:
+                        _append_asset(
+                            package,
+                            state,
+                            source,
+                            scope,
+                            "attachment",
+                            asset,
+                            comment_origin,
+                        )
+            if include_attachments:
+                for asset in issue["attachments"]:
+                    _append_asset(
+                        package,
+                        state,
+                        source,
+                        scope,
+                        "attachment",
+                        asset,
+                        issue_origin,
+                    )
+        if include_releases:
+            for release in repository["releases"]:
+                release_origin = _origin(state, source, scope, "release", release)
+                package["content"].append(
+                    {
+                        "kind": "release",
+                        "origin": {
+                            key: release_origin[key]
+                            for key in ("instance_key", "repository", "object_type", "global_id")
+                        },
+                        "repository": scope,
+                        "source_native_id": release["global_id"],
+                        "author": author(release["author"]),
+                        "values": {
+                            key: release[key]
+                            for key in (
+                                "tag_name",
+                                "target_commitish",
+                                "name",
+                                "body",
+                                "draft",
+                                "prerelease",
+                            )
+                        },
+                        "source_created_at": release["created_at"],
+                        "source_published_at": release["published_at"],
+                    }
+                )
+                if include_release_assets:
+                    for asset in release["assets"]:
+                        _append_asset(
+                            package,
+                            state,
+                            source,
+                            scope,
+                            "release_asset",
+                            asset,
+                            release_origin,
+                        )
     if identities:
         package["realms"] = [
             {
@@ -239,6 +366,41 @@ def build_source_documents(
             "issue_authors": issue_authors,
         }
     return package, metadata if include_metadata else None
+
+
+def _append_asset(
+    package: dict[str, Any],
+    state: StateStore,
+    source: str,
+    scope: str,
+    kind: ObjectType,
+    value: dict[str, Any],
+    parent: dict[str, Any],
+) -> None:
+    asset_origin = _origin(state, source, scope, kind, value, parent=parent)
+    package["content"].append(
+        {
+            "kind": kind,
+            "origin": {
+                key: asset_origin[key]
+                for key in ("instance_key", "repository", "object_type", "global_id")
+            },
+            "repository": scope,
+            "source_native_id": value["global_id"],
+            "parent_origin": {
+                key: parent[key]
+                for key in ("instance_key", "repository", "object_type", "global_id")
+            },
+            "name": value["name"],
+            "media_type": "application/octet-stream",
+            "source_created_at": value["created_at"],
+            "file": {
+                "path": "assets/" + value["global_id"],
+                "size": value["size"],
+                "sha256": "0" * 64,
+            },
+        }
+    )
 
 
 def _item(

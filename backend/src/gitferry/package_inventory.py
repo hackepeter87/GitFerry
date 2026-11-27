@@ -31,6 +31,10 @@ def attach_inventory(
     include_members: bool,
     include_lfs: bool = False,
     include_wiki: bool = False,
+    include_labels: bool = False,
+    include_attachments: bool = False,
+    include_releases: bool = False,
+    include_release_assets: bool = False,
 ) -> None:
     """Write one immutable payload; source replica IDs do not replace permanent origins."""
     raw = (canonical_json(document.model_dump(mode="json")) + "\n").encode("utf-8")
@@ -54,6 +58,17 @@ def attach_inventory(
     if include_lfs or include_wiki:
         package["schema_version"] = 3
         package["inventory"].update(include_lfs=include_lfs, include_wiki=include_wiki)
+    if include_labels or include_attachments or include_releases or include_release_assets:
+        package["schema_version"] = 4
+        package["inventory"].update(
+            include_lfs=include_lfs,
+            include_wiki=include_wiki,
+            include_labels=include_labels,
+            include_attachments=include_attachments,
+            include_releases=include_releases,
+            include_release_assets=include_release_assets,
+        )
+        package.setdefault("content", [])
     native = {item["repository"]: item for item in snapshot["repositories"]}
     for selected in package["repositories"]:
         captured = native[selected["repository"]]
@@ -136,12 +151,22 @@ def validate_inventory_contents(
             members=members,
             lfs=package["inventory"].get("include_lfs", False),
             wiki=package["inventory"].get("include_wiki", False),
+            labels=package["inventory"].get("include_labels", False),
+            attachments=package["inventory"].get("include_attachments", False),
+            releases=package["inventory"].get("include_releases", False),
+            release_assets=package["inventory"].get("include_release_assets", False),
         ):
             raise PackageError("inventory classes differ from bounded package capabilities")
-        if package["schema_version"] == 3:
+        if package["schema_version"] in (3, 4):
             from gitferry.package_native import match_native_inventory
 
             match_native_inventory(document, selected)
+        if package["schema_version"] == 4:
+            from gitferry.package_metadata import content_by_repository, match_metadata_inventory
+
+            match_metadata_inventory(
+                observed, content_by_repository(package, selected["repository"])
+            )
         if bool(expected_git_refs(document, observed.repository)) != (
             selected["bundle"] is not None
         ):
@@ -227,8 +252,16 @@ def validate_inventory_contents(
                     raise PackageError("metadata content differs from inventory")
                 if kind == "issue":
                     selector = authors[issue_origins[native_id]]
-                    if replica["issue_index"] != source.issue_index or values.get("labels"):
-                        raise PackageError("issue relation or unsupported label selection differs")
+                    if replica["issue_index"] != source.issue_index:
+                        raise PackageError("issue relation differs from inventory")
+                    if values.get("labels"):
+                        selected_labels = {
+                            item["values"]["name"]
+                            for item in package.get("content", [])
+                            if item["kind"] == "label" and item["repository"] == observed.repository
+                        }
+                        if set(values["labels"]) - selected_labels:
+                            raise PackageError("issue labels lack portable label definitions")
                 else:
                     selector = item["author"]
                     if (
