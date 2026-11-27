@@ -1259,6 +1259,7 @@ def test_inventory_partial_or_mismatched_evidence_cannot_pass(change: str) -> No
         "missing-limit",
         "missing-assertion",
         "stale-blocking-source",
+        "malformed-blockers",
         "invented-evidence",
         "promoted-return",
         "unsupported-promoted",
@@ -1284,6 +1285,8 @@ def test_scope_acceptance_cannot_hide_incomplete_or_unsupported_content(mutation
             "full_transfer": True,
             "blockers": [],
         }
+    elif mutation == "malformed-blockers":
+        report["content_inventory"]["selection_summary"]["blockers"] = None
     elif mutation == "invented-evidence":
         acceptance["catalog"][0]["evidence"] = ["invented"]
     elif mutation == "promoted-return":

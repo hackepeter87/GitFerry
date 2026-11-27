@@ -234,7 +234,8 @@ def build_scope_acceptance(report: dict[str, Any]) -> dict[str, Any]:
     summary = _value(report, "content_inventory.selection_summary")
     counts = counts if isinstance(counts, dict) else {}
     direct_counts = direct_counts if isinstance(direct_counts, dict) else {}
-    blockers = summary.get("blockers", []) if isinstance(summary, dict) else []
+    blockers_value = summary.get("blockers") if isinstance(summary, dict) else None
+    blockers = blockers_value if isinstance(blockers_value, list) else []
     blocked_classes = {
         item.get("content_class")
         for item in blockers
