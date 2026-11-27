@@ -11,7 +11,7 @@ from gitferry.connection_probe import approve_connection
 from gitferry.connection_profiles import ConnectionProfile, ProfileService
 from gitferry.operations import OperationExecutor
 from gitferry.plan_application import prepare_transfer_plan
-from gitferry.state_store import OperationBlocked, OriginKey, StateStore
+from gitferry.state_store import OperationBlocked, OriginKey, StateStore, TargetConfirmation
 from gitferry.transfer_plans import PlanConflict
 
 
@@ -162,7 +162,6 @@ def test_label_and_attachment_operations_follow_repository_and_issue_dependencie
     )
     request["package_ref"] = "package-1"
     request["package_digest"] = "a" * 64
-    request["metadata"][1]["values"]["labels"] = ["priority"]
     request["content"] = [
         {
             "origin_id": attachment.id,
@@ -187,6 +186,12 @@ def test_label_and_attachment_operations_follow_repository_and_issue_dependencie
                 "description": "Synthetic",
             },
         },
+        {
+            "origin_id": issue.id,
+            "repository": "org/repo",
+            "kind": "label_assignment",
+            "values": {"label_origin_ids": [label.id]},
+        },
     ]
     plan = prepare_transfer_plan(state, request)
     by_type = {item["operation_type"]: item for item in plan["operations"]}
@@ -194,12 +199,17 @@ def test_label_and_attachment_operations_follow_repository_and_issue_dependencie
         "create_label",
         "create_issue",
         "create_comment",
+        "assign_issue_labels",
         "upload_attachment",
     }
     dependencies = plan["document"]["dependencies"]
     assert (
         by_type["create_label"]["operation_id"]
-        in dependencies[by_type["create_issue"]["operation_id"]]
+        in dependencies[by_type["assign_issue_labels"]["operation_id"]]
+    )
+    assert (
+        by_type["create_issue"]["operation_id"]
+        in dependencies[by_type["assign_issue_labels"]["operation_id"]]
     )
     assert (
         by_type["create_issue"]["operation_id"]
@@ -248,3 +258,44 @@ def test_repackaging_cannot_bypass_unknown_portable_asset_create(tmp_path: Path)
     repackaged["round_key"] = "asset-repackaged"
     with pytest.raises(OperationBlocked, match="reconciliation"):
         prepare_transfer_plan(state, repackaged)
+
+
+def test_confirmed_content_replay_rejects_changed_intent(tmp_path: Path) -> None:
+    state, request = configured_plan(tmp_path)
+    label = state.register_origin(OriginKey("source", "org/repo", "label", "302"))
+    request.update(
+        {
+            "round_key": "label-first",
+            "package_ref": "package-1",
+            "package_digest": "a" * 64,
+            "metadata": [],
+            "content": [
+                {
+                    "origin_id": label.id,
+                    "repository": "org/repo",
+                    "kind": "label",
+                    "values": {
+                        "name": "priority",
+                        "color": "112233",
+                        "description": "Synthetic",
+                    },
+                }
+            ],
+        }
+    )
+    plan = prepare_transfer_plan(state, request)
+    operation_id = plan["operations"][0]["operation_id"]
+    with OperationExecutor(state, "confirm-label") as executor:
+        executor.execute(
+            operation_id,
+            lambda _: TargetConfirmation("9", None, observed_state=request["content"][0]["values"]),
+        )
+
+    replay = deepcopy(request)
+    replay["round_key"] = "label-repackaged"
+    assert prepare_transfer_plan(state, replay)["operations"][0]["status"] == "confirmed"
+
+    changed = deepcopy(replay)
+    changed["content"][0]["values"]["color"] = "445566"
+    with pytest.raises(OperationBlocked, match="differs from the confirmed create"):
+        prepare_transfer_plan(state, changed)

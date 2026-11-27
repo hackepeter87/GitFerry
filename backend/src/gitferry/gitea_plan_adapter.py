@@ -252,6 +252,11 @@ class GiteaPlanAdapter:
             for operation in metadata + portable_content
             if operation.operation_type in ("create_issue", "create_comment", "create_release")
         )
+        planned_label_origins = frozenset(
+            operation.origin_id
+            for operation in portable_content
+            if operation.operation_type == "create_label"
+        )
         for operation in portable_content:
             self.scope = operation.target_repository_scope
             self.check = PreflightCheck.METADATA
@@ -259,6 +264,7 @@ class GiteaPlanAdapter:
                 operation.operation_id,
                 planned_repository=operation.target_repository_scope in planned_repositories,
                 planned_parent_origins=planned_parents,
+                planned_label_origins=planned_label_origins,
             )
         planned_labels = {
             (operation.target_repository_scope, operation.intent["values"]["name"])

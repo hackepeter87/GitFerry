@@ -303,6 +303,22 @@ def initialize(state: StateStore) -> dict[str, Any]:
                 **({"author": item["author"]} if "author" in item else {}),
             }
         )
+    for assignment in package.document.get("label_assignments", []):
+        issue_origin = assignment["issue_origin"]
+        label_origins = assignment["label_origins"]
+        content.append(
+            {
+                "origin_id": origins[(issue_origin["object_type"], issue_origin["global_id"])],
+                "repository": assignment["repository"],
+                "kind": "label_assignment",
+                "values": {
+                    "label_origin_ids": [
+                        origins[(label["object_type"], label["global_id"])]
+                        for label in label_origins
+                    ]
+                },
+            }
+        )
     request = {
         "version": 1,
         "target_instance_key": "target",
@@ -343,7 +359,7 @@ def initialize(state: StateStore) -> dict[str, Any]:
                     "title": "Application plan",
                     "body": "Issue body",
                     "state": "open",
-                    "labels": ["portable-priority"],
+                    "labels": [],
                 },
             },
         ],

@@ -46,9 +46,11 @@ the importer does not access the exporter database or source Gitea network. Miss
 entries do not delete target metadata.
 
 The bounded support contract is create/replay for labels, issue/comment attachments, releases
-and release assets, plus same-ID label/release updates with immutable baselines. The real probe
-blocks same-name/tag collisions and stale target drift and proves that omission does not delete
-target metadata. Native historical timestamps and attachment author fields are retained as
+and release assets, plus same-ID label/release updates with immutable baselines. Issue-label
+relations use stable issue and label origins and run only after their target mappings are
+confirmed. Confirmed asset replay re-downloads the mapped target and verifies its size and
+SHA-256. The real probe blocks same-name/tag collisions and stale target drift and proves that
+omission does not delete target metadata. Native historical timestamps and attachment author fields are retained as
 origin facts where the tested regular endpoints cannot restore them. Label-assignment
 replacement, deletion, binary replacement, and a complete metadata return workflow remain
 separately qualified work.

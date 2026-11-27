@@ -15,8 +15,10 @@ class MetadataClient:
         self.labels: list[dict[str, Any]] = []
         self.assets: list[dict[str, Any]] = []
         self.label_posts = 0
+        self.label_puts = 0
         self.asset_posts = 0
         self.payload = b""
+        self.issue_labels: list[dict[str, Any]] = []
 
     def list_labels(self, repository: str) -> list[dict[str, Any]]:
         return list(self.labels)
@@ -35,6 +37,16 @@ class MetadataClient:
                 label.update(values)
                 return dict(label)
         raise KeyError(label_id)
+
+    def list_issue_labels(self, repository: str, issue_index: int) -> list[dict[str, Any]]:
+        return list(self.issue_labels)
+
+    def replace_issue_labels(
+        self, repository: str, issue_index: int, label_ids: list[int]
+    ) -> list[dict[str, Any]]:
+        self.label_puts += 1
+        self.issue_labels = [{"id": identifier} for identifier in label_ids]
+        return list(self.issue_labels)
 
     def list_assets(
         self, repository: str, parent_kind: str, parent_id: str
@@ -129,6 +141,67 @@ def test_unknown_label_create_stays_blocked_without_second_post(tmp_path: Path) 
         with pytest.raises(OperationBlocked, match="reconciliation"):
             app.apply(operation.operation_id, executor)
     assert client.label_posts == 1
+
+
+def test_new_issue_label_assignment_uses_mapped_origins_and_replays_without_put(
+    tmp_path: Path,
+) -> None:
+    state, _, label = configured(tmp_path)
+    issue = state.register_origin(OriginKey("a", "acme/repo", "issue", "13", 4))
+    state.add_object_mapping(label, "b", "acme/repo", "41")
+    operation = prepare_metadata_operation(
+        state,
+        origin_id=issue.id,
+        target_instance_key="b",
+        target_repository_scope="acme/repo",
+        operation_type="assign_issue_labels",
+        values={"label_origin_ids": [label]},
+    )
+    state.add_object_mapping(issue.id, "b", "acme/repo", "52", target_issue_index=9)
+    client = MetadataClient()
+    app = MetadataApplication(state, client, tmp_path, max_bytes=1024)  # type: ignore[arg-type]
+    with OperationExecutor(state, "assign") as executor:
+        confirmed = app.apply(operation.operation_id, executor)
+    assert confirmed.status == "confirmed"
+    assert client.issue_labels == [{"id": 41}]
+    with OperationExecutor(state, "replay-assignment") as executor:
+        replay = app.apply(operation.operation_id, executor)
+    assert replay.status == "confirmed"
+    assert client.label_puts == 1
+
+    client.issue_labels = [{"id": 99}]
+    with OperationExecutor(state, "drift-assignment") as executor:
+        with pytest.raises(OperationBlocked, match="differ from the baseline"):
+            app.apply(operation.operation_id, executor)
+    assert client.label_puts == 1
+
+
+def test_new_issue_label_assignment_preflight_accepts_planned_issue_and_label(
+    tmp_path: Path,
+) -> None:
+    state, _, label = configured(tmp_path)
+    issue = state.register_origin(OriginKey("a", "acme/repo", "issue", "13", 4))
+    operation = prepare_metadata_operation(
+        state,
+        origin_id=issue.id,
+        target_instance_key="b",
+        target_repository_scope="acme/repo",
+        operation_type="assign_issue_labels",
+        values={"label_origin_ids": [label]},
+    )
+    app = MetadataApplication(state, MetadataClient(), tmp_path, max_bytes=1024)  # type: ignore[arg-type]
+
+    app.preflight(
+        operation.operation_id,
+        planned_parent_origins=frozenset({issue.id}),
+        planned_label_origins=frozenset({label}),
+    )
+
+    with pytest.raises(OperationBlocked, match="no target mapping or create"):
+        app.preflight(
+            operation.operation_id,
+            planned_parent_origins=frozenset({issue.id}),
+        )
 
 
 def test_same_name_label_collision_is_blocked_without_mapping_or_post(tmp_path: Path) -> None:
@@ -256,6 +329,40 @@ def test_attachment_upload_verifies_parent_and_remote_bytes(tmp_path: Path) -> N
     assert client.asset_posts == 1
     assert client.payload == b"synthetic asset"
     app.preflight(operation.operation_id)
+
+
+def test_confirmed_asset_rejects_equal_size_remote_digest_drift(tmp_path: Path) -> None:
+    state, issue, _ = configured(tmp_path)
+    payload = tmp_path / "payloads" / "asset.bin"
+    payload.parent.mkdir()
+    payload.write_bytes(b"synthetic asset")
+    attachment = state.register_origin(
+        OriginKey("a", "acme/repo", "attachment", "18", parent_origin_id=issue)
+    )
+    operation = prepare_metadata_operation(
+        state,
+        origin_id=attachment.id,
+        target_instance_key="b",
+        target_repository_scope="acme/repo",
+        operation_type="upload_attachment",
+        values={
+            "name": "asset.txt",
+            "size": len(payload.read_bytes()),
+            "sha256": hashlib.sha256(payload.read_bytes()).hexdigest(),
+            "media_type": "text/plain",
+            "member": "payloads/asset.bin",
+            "parent_origin_id": issue,
+        },
+    )
+    client = MetadataClient()
+    app = MetadataApplication(state, client, tmp_path, max_bytes=1024)  # type: ignore[arg-type]
+    with OperationExecutor(state, "asset") as executor:
+        app.apply(operation.operation_id, executor)
+
+    client.payload = b"synthetic asseX"
+    with pytest.raises(OperationBlocked, match="differs from its baseline"):
+        app.preflight(operation.operation_id)
+    assert client.asset_posts == 1
 
 
 def test_asset_parent_conflict_is_rejected_before_operation(tmp_path: Path) -> None:

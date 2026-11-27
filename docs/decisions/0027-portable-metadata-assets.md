@@ -13,6 +13,9 @@ portable identity, and package paths must not become a file-system or network es
 
 - Application-package v4 represents labels, issue/comment attachments, releases and
   release assets as typed records with stable origin keys and instance-scoped replicas.
+- Issue-label relations name the stable issue origin and stable label origins explicitly.
+  Names are display data, not relation identity; execution waits for confirmed issue and label
+  mappings and rejects contradictory local mappings.
 - Attachment and release-asset records carry an explicit parent origin, a relative payload
   reference, byte size and SHA-256 digest. Admission rejects absolute, traversal, symlink,
   external-URL, inaccessible, duplicate or over-limit payload references before target writes.
@@ -20,6 +23,7 @@ portable identity, and package paths must not become a file-system or network es
   confirmed operation is replay-safe. A remote write whose result is lost is persisted as
   `outcome_unknown` and is never retried as an automatic second POST; explicit reconciliation
   must verify target instance, repository, parent, content and mapped author where applicable.
+  Confirmed asset replay reads the mapped target again and verifies its byte size and SHA-256.
 - Author-bearing release records require an explicit local identity binding. The technical
   importer is not used as a fallback author. Attachment authors and historical native
   timestamps are not reconstructed where the tested Gitea endpoint does not accept them;

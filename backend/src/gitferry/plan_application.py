@@ -19,7 +19,7 @@ from gitferry.provisioning import (
     ProvisioningTeam,
     prepare_provisioning_operations,
 )
-from gitferry.state_store import OperationBlocked, OperationRecord, StateStore
+from gitferry.state_store import OperationBlocked, OperationConflict, OperationRecord, StateStore
 from gitferry.transfer_plans import PlanConflict, PlanService
 
 Reference = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")]
@@ -97,7 +97,7 @@ class MetadataInput(_Input):
 class ContentInput(_Input):
     origin_id: Text
     repository: Text
-    kind: Literal["label", "release", "attachment", "release_asset"]
+    kind: Literal["label", "label_assignment", "release", "attachment", "release_asset"]
     values: dict[str, Any]
     author: AuthorInput | None = None
     baseline_id: Text | None = None
@@ -127,10 +127,13 @@ def parse_plan_request(value: Mapping[str, Any]) -> PlanRequest:
     if len({item.repository for item in parsed.repositories}) != len(parsed.repositories):
         raise PlanConflict("selected repository scopes must be unique")
     origins = [item.origin_id for item in parsed.metadata] + [
-        item.origin_id for item in parsed.content
+        item.origin_id for item in parsed.content if item.kind != "label_assignment"
     ]
     if len(set(origins)) != len(origins):
         raise PlanConflict("selected metadata origins must be unique")
+    assignments = [item.origin_id for item in parsed.content if item.kind == "label_assignment"]
+    if len(set(assignments)) != len(assignments):
+        raise PlanConflict("selected issue label assignments must be unique")
     for repository in [item.repository for item in parsed.repositories] + [
         item.repository for item in parsed.metadata
     ]:
@@ -241,7 +244,8 @@ def _content_operation(
     state: StateStore, request: PlanRequest, item: ContentInput
 ) -> OperationRecord:
     origin = state.get_origin(item.origin_id)
-    if origin.key.object_type != item.kind:
+    expected_origin_type = "issue" if item.kind == "label_assignment" else item.kind
+    if origin.key.object_type != expected_origin_type:
         raise PlanConflict("portable content kind differs from its admitted origin")
     if item.kind == "release":
         if item.author is None:
@@ -253,6 +257,16 @@ def _content_operation(
             raise OperationBlocked("release author requires a local credential reference")
     elif item.author is not None:
         raise PlanConflict("only releases carry an author selector")
+    if item.kind == "label_assignment":
+        return prepare_metadata_operation(
+            state,
+            origin_id=origin.id,
+            target_instance_key=request.target_instance_key,
+            target_repository_scope=item.repository,
+            operation_type="assign_issue_labels",
+            values=item.values,
+            baseline_id=item.baseline_id,
+        )
     try:
         state.get_object_mapping(origin.id, request.target_instance_key)
         mapped = True
@@ -289,7 +303,22 @@ def _content_operation(
         operation = state.get_operation(rows[0][0])
         if operation.status != "confirmed":
             raise OperationBlocked("earlier portable content operation needs reconciliation")
-        return operation
+        try:
+            replay = prepare_metadata_operation(
+                state,
+                origin_id=origin.id,
+                target_instance_key=request.target_instance_key,
+                target_repository_scope=item.repository,
+                operation_type=create_type,
+                values=item.values,
+                baseline_id=None,
+                author=item.author.model_dump() if item.author else None,
+            )
+        except OperationConflict:
+            raise OperationBlocked("portable content differs from the confirmed create") from None
+        if replay.operation_id != operation.operation_id or replay.status != "confirmed":
+            raise OperationBlocked("earlier portable content operation needs reconciliation")
+        return replay
     if item.kind in ("attachment", "release_asset") and mapped:
         raise OperationBlocked("binary asset replacement is not supported")
     operation_type = (
@@ -368,6 +397,7 @@ def prepare_transfer_plan(
             "create_team",
             "create_issue",
             "create_comment",
+            "create_label",
             "create_release",
         )
     }
@@ -409,10 +439,39 @@ def prepare_transfer_plan(
             "update_release",
             "upload_attachment",
             "upload_release_asset",
+            "assign_issue_labels",
         ):
             parent_repository = repositories.get(operation.target_repository_scope)
             if parent_repository:
                 parents.append(parent_repository)
+        if operation.operation_type == "assign_issue_labels":
+            issue_creator = creators.get(operation.origin_id)
+            if issue_creator:
+                parents.append(issue_creator)
+            else:
+                try:
+                    state.get_object_mapping(operation.origin_id, request.target_instance_key)
+                except KeyError:
+                    raise PlanConflict(
+                        "label assignment issue is neither selected nor mapped"
+                    ) from None
+            for label_origin in operation.intent["label_origin_ids"]:
+                label_creator = creators.get(str(label_origin))
+                if label_creator:
+                    parents.append(label_creator)
+                else:
+                    try:
+                        mapping = state.get_object_mapping(
+                            str(label_origin), request.target_instance_key
+                        )
+                    except KeyError:
+                        raise PlanConflict(
+                            "label assignment definition is neither selected nor mapped"
+                        ) from None
+                    if mapping.target_repository_scope != operation.target_repository_scope:
+                        raise PlanConflict(
+                            "label assignment definition belongs to another repository"
+                        )
         if operation.operation_type in ("upload_attachment", "upload_release_asset"):
             parent_origin = str(operation.intent["parent_origin_id"])
             parent_operation = creators.get(parent_origin)
@@ -425,18 +484,6 @@ def prepare_transfer_plan(
                     raise PlanConflict(
                         "asset parent is neither selected nor locally mapped"
                     ) from None
-        if operation.operation_type == "create_issue" and operation.intent["values"]["labels"]:
-            names = set(operation.intent["values"]["labels"])
-            labels = [
-                other.operation_id
-                for other in operations.values()
-                if other.operation_type == "create_label"
-                and other.target_repository_scope == operation.target_repository_scope
-                and other.intent["values"]["name"] in names
-            ]
-            if len(labels) != len(names):
-                raise PlanConflict("selected issue labels lack unique planned definitions")
-            parents.extend(labels)
         if operation.operation_type in ("create_comment", "update_comment"):
             parent_origin = str(operation.intent["parent_origin_id"])
             parent_operation = creators.get(parent_origin)

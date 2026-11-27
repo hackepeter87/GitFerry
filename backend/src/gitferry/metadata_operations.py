@@ -178,15 +178,38 @@ def prepare_metadata_operation(
         ruleset = ""
     if operation_type.startswith("update_") or operation_type == "assign_issue_labels":
         if baseline_id is None:
-            raise OperationBlocked("metadata changes require an immutable baseline")
-        baseline = state.get_baseline(baseline_id)
-        if (
-            baseline.origin_id != origin_id
-            or baseline.ruleset_name != ruleset
-            or baseline.ruleset_version != 1
-        ):
-            raise OperationBlocked("metadata baseline origin or ruleset differs")
-        intent["expected"] = baseline.baseline
+            if operation_type != "assign_issue_labels":
+                raise OperationBlocked("metadata changes require an immutable baseline")
+            try:
+                state.get_object_mapping(origin_id, target_instance_key)
+            except KeyError:
+                intent["expected"] = {"label_origin_ids": []}
+            else:
+                raise OperationBlocked("existing issue label changes require an immutable baseline")
+        else:
+            baseline = state.get_baseline(baseline_id)
+            if (
+                baseline.origin_id != origin_id
+                or baseline.ruleset_name != ruleset
+                or baseline.ruleset_version != 1
+            ):
+                raise OperationBlocked("metadata baseline origin or ruleset differs")
+            if operation_type == "assign_issue_labels":
+                expected_origins = baseline.baseline.get("label_origin_ids")
+                if (
+                    set(baseline.baseline) != {"label_origin_ids"}
+                    or not isinstance(expected_origins, list)
+                    or any(
+                        not isinstance(item, str)
+                        or state.get_origin(item).key.object_type != "label"
+                        for item in expected_origins
+                    )
+                    or len(set(expected_origins)) != len(expected_origins)
+                ):
+                    raise OperationBlocked("issue label baseline is invalid")
+                intent["expected"] = {"label_origin_ids": sorted(expected_origins)}
+            else:
+                intent["expected"] = baseline.baseline
     return state.prepare_operation(
         operation_id=_operation_id(
             operation_type, origin_id, target_instance_key, intent, baseline_id
@@ -237,6 +260,7 @@ class MetadataApplication:
         *,
         planned_repository: bool = False,
         planned_parent_origins: frozenset[str] = frozenset(),
+        planned_label_origins: frozenset[str] = frozenset(),
     ) -> None:
         operation = self.state.get_operation(operation_id)
         if operation.status in ("outcome_unknown", "executing", "conflict", "failed"):
@@ -305,13 +329,51 @@ class MetadataApplication:
                 raise OperationBlocked("mapped target release differs from the baseline") from exc
             return
         if operation.operation_type == "assign_issue_labels":
-            issue = self._mapping(operation.origin_id, operation.target_instance_key)
-            if issue.target_issue_index is None:
+            try:
+                issue = self._mapping(operation.origin_id, operation.target_instance_key)
+            except OperationBlocked:
+                if operation.origin_id not in planned_parent_origins:
+                    raise
+                missing = []
+                for origin_id in operation.intent["label_origin_ids"]:
+                    if origin_id in planned_label_origins:
+                        continue
+                    try:
+                        self._mapping(origin_id, operation.target_instance_key)
+                    except OperationBlocked:
+                        missing.append(origin_id)
+                if missing:
+                    raise OperationBlocked(
+                        "planned issue labels have no target mapping or create"
+                    ) from None
+                return
+            if (
+                issue.target_repository_scope != operation.target_repository_scope
+                or issue.target_issue_index is None
+            ):
                 raise OperationBlocked("mapped issue has no repository index")
+            desired_ids: list[int] = []
             for origin_id in operation.intent["label_origin_ids"]:
                 mapping = self._mapping(origin_id, operation.target_instance_key)
                 if mapping.target_repository_scope != operation.target_repository_scope:
                     raise OperationBlocked("mapped label belongs to another repository")
+                desired_ids.append(int(mapping.target_global_id))
+            expected_ids: list[int] = []
+            for origin_id in operation.intent["expected"]["label_origin_ids"]:
+                mapping = self._mapping(origin_id, operation.target_instance_key)
+                if mapping.target_repository_scope != operation.target_repository_scope:
+                    raise OperationBlocked("baseline label belongs to another repository")
+                expected_ids.append(int(mapping.target_global_id))
+            current = self.client.list_issue_labels(
+                operation.target_repository_scope, issue.target_issue_index
+            )
+            try:
+                current_ids = sorted(int(item["id"]) for item in current)
+            except (KeyError, TypeError, ValueError):
+                raise OperationBlocked("target issue label inventory is invalid") from None
+            wanted = sorted(desired_ids if operation.status == "confirmed" else expected_ids)
+            if current_ids != wanted:
+                raise OperationBlocked("mapped target issue labels differ from the baseline")
             return
         intent = operation.intent
         path = _file(self.package_root, intent["member"])
@@ -344,6 +406,15 @@ class MetadataApplication:
                 raise OperationBlocked("mapped target asset is missing from its parent")
             try:
                 verify_asset(matches[0], name=intent["name"], size=intent["size"])
+                with tempfile.TemporaryDirectory() as temporary:
+                    observed = Path(temporary) / "asset"
+                    size, digest, _media_type = self.client.download_asset(
+                        matches[0], observed, max_bytes=self.max_bytes
+                    )
+                if (size, digest) != (intent["size"], intent["sha256"]):
+                    raise MetadataTargetConflict(
+                        "mapped target asset bytes differ from the reviewed payload"
+                    )
             except MetadataTargetConflict as exc:
                 raise OperationBlocked("mapped target asset differs from its baseline") from exc
         elif any(item.get("name") == intent["name"] for item in assets):

@@ -147,6 +147,30 @@ def build_package_selection(
     objects = _manifest_objects(artifact, include_metadata)
     metadata: list[dict[str, Any]] = []
     content: list[dict[str, Any]] = []
+    portable_content = artifact.document.get("content", [])
+    assignments = artifact.document.get("label_assignments", []) if include_metadata else []
+    manifest_issue_origins = {
+        _origin(item["origin"])
+        for item in objects
+        if _internal_type(str(item.get("origin", {}).get("object_type", ""))) == "issue"
+    }
+    manifest_label_origins = {
+        _origin(item["origin"]) for item in portable_content if item["kind"] == "label"
+    }
+    for assignment in assignments:
+        issue_origin = _origin(assignment["issue_origin"])
+        label_origins = {_origin(origin) for origin in assignment["label_origins"]}
+        if (
+            issue_origin not in manifest_issue_origins
+            or not label_origins <= manifest_label_origins
+        ):
+            raise ValueError("label assignment references content outside the selected package")
+        if assignment["issue_origin"]["repository"] != assignment["repository"] or any(
+            origin["repository"] != assignment["repository"]
+            for origin in assignment["label_origins"]
+        ):
+            raise ValueError("label assignment crosses repository boundaries")
+    assigned_issues = {_origin(item["issue_origin"]) for item in assignments}
     if include_metadata and artifact.document.get("metadata") is not None:
         authors = {
             _origin({**entry["origin"], "object_type": "issue"}): entry["author"]
@@ -169,16 +193,18 @@ def build_package_selection(
             values = comparison.get("current") if isinstance(comparison, Mapping) else None
             if not isinstance(values, Mapping):
                 raise ValueError("selected metadata object has no current comparison values")
+            selected_values = dict(values)
+            if item_origin in assigned_issues:
+                selected_values["labels"] = []
             metadata.append(
                 {
                     "origin_id": item_origin,
                     "repository": portable_origin["repository"],
                     "author": dict(author),
-                    "values": dict(values),
+                    "values": selected_values,
                     "baseline_id": None,
                 }
             )
-    portable_content = artifact.document.get("content", [])
     selected_origins.update(_origin(item["origin"]) for item in portable_content)
     for item in portable_content:
         portable_origin = item["origin"]
@@ -216,6 +242,19 @@ def build_package_selection(
             content_item["author"] = dict(item["author"])
             binding_for(item["author"])
         content.append(content_item)
+
+    for assignment in assignments:
+        issue_origin = _origin(assignment["issue_origin"])
+        assignment_label_origins = [_origin(origin) for origin in assignment["label_origins"]]
+        content.append(
+            {
+                "origin_id": issue_origin,
+                "repository": assignment["repository"],
+                "kind": "label_assignment",
+                "baseline_id": None,
+                "values": {"label_origin_ids": assignment_label_origins},
+            }
+        )
 
     for item in objects:
         if _internal_type(str(item.get("origin", {}).get("object_type", ""))) != "comment":

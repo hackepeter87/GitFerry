@@ -165,6 +165,8 @@ def build_source_documents(
     issue_authors = []
     if include_labels or include_attachments or include_releases or include_release_assets:
         package["content"] = []
+    if include_labels:
+        package["label_assignments"] = []
     for repository in snapshot["repositories"]:
         scope = repository["repository"]
         organization = repository["organization"]
@@ -191,9 +193,13 @@ def build_source_documents(
                 }
             )
         package["repositories"].append(selected)
+        label_origins_by_name: dict[str, dict[str, Any]] = {}
         if include_labels:
             for label in repository["labels"]:
                 label_origin = _origin(state, source, scope, "label", label)
+                if label["name"] in label_origins_by_name:
+                    raise MappingConflict("source label names are ambiguous within a repository")
+                label_origins_by_name[label["name"]] = label_origin
                 package["content"].append(
                     {
                         "kind": "label",
@@ -235,6 +241,34 @@ def build_source_documents(
                 }
             )
             metadata["objects"].append(_item(issue_origin, source, scope, issue, values, export_id))
+            if include_labels and issue["labels"]:
+                try:
+                    assigned = [label_origins_by_name[name] for name in issue["labels"]]
+                except KeyError:
+                    raise MappingConflict(
+                        "issue label assignment references an uncaptured label definition"
+                    ) from None
+                package["label_assignments"].append(
+                    {
+                        "repository": scope,
+                        "issue_origin": {
+                            key: issue_origin[key]
+                            for key in ("instance_key", "repository", "object_type", "global_id")
+                        },
+                        "label_origins": [
+                            {
+                                key: label_origin[key]
+                                for key in (
+                                    "instance_key",
+                                    "repository",
+                                    "object_type",
+                                    "global_id",
+                                )
+                            }
+                            for label_origin in assigned
+                        ],
+                    }
+                )
             for comment in issue["comments"]:
                 comment_origin = _origin(
                     state, source, scope, "comment", comment, parent=issue_origin

@@ -73,6 +73,10 @@ class GiteaMetadataClient(GiteaProvisioningClient):
             raise MetadataTargetConflict("Gitea issue-label response is malformed")
         return value
 
+    def list_issue_labels(self, repository: str, issue_index: int) -> list[dict[str, Any]]:
+        owner, name = _repository_segments(repository)
+        return self._list(f"/repos/{owner}/{name}/issues/{int(issue_index)}/labels")
+
     def list_releases(self, repository: str) -> list[dict[str, Any]]:
         owner, name = _repository_segments(repository)
         return self._list(f"/repos/{owner}/{name}/releases")
@@ -165,12 +169,17 @@ class GiteaMetadataClient(GiteaProvisioningClient):
             raise MetadataTargetConflict("asset download facts are incomplete or oversized")
         parsed = urlsplit(url)
         base = urlsplit(str(self._client.base_url))
+        api_path = base.path.rstrip("/")
+        api_suffix = "/api/v1"
+        if not api_path.endswith(api_suffix):
+            raise MetadataTargetConflict("asset download base URL is not a supported Gitea API URL")
+        installation_prefix = api_path[: -len(api_suffix)]
         if (
             parsed.scheme != base.scheme
             or parsed.netloc != base.netloc
             or parsed.query
             or parsed.fragment
-            or parsed.path != f"/attachments/{uuid}"
+            or parsed.path != f"{installation_prefix}/attachments/{uuid}"
         ):
             raise MetadataTargetConflict("asset download URL is not the expected same-origin route")
         response = self._client.get(url)

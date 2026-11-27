@@ -379,6 +379,25 @@ def run_application_plan_probe() -> dict[str, Any]:
         include_release_assets=True,
     )
     package_document["content"] = _portable_content()
+    package_document["label_assignments"] = [
+        {
+            "repository": REPOSITORY,
+            "issue_origin": {
+                "instance_key": "source",
+                "repository": REPOSITORY,
+                "object_type": "issue",
+                "global_id": "53",
+            },
+            "label_origins": [
+                {
+                    "instance_key": "source",
+                    "repository": REPOSITORY,
+                    "object_type": "label",
+                    "global_id": "57",
+                }
+            ],
+        }
+    ]
     package_artifact = write_package(package_root, package_document)
     write_package_archive(package_root, PACKAGE / "application-plan.zip")
     directory = WORK / "application-plan-tls"

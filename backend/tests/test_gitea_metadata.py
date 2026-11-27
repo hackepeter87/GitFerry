@@ -143,3 +143,47 @@ def test_asset_download_requires_same_origin_uuid_size_and_digest(tmp_path: Path
             max_bytes=5,
         )
     client.close()
+
+
+def test_asset_download_accepts_gitea_installation_subpath_but_not_sibling_path(
+    tmp_path: Path,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/gitea/attachments/uuid-2"
+        return httpx.Response(
+            200,
+            content=b"asset",
+            headers={"content-type": "text/plain", "content-encoding": "identity"},
+            request=request,
+        )
+
+    client = GiteaMetadataClient(
+        "https://gitea.invalid/gitea",
+        username="admin",
+        token="token",  # noqa: S106 - synthetic MockTransport credential
+        transport=httpx.MockTransport(handler),
+    )
+    destination = tmp_path / "asset.bin"
+    assert (
+        client.download_asset(
+            {
+                "uuid": "uuid-2",
+                "size": 5,
+                "browser_download_url": "https://gitea.invalid/gitea/attachments/uuid-2",
+            },
+            destination,
+            max_bytes=5,
+        )[0]
+        == 5
+    )
+    with pytest.raises(MetadataTargetConflict, match="same-origin"):
+        client.download_asset(
+            {
+                "uuid": "uuid-2",
+                "size": 5,
+                "browser_download_url": "https://gitea.invalid/gitea-other/attachments/uuid-2",
+            },
+            tmp_path / "sibling.bin",
+            max_bytes=5,
+        )
+    client.close()
