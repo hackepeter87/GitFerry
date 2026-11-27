@@ -63,6 +63,7 @@ def validate_metadata_descriptors(document: dict[str, Any]) -> None:
             if (
                 not isinstance(parent, Mapping)
                 or set(parent) != {"instance_key", "repository", "object_type", "global_id"}
+                or parent["instance_key"] != origin[0]
                 or parent["repository"] != item["repository"]
                 or parent["object_type"]
                 not in ({"release"} if kind == "release_asset" else {"issue", "issue_comment"})
@@ -143,12 +144,22 @@ def match_metadata_inventory(
                 if selected["source_created_at"] != observed.facts.get("created_at"):
                     raise PackageError("release creation time differs from the reviewed inventory")
             if kind in ("attachment", "release_asset"):
+                parent = selected["parent_origin"]
+                origin = selected["origin"]
+                parent_class = {
+                    "issue": "issues",
+                    "issue_comment": "comments",
+                    "release": "releases",
+                }.get(parent.get("object_type"))
                 if (
                     selected["name"] != observed.facts.get("name")
                     or selected["source_created_at"] != observed.facts.get("created_at")
                     or selected["file"]["size"] != observed.size_bytes
                     or observed.parent is None
-                    or selected["parent_origin"]["global_id"] != observed.parent["key"]
+                    or parent.get("instance_key") != origin.get("instance_key")
+                    or parent.get("repository") != selected["repository"]
+                    or parent_class != observed.parent["content_class"]
+                    or parent.get("global_id") != observed.parent["key"]
                 ):
                     raise PackageError("asset payload or parent differs from reviewed inventory")
 

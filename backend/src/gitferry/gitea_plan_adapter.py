@@ -454,8 +454,13 @@ class GiteaPlanAdapter:
                         and step["status"] == "confirmed"
                         for step in plan["operations"]
                     )
-                    allowed_release_tags = frozenset(
-                        f"refs/tags/{operation.intent['values']['tag_name']}"
+                    allowed_release_tags = {
+                        f"refs/tags/{operation.intent['values']['tag_name']}": (
+                            self.metadata_apps[operation.operation_id].client.resolve_git_target(
+                                operation.target_repository_scope,
+                                str(operation.intent["values"]["target_commitish"]),
+                            )
+                        )
                         for operation in (
                             self.state.get_operation(step["operation_id"])
                             for step in plan["operations"]
@@ -463,7 +468,7 @@ class GiteaPlanAdapter:
                         if operation.operation_type == "create_release"
                         and operation.status == "confirmed"
                         and operation.target_repository_scope == repository.repository
-                    )
+                    }
                     self.bundles.check_remote(
                         repository.repository,
                         bundle=bundle,

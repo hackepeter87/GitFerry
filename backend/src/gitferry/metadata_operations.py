@@ -109,6 +109,116 @@ def verify_release_target(
         raise MetadataTargetConflict("release Git tag points at another target")
 
 
+def resolve_unknown_metadata_operation(
+    state: StateStore,
+    client: GiteaMetadataClient,
+    operation_id: str,
+    *,
+    target_global_id: str,
+    evidence: str,
+) -> OperationRecord:
+    """Confirm an uncertain metadata write only after live target verification."""
+
+    operation = state.get_operation(operation_id)
+    if operation.operation_type not in METADATA_OPERATION_TYPES:
+        raise OperationBlocked("operation is not supported by metadata reconciliation")
+    if operation.status != "outcome_unknown":
+        raise OperationBlocked("metadata operation is not awaiting reconciliation")
+    if not target_global_id.isdigit() or int(target_global_id) < 1:
+        raise OperationBlocked("metadata target ID must be a positive native ID")
+    try:
+        mapped = state.get_object_mapping(operation.origin_id, operation.target_instance_key)
+    except KeyError:
+        mapped = None
+    if mapped is not None and mapped.target_global_id != target_global_id:
+        raise OperationBlocked("metadata target ID contradicts the existing mapping")
+
+    kind = operation.operation_type
+    scope = operation.target_repository_scope
+    intent = operation.intent
+    target_issue_index: int | None = None
+    if kind in ("create_label", "update_label"):
+        matches = [
+            value for value in client.list_labels(scope) if str(value.get("id")) == target_global_id
+        ]
+        if len(matches) != 1:
+            raise OperationBlocked("selected target label is missing or ambiguous")
+        verify_label(matches[0], intent["values"])
+    elif kind in ("create_release", "update_release"):
+        binding = state.get_identity_binding(intent["author_binding_id"])
+        if (
+            binding.target_instance_key != operation.target_instance_key
+            or binding.target_login != client.authenticated_login
+        ):
+            raise OperationBlocked("release reconciliation client differs from the author")
+        value = client.get_release(scope, target_global_id)
+        verify_release(
+            value,
+            intent["values"],
+            author_login=binding.target_login,
+            author_id=binding.target_account_id,
+        )
+        verify_release_target(client, scope, intent["values"])
+    elif kind == "assign_issue_labels":
+        issue = state.get_object_mapping(operation.origin_id, operation.target_instance_key)
+        if (
+            issue.target_repository_scope != scope
+            or issue.target_issue_index is None
+            or issue.target_global_id != target_global_id
+        ):
+            raise OperationBlocked("selected issue label target differs from the mapped issue")
+        expected_ids = sorted(
+            int(state.get_object_mapping(origin, operation.target_instance_key).target_global_id)
+            for origin in intent["label_origin_ids"]
+        )
+        actual = client.list_issue_labels(scope, issue.target_issue_index)
+        try:
+            actual_ids = sorted(int(value["id"]) for value in actual)
+        except (KeyError, TypeError, ValueError):
+            raise OperationBlocked("target issue label inventory is invalid") from None
+        if actual_ids != expected_ids:
+            raise OperationBlocked("target issue labels differ from the uncertain write")
+        target_issue_index = issue.target_issue_index
+    else:
+        parent = state.get_object_mapping(intent["parent_origin_id"], operation.target_instance_key)
+        if parent.target_repository_scope != scope:
+            raise OperationBlocked("asset parent mapping belongs to another repository")
+        parent_type = state.get_origin(intent["parent_origin_id"]).key.object_type
+        if parent_type not in ("issue", "comment", "release"):
+            raise OperationBlocked("asset parent mapping has an unsupported type")
+        parent_kind: ParentKind = (
+            "release" if kind == "upload_release_asset" else cast(ParentKind, parent_type)
+        )
+        parent_id = parent.target_global_id
+        if parent_kind == "issue":
+            if parent.target_issue_index is None:
+                raise OperationBlocked("mapped issue has no repository index")
+            parent_id = str(parent.target_issue_index)
+        matches = [
+            value
+            for value in client.list_assets(scope, parent_kind, parent_id)
+            if str(value.get("id")) == target_global_id
+        ]
+        if len(matches) != 1:
+            raise OperationBlocked("selected target asset is missing from the expected parent")
+        verify_asset(matches[0], name=intent["name"], size=intent["size"])
+        with tempfile.TemporaryDirectory() as temporary:
+            observed = Path(temporary) / "asset"
+            size, digest, _media_type = client.download_asset(
+                matches[0], observed, max_bytes=intent["size"]
+            )
+        if (size, digest) != (intent["size"], intent["sha256"]):
+            raise OperationBlocked("selected target asset bytes differ from the uncertain write")
+
+    return state.resolve_unknown_operation(
+        operation_id,
+        target_global_id=target_global_id,
+        target_issue_index=target_issue_index,
+        observed_intent=intent,
+        evidence=evidence,
+    )
+
+
 def _operation_id(
     operation_type: str,
     origin_id: str,
@@ -613,4 +723,9 @@ class MetadataApplication:
         return executor.execute(operation_id, write)
 
 
-__all__ = ["METADATA_OPERATION_TYPES", "MetadataApplication", "prepare_metadata_operation"]
+__all__ = [
+    "METADATA_OPERATION_TYPES",
+    "MetadataApplication",
+    "prepare_metadata_operation",
+    "resolve_unknown_metadata_operation",
+]

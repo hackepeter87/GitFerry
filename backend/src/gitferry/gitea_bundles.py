@@ -132,7 +132,7 @@ class GiteaBundlePusher(AbstractContextManager["GiteaBundlePusher"]):
         *,
         bundle: BundleIntent,
         expected_empty: bool,
-        allowed_extra_refs: frozenset[str] = frozenset(),
+        allowed_extra_refs: Mapping[str, str] | None = None,
     ) -> dict[str, str]:
         """Read the target's refs; never alters the remote repository."""
 
@@ -141,8 +141,11 @@ class GiteaBundlePusher(AbstractContextManager["GiteaBundlePusher"]):
         if expected_empty and refs:
             raise GiteaBundleError("target repository is not empty")
         if not expected_empty:
-            if any(refs.get(name) != sha for name, sha in expected.items()) or (
-                set(refs) - set(expected) - allowed_extra_refs
+            allowed = allowed_extra_refs or {}
+            if (
+                any(refs.get(name) != sha for name, sha in expected.items())
+                or (set(refs) - set(expected) - set(allowed))
+                or any(refs.get(name) != sha for name, sha in allowed.items())
             ):
                 raise GiteaBundleError("target repository has divergent refs")
         return refs

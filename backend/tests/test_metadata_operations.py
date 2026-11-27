@@ -5,7 +5,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from gitferry.metadata_operations import MetadataApplication, prepare_metadata_operation
+from gitferry.metadata_operations import (
+    MetadataApplication,
+    prepare_metadata_operation,
+    resolve_unknown_metadata_operation,
+)
 from gitferry.operations import OperationExecutor
 from gitferry.state_store import OperationBlocked, OriginKey, StateStore
 
@@ -51,7 +55,11 @@ class MetadataClient:
     def list_assets(
         self, repository: str, parent_kind: str, parent_id: str
     ) -> list[dict[str, Any]]:
-        return list(self.assets)
+        return [
+            value
+            for value in self.assets
+            if value.get("_parent_kind") == parent_kind and value.get("_parent_id") == parent_id
+        ]
 
     def upload_asset(
         self,
@@ -71,6 +79,8 @@ class MetadataClient:
             "size": len(self.payload),
             "created_at": "2026-01-01T00:00:00Z",
             "browser_download_url": "https://gitea.invalid/attachments/asset-71",
+            "_parent_kind": parent_kind,
+            "_parent_id": parent_id,
         }
         self.assets.append(value)
         return value
@@ -141,6 +151,91 @@ def test_unknown_label_create_stays_blocked_without_second_post(tmp_path: Path) 
         with pytest.raises(OperationBlocked, match="reconciliation"):
             app.apply(operation.operation_id, executor)
     assert client.label_posts == 1
+
+    with pytest.raises(OperationBlocked, match="missing or ambiguous"):
+        resolve_unknown_metadata_operation(
+            state,
+            client,  # type: ignore[arg-type]
+            operation.operation_id,
+            target_global_id="999",
+            evidence="synthetic live label verification",
+        )
+    resolved = resolve_unknown_metadata_operation(
+        state,
+        client,  # type: ignore[arg-type]
+        operation.operation_id,
+        target_global_id="41",
+        evidence="synthetic live label verification",
+    )
+    assert resolved.status == "confirmed"
+    assert state.get_object_mapping(label, "b").target_global_id == "41"
+
+
+def test_unknown_asset_resolution_checks_parent_and_bytes(tmp_path: Path) -> None:
+    state, issue, _ = configured(tmp_path)
+    payload = tmp_path / "payloads" / "asset.bin"
+    payload.parent.mkdir()
+    payload.write_bytes(b"synthetic asset")
+    attachment = state.register_origin(
+        OriginKey("a", "acme/repo", "attachment", "18", parent_origin_id=issue)
+    )
+    operation = prepare_metadata_operation(
+        state,
+        origin_id=attachment.id,
+        target_instance_key="b",
+        target_repository_scope="acme/repo",
+        operation_type="upload_attachment",
+        values={
+            "name": "asset.txt",
+            "size": len(payload.read_bytes()),
+            "sha256": hashlib.sha256(payload.read_bytes()).hexdigest(),
+            "media_type": "text/plain",
+            "member": "payloads/asset.bin",
+            "parent_origin_id": issue,
+        },
+    )
+    client = MetadataClient()
+    app = MetadataApplication(state, client, tmp_path, max_bytes=1024)  # type: ignore[arg-type]
+    with pytest.raises(RuntimeError, match="crash"):
+        with OperationExecutor(
+            state,
+            "crash",
+            after_remote_hook=lambda: (_ for _ in ()).throw(RuntimeError("crash")),
+        ) as executor:
+            app.apply(operation.operation_id, executor)
+    with OperationExecutor(state, "restart"):
+        pass
+    assert state.get_operation(operation.operation_id).status == "outcome_unknown"
+
+    client.assets[0]["_parent_id"] = "other"
+    with pytest.raises(OperationBlocked, match="expected parent"):
+        resolve_unknown_metadata_operation(
+            state,
+            client,  # type: ignore[arg-type]
+            operation.operation_id,
+            target_global_id="71",
+            evidence="synthetic live asset verification",
+        )
+    client.assets[0]["_parent_id"] = "8"
+    client.payload = b"synthetic asseX"
+    with pytest.raises(OperationBlocked, match="bytes differ"):
+        resolve_unknown_metadata_operation(
+            state,
+            client,  # type: ignore[arg-type]
+            operation.operation_id,
+            target_global_id="71",
+            evidence="synthetic live asset verification",
+        )
+    client.payload = payload.read_bytes()
+    resolved = resolve_unknown_metadata_operation(
+        state,
+        client,  # type: ignore[arg-type]
+        operation.operation_id,
+        target_global_id="71",
+        evidence="synthetic live asset verification",
+    )
+    assert resolved.status == "confirmed"
+    assert state.get_object_mapping(attachment.id, "b").target_global_id == "71"
 
 
 def test_new_issue_label_assignment_uses_mapped_origins_and_replays_without_put(

@@ -149,18 +149,28 @@ def test_remote_replay_allows_only_separately_confirmed_release_tags(
             "org/repo",
             bundle=intent,
             expected_empty=False,
-            allowed_extra_refs=frozenset({release_tag}),
+            allowed_extra_refs={release_tag: observed[release_tag]},
         )
         == observed
     )
 
+    observed[release_tag] = "f" * 40
+    with pytest.raises(GiteaBundleError, match="divergent refs"):
+        pusher.check_remote(
+            "org/repo",
+            bundle=intent,
+            expected_empty=False,
+            allowed_extra_refs={release_tag: next(iter(expected.values()))},
+        )
+
+    observed[release_tag] = next(iter(expected.values()))
     observed["refs/heads/unrelated"] = next(iter(expected.values()))
     with pytest.raises(GiteaBundleError, match="divergent refs"):
         pusher.check_remote(
             "org/repo",
             bundle=intent,
             expected_empty=False,
-            allowed_extra_refs=frozenset({release_tag}),
+            allowed_extra_refs={release_tag: observed[release_tag]},
         )
 
 

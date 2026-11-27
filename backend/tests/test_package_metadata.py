@@ -174,6 +174,11 @@ def test_metadata_descriptor_rejects_origin_and_parent_conflicts() -> None:
         with pytest.raises(PackageError):
             validate_metadata_descriptors(value)
 
+    value = package()
+    value["content"][2]["parent_origin"]["instance_key"] = "other-instance"
+    with pytest.raises(PackageError, match="parent"):
+        validate_metadata_descriptors(value)
+
 
 def test_metadata_content_matches_reviewed_inventory_by_native_id_and_parent() -> None:
     raw = _document(requested_classes=["labels", "attachments", "releases", "release_assets"])
@@ -184,6 +189,11 @@ def test_metadata_content_matches_reviewed_inventory_by_native_id_and_parent() -
     changed[2]["parent_origin"]["global_id"] = "other"
     with pytest.raises(PackageError, match="parent"):
         match_metadata_inventory(document.repositories[0], changed)
+    for key, value in (("instance_key", "other-instance"), ("object_type", "issue_comment")):
+        changed = deepcopy(content)
+        changed[2]["parent_origin"][key] = value
+        with pytest.raises(PackageError, match="parent"):
+            match_metadata_inventory(document.repositories[0], changed)
     duplicated = deepcopy(package())
     duplicated["content"].append(deepcopy(duplicated["content"][0]))
     with pytest.raises(PackageError, match="duplicate"):
