@@ -1,0 +1,343 @@
+"""Real file-only Git return using the two independent GitFerry state stores."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import traceback
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
+
+import httpx
+import plan_worker
+from gitferry.connection_probe import LocalReferences
+from gitferry.gitea_plan_adapter import GiteaPlanAdapter
+from gitferry.package_admission import PackageAdmissions
+from gitferry.package_archive import receive_package_archive
+from gitferry.plan_runner import PlanRunner
+from gitferry.runtime import RuntimePaths
+from gitferry.source_export_jobs import SourceExportJobs
+from gitferry.state_store import StateStore
+from gitferry.transfer_plans import PlanService
+
+REPOSITORY = "source-export-lab/selected"
+CONTROL_REPOSITORY = "source-export-lab/not-selected"
+A_ROOT = Path("/state/source-export")
+B_ROOT = Path("/state/package-admission")
+A_URL = "http://source:3000"
+B_URL = "http://target:3000"
+RETURN_ARCHIVE = Path("/package/git-return-real.zip")
+
+
+def _paths(root: Path) -> RuntimePaths:
+    database = root / "state/state.sqlite3"
+    return RuntimePaths(database, root / "packages", root / "work")
+
+
+@contextmanager
+def _git_environment(root: Path) -> Iterator[dict[str, str]]:
+    script = root / "git-return-askpass.sh"
+    script.write_text(
+        "#!/bin/sh\n"
+        'case "$1" in\n'
+        '  *Username*) printf "%s\\n" "gitferry-admin" ;;\n'
+        '  *) printf "%s\\n" "$GITFERRY_RETURN_PASSWORD" ;;\n'
+        "esac\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o700)
+    environment = {
+        **os.environ,
+        "GIT_ASKPASS": str(script),
+        "GIT_ASKPASS_REQUIRE": "force",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GITFERRY_RETURN_PASSWORD": os.environ["GITFERRY_IT_ADMIN_PASSWORD"],
+    }
+    try:
+        yield environment
+    finally:
+        script.unlink(missing_ok=True)
+
+
+def _git_refs(root: Path, base_url: str, repository: str) -> dict[str, str]:
+    with _git_environment(root) as environment:
+        output = subprocess.run(  # noqa: S603
+            [
+                shutil.which("git") or "/usr/bin/git",
+                "ls-remote",
+                "--refs",
+                f"{base_url}/{repository}.git",
+            ],
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    return {
+        ref: oid
+        for line in output.splitlines()
+        for oid, ref in [line.split("\t", 1)]
+        if ref.startswith("refs/")
+    }
+
+
+def _unreachable(host: str, port: int) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=2):
+            return False
+    except OSError:
+        return True
+
+
+def _admin_repository(base_url: str) -> dict[str, Any]:
+    response = httpx.get(
+        f"{base_url}/api/v1/repos/{REPOSITORY}",
+        auth=("gitferry-admin", os.environ["GITFERRY_IT_ADMIN_PASSWORD"]),
+        timeout=20,
+        trust_env=False,
+    )
+    response.raise_for_status()
+    return dict(response.json())
+
+
+def _create_offline_commit() -> dict[str, str]:
+    before = _git_refs(B_ROOT, B_URL, REPOSITORY)
+    if "refs/heads/offline-return" in before:
+        return before
+    with tempfile.TemporaryDirectory(prefix="gitferry-return-", dir=B_ROOT / "work") as raw:
+        clone = Path(raw) / "repository"
+        with _git_environment(B_ROOT) as environment:
+            subprocess.run(  # noqa: S603
+                [
+                    shutil.which("git") or "/usr/bin/git",
+                    "clone",
+                    f"{B_URL}/{REPOSITORY}.git",
+                    str(clone),
+                ],
+                env=environment,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(  # noqa: S603
+                [shutil.which("git") or "/usr/bin/git", "config", "user.name", "Offline User"],
+                cwd=clone,
+                check=True,
+            )
+            subprocess.run(  # noqa: S603
+                [
+                    shutil.which("git") or "/usr/bin/git",
+                    "config",
+                    "user.email",
+                    "offline@example.invalid",
+                ],
+                cwd=clone,
+                check=True,
+            )
+            subprocess.run(  # noqa: S603
+                [shutil.which("git") or "/usr/bin/git", "switch", "-c", "offline-return"],
+                cwd=clone,
+                check=True,
+            )
+            (clone / "OFFLINE-RETURN.txt").write_text(
+                "synthetic offline return\n", encoding="utf-8"
+            )
+            subprocess.run(  # noqa: S603
+                [shutil.which("git") or "/usr/bin/git", "add", "OFFLINE-RETURN.txt"],
+                cwd=clone,
+                check=True,
+            )
+            subprocess.run(  # noqa: S603
+                [shutil.which("git") or "/usr/bin/git", "commit", "-m", "Offline return"],
+                cwd=clone,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(  # noqa: S603
+                [
+                    shutil.which("git") or "/usr/bin/git",
+                    "push",
+                    "origin",
+                    "HEAD:refs/heads/offline-return",
+                ],
+                env=environment,
+                cwd=clone,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+    return _git_refs(B_ROOT, B_URL, REPOSITORY)
+
+
+def export_return() -> dict[str, Any]:
+    paths = _paths(B_ROOT)
+    state = StateStore(paths.state_database)
+    with state.read_connection() as connection:
+        receipt = connection.execute(
+            "SELECT package_id,digest_sha256 FROM package_receipts ORDER BY received_at LIMIT 1"
+        ).fetchone()
+    if receipt is None:
+        raise RuntimeError("forward package receipt is missing on B")
+    current = _create_offline_commit()
+    repository = _admin_repository(B_URL)
+    request = {
+        "version": 5,
+        "mode": "return",
+        "forward_package_id": receipt["package_id"],
+        "forward_package_digest": receipt["digest_sha256"],
+        "source_instance_key": "target",
+        "source_profile_revision": 1,
+        "recipient_instance_key": "source",
+        "repositories": [{"repository": REPOSITORY, "global_id": str(repository["id"])}],
+        "include_metadata": False,
+        "include_members": False,
+    }
+    jobs = SourceExportJobs(state, paths, LocalReferences(B_ROOT / "secrets", B_ROOT))
+    plan_worker.ROOT = B_ROOT
+    plan_worker.URL = B_URL
+    with plan_worker.proxy(preserve_origin=True):
+        jobs.create("git-return-real", request)
+        result = jobs.run_next()
+    if result is None or result["status"] != "ready":
+        raise RuntimeError("return export did not reach ready")
+    stream, details = jobs.open_download("git-return-real")
+    with stream, RETURN_ARCHIVE.open("wb") as output:
+        shutil.copyfileobj(stream, output)
+    return {
+        "status": details["status"],
+        "package_digest": details["package_digest"],
+        "archive_sha256": details["archive_sha256"],
+        "offline_oid": current["refs/heads/offline-return"],
+        "source_unreachable": _unreachable("source", 3000),
+    }
+
+
+def apply_return() -> dict[str, Any]:
+    paths = _paths(A_ROOT)
+    state = StateStore(paths.state_database)
+    package_ref = "received-git-return"
+    destination = paths.package_directory / package_ref
+    if not destination.exists():
+        receive_package_archive(RETURN_ARCHIVE, destination)
+    admissions = PackageAdmissions(state, paths)
+    artifact = admissions.artifact(package_ref)
+    admissions.admit(
+        package_ref,
+        target_instance_key="source",
+        profile_revision=1,
+        expected_digest=artifact.digest_sha256,
+    )
+    review = admissions.plan_review(
+        package_ref,
+        target_instance_key="source",
+        profile_revision=1,
+        include_metadata=False,
+    )
+    plan = admissions.prepare_plan(
+        package_ref,
+        target_instance_key="source",
+        profile_revision=1,
+        expected_review_digest=review["review_digest"],
+        include_metadata=False,
+    )
+    service = PlanService(state)
+    service.queue(plan["plan_id"], plan["digest"])
+    before_control = _git_refs(A_ROOT, A_URL, CONTROL_REPOSITORY)
+    plan_worker.ROOT = A_ROOT
+    plan_worker.URL = A_URL
+    with plan_worker.proxy(preserve_origin=True):
+        result = PlanRunner(
+            service,
+            lambda _: GiteaPlanAdapter(
+                state,
+                paths,
+                LocalReferences(A_ROOT / "secrets", A_ROOT / "ca"),
+            ),
+        ).run(plan["plan_id"])
+    after = _git_refs(A_ROOT, A_URL, REPOSITORY)
+    after_control = _git_refs(A_ROOT, A_URL, CONTROL_REPOSITORY)
+    with state.read_connection() as connection:
+        executing = connection.execute(
+            "SELECT count(*) FROM operation_events e JOIN operations o "
+            "ON o.operation_id=e.operation_id "
+            "WHERE o.operation_type='push_git_ref' AND e.to_status='executing'"
+        ).fetchone()[0]
+    return {
+        "status": result["status"],
+        "plan_id": plan["plan_id"],
+        "return_digest": artifact.digest_sha256,
+        "refs": after,
+        "control_unchanged": before_control == after_control,
+        "push_attempts": executing,
+        "target_unreachable": _unreachable("target", 3000),
+    }
+
+
+def replay_return() -> dict[str, Any]:
+    paths = _paths(A_ROOT)
+    state = StateStore(paths.state_database)
+    plans = PlanService(state).list()
+    return_plans = [
+        plan for plan in plans if plan["document"]["inventory"]["request"]["mode"] == "return"
+    ]
+    if len(return_plans) != 1:
+        raise RuntimeError("expected exactly one durable return plan")
+    plan = return_plans[0]
+    service = PlanService(state)
+    before = _git_refs(A_ROOT, A_URL, REPOSITORY)
+    plan_worker.ROOT = A_ROOT
+    plan_worker.URL = A_URL
+    with plan_worker.proxy(preserve_origin=True):
+        result = PlanRunner(
+            service,
+            lambda _: GiteaPlanAdapter(
+                state,
+                paths,
+                LocalReferences(A_ROOT / "secrets", A_ROOT / "ca"),
+            ),
+        ).run(plan["plan_id"])
+    after = _git_refs(A_ROOT, A_URL, REPOSITORY)
+    with state.read_connection() as connection:
+        executing = connection.execute(
+            "SELECT count(*) FROM operation_events e JOIN operations o "
+            "ON o.operation_id=e.operation_id "
+            "WHERE o.operation_type='push_git_ref' AND e.to_status='executing'"
+        ).fetchone()[0]
+    return {
+        "status": result["status"],
+        "same_refs": before == after,
+        "push_attempts": executing,
+    }
+
+
+def main() -> None:
+    actions = {"export-b": export_return, "apply-a": apply_return, "replay-a": replay_return}
+    parser = argparse.ArgumentParser()
+    parser.add_argument("mode", choices=actions)
+    args = parser.parse_args()
+    try:
+        print(json.dumps(actions[args.mode](), sort_keys=True))
+    except Exception as error:
+        evidence = {
+            "exception_type": type(error).__name__,
+            "message": str(error),
+            "frames": [
+                {"file": Path(frame.filename).name, "function": frame.name, "line": frame.lineno}
+                for frame in traceback.extract_tb(error.__traceback__)
+            ],
+        }
+        print("GITFERRY_PROBE_ERROR " + json.dumps(evidence), file=sys.stderr)
+        raise SystemExit(1) from None
+
+
+if __name__ == "__main__":
+    main()

@@ -85,6 +85,10 @@ ASSERTIONS = frozenset(
         "directory_reader_unit_permissions",
         "directory_writer_unit_permissions",
         "structure_account_counts_unchanged",
+        "git_return_file_only",
+        "git_return_ref_object_exact",
+        "git_return_replay_restart_no_duplicate",
+        "git_return_control_and_network_isolation",
     }
 )
 
@@ -159,6 +163,20 @@ def _target_worker(mode: str, context: str = "normal") -> dict[str, Any]:
     return json.loads(result.stdout)
 
 
+def _git_return_worker(service: str, mode: str) -> dict[str, Any]:
+    result = docker_service_exec(
+        service, ["python", "/probe/git_return_worker.py", mode], timeout=240, check=False
+    )
+    if result.returncode:
+        evidence = {"service": service, "mode": mode, "exit_code": result.returncode}
+        for line in result.stderr.splitlines():
+            if line.startswith("GITFERRY_PROBE_ERROR "):
+                evidence.update(json.loads(line.removeprefix("GITFERRY_PROBE_ERROR ")))
+        (WORK / "git-return-worker-failure.json").write_text(json.dumps(evidence, indent=2))
+        raise ProbeFailure(f"Git return worker {service}/{mode} failed")
+    return json.loads(result.stdout)
+
+
 def _run_browser(
     archive: Path, phase: str, base_url: str, *, evidence_name: str | None = None
 ) -> dict[str, Any]:
@@ -200,6 +218,11 @@ def run_source_export_probe() -> dict[str, Any]:
     worker_path = Path(__file__).with_name("source_export_worker.py")
     docker_copy(worker_path, "gitferry-a:/probe/source_export_worker.py")
     for service in ("gitferry-a", "gitferry-b"):
+        docker_copy(
+            worker_path.with_name("git_return_worker.py"),
+            f"{service}:/probe/git_return_worker.py",
+        )
+        docker_copy(worker_path.with_name("plan_worker.py"), f"{service}:/probe/plan_worker.py")
         docker_copy(
             worker_path.with_name("native_browser_fixture.py"),
             f"{service}:/probe/native_browser_fixture.py",
@@ -315,6 +338,21 @@ def run_source_export_probe() -> dict[str, Any]:
         finally:
             _target_worker("stop-browser")
     target_replay = _target_worker("replay")
+    return_export = _git_return_worker("gitferry-b", "export-b")
+    return_archive = PACKAGE / "git-return-real.zip"
+    docker_copy("gitferry-b:/package/git-return-real.zip", return_archive)
+    docker_copy(return_archive, "gitferry-a:/package/git-return-real.zip")
+    return_apply = _git_return_worker("gitferry-a", "apply-a")
+    return_replay = _git_return_worker("gitferry-a", "replay-a")
+    (WORK / "git-return-evidence.json").write_text(
+        json.dumps(
+            {"export": return_export, "apply": return_apply, "replay": return_replay},
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     runtimes = {}
     image_ids = {}
     for service, context in (("gitferry-a", "source-export"), ("gitferry-b", "package-admission")):
@@ -561,6 +599,25 @@ def run_source_export_probe() -> dict[str, Any]:
     assertions["directory_writer_unit_permissions"] = authority["writer_unit_permissions"]
     assertions["structure_account_counts_unchanged"] = (
         structure["account_count_before"] == structure["account_count_after"]
+    )
+    assertions["git_return_file_only"] = (
+        return_export["status"] == "ready"
+        and return_archive.is_file()
+        and return_apply["status"] == "confirmed"
+        and return_apply["return_digest"] == return_export["package_digest"]
+    )
+    assertions["git_return_ref_object_exact"] = (
+        return_apply["refs"].get("refs/heads/offline-return") == return_export["offline_oid"]
+    )
+    assertions["git_return_replay_restart_no_duplicate"] = (
+        return_replay["status"] == "confirmed"
+        and return_replay["same_refs"]
+        and return_apply["push_attempts"] == return_replay["push_attempts"] == 1
+    )
+    assertions["git_return_control_and_network_isolation"] = (
+        return_export["source_unreachable"]
+        and return_apply["target_unreachable"]
+        and return_apply["control_unchanged"]
     )
     from directory_identity_recovery_probe import run as run_identity_recovery
 
