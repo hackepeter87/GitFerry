@@ -82,7 +82,9 @@ def attach_inventory(
 def read_inventory(directory: Path, package: dict[str, Any]) -> InventoryDocument | None:
     from gitferry.application_package import PackageError, _file, _read_bounded
 
-    if package["schema_version"] == 1:
+    # v1 predates the portable inventory. v5 is the deliberately narrow Git
+    # return contract and carries its comparison facts directly in package.json.
+    if package["schema_version"] in (1, 5):
         return None
     reference = package["inventory"]
     raw = _read_bounded(_file(directory, reference["path"]), MAX_INVENTORY_BYTES)
